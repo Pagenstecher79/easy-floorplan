@@ -73,6 +73,8 @@ import {
   applyDelta,
   areaContainingPoint,
   attachedCorners,
+  elementsAtPoint,
+  cyclePick,
   elementsInRect,
   layoutPointsInPolygon,
   nearestAreaSnapPoint,
@@ -84,6 +86,7 @@ import {
   type Sel,
   type SelKind,
 } from "./editor-geometry";
+import type { AreaEntityScope } from "./editor-forms";
 import {
   FURNITURE_LABELS,
   FURNITURE_TYPES,
@@ -172,6 +175,12 @@ interface Clipboard {
 
 /** Snap distance (virtual units) for openings onto walls. */
 const WALL_SNAP = 35;
+/**
+ * How far the pointer may move between clicks and still count as "the same
+ * spot" for click-cycling (issue #52). Generous enough for hand tremor on a
+ * touchpad, tight enough that aiming at a neighbour restarts the cycle.
+ */
+const PICK_EPS = 6;
 const HISTORY_MAX = 60;
 /** Angle (degrees) within which a drawn wall is snapped flat to horizontal/vertical. */
 const WALL_AXIS_SNAP_DEG = 10;
@@ -248,6 +257,18 @@ export class FloorplanCardEditor extends LitElement {
   @query(".canvas-wrap") private _canvasWrap?: HTMLElement;
 
   private _drag: Drag | null = null;
+  /**
+   * Where the last plain selection click landed, for click-cycling through
+   * overlapping elements (issue #52). Cleared whenever the pointer lands
+   * somewhere else, so cycling only happens on repeat clicks in one spot.
+   */
+  private _pickAnchor: { x: number; y: number } | null = null;
+  /**
+   * Hide the canvas name labels while editing (issue #52). Editor view state
+   * only — never written to the config, so it can't change what the live card
+   * shows. A dense plan is much easier to aim at without them.
+   */
+  @state() private _hideLabels = false;
   /** Live touch points on the canvas wrap, for pinch-zoom (issue #38). */
   private _pinchPts = new Map<number, { x: number; y: number }>();
   /** Pinch baseline: finger distance, zoom, and centroid (content coords) at pinch start. */
@@ -1000,6 +1021,8 @@ export class FloorplanCardEditor extends LitElement {
       return;
     }
     // Select tool, empty canvas: start a marquee (rubber-band) selection.
+    // Clicking empty space also ends any cycling run (issue #52).
+    this._pickAnchor = null;
     this._marqueeAdd = ev.shiftKey || ev.ctrlKey || ev.metaKey;
     this._marquee = { x0: raw.x, y0: raw.y, x1: raw.x, y1: raw.y };
     this._gesturePointer = ev.pointerId;
@@ -1133,22 +1156,50 @@ export class FloorplanCardEditor extends LitElement {
 
   // ---- dragging existing elements ----------------------------------------
 
+  /**
+   * Which element a plain click should actually select (issue #52). The
+   * element whose hit area received the event is only a starting point: a big
+   * tracker zone or an Area polygon can sit over a device, so we hit-test the
+   * point geometrically and take the most *specific* candidate. Clicking again
+   * without moving steps to the next candidate underneath and wraps, which is
+   * what makes buried elements reachable at all.
+   *
+   * Modifier-clicks (multi-select) and explicit handles keep their old
+   * behavior — they address one element on purpose.
+   */
+  private _resolvePick(ev: PointerEvent, sel: Sel): Sel {
+    if (ev.shiftKey || ev.ctrlKey || ev.metaKey) return sel;
+    const p = this._toVirtual(ev, false);
+    const candidates = elementsAtPoint(this._floor(), p.x, p.y, {
+      itemSize: DEFAULT_ITEM_SIZE,
+      textSize: DEFAULT_TEXT_SIZE,
+      wallThickness: WALL_THICKNESS,
+    });
+    const sameSpot =
+      !!this._pickAnchor && Math.hypot(p.x - this._pickAnchor.x, p.y - this._pickAnchor.y) <= PICK_EPS;
+    this._pickAnchor = p;
+    return cyclePick(candidates, this._selection, sameSpot) ?? sel;
+  }
+
   private _startDrag(ev: PointerEvent, sel: Sel, endpoint?: 1 | 2, areaVertex?: number): void {
     if (this._tool !== "select") return;
     ev.stopPropagation();
     if (this._gesturePointer !== null) return;
     this._canvasWrap?.focus();
-    // Endpoint/vertex handles always operate on that single element.
-    if (endpoint || areaVertex != null) this._selectOne(sel);
-    else this._selectForPointer(ev, sel);
+    // Endpoint/vertex handles always operate on that single element; every
+    // other click goes through the overlap-aware picker (issue #52).
+    const explicitHandle = endpoint != null || areaVertex != null;
+    const pick = explicitHandle ? sel : this._resolvePick(ev, sel);
+    if (explicitHandle) this._selectOne(pick);
+    else this._selectForPointer(ev, pick);
     this._drag = {
-      primary: sel,
+      primary: pick,
       start: this._toVirtual(ev, false),
       orig: this._snapshotSelection(),
       endpoint,
       areaVertex,
     };
-    if (sel.kind === "wall") this._drag.attached = this._attachedCorners(sel.id, endpoint);
+    if (pick.kind === "wall") this._drag.attached = this._attachedCorners(pick.id, endpoint);
     this._gesturePointer = ev.pointerId;
     this._capturePointer(ev);
   }
@@ -1316,9 +1367,10 @@ export class FloorplanCardEditor extends LitElement {
     ev.preventDefault();
     if (this._gesturePointer !== null) return;
     this._canvasWrap?.focus();
-    this._selectForPointer(ev, sel);
+    const pick = this._resolvePick(ev, sel);
+    this._selectForPointer(ev, pick);
     this._drag = {
-      primary: sel,
+      primary: pick,
       start: this._toVirtual(ev, false),
       orig: this._snapshotSelection(),
     };
@@ -1891,9 +1943,39 @@ export class FloorplanCardEditor extends LitElement {
    * tracks the element as it's dragged in/out of the polygon, even before the
    * form reopens.
    */
-  private _areaEntitiesAt(x: number, y: number): string[] | undefined {
+  /**
+   * The Area actively scoping the selected element's entity picker, if any —
+   * i.e. the element is a device/furniture, it sits inside an Area, and that
+   * Area is linked to an HA area with filtering on. The canvas animates this
+   * one so it is obvious *which room you are working in* and why the picker
+   * is short; nothing else in the editor communicated that.
+   */
+  private _scopingAreaId(): string | undefined {
+    if (this._selection.length !== 1) return undefined;
+    const sel = this._selection[0]!;
+    const f = this._floor();
+    const el =
+      sel.kind === "item"
+        ? f.items.find((x) => x.id === sel.id)
+        : sel.kind === "furniture"
+          ? f.furniture.find((x) => x.id === sel.id)
+          : undefined;
+    if (!el) return undefined;
+    const area = areaContainingPoint(f, el.x, el.y);
+    // Only when it actually narrows the picker: an unlinked area, or one with
+    // nothing assigned in HA, filters nothing and must not claim otherwise.
+    if (!areaFiltersEntities(area)) return undefined;
+    return entityIdsInHaArea(this.hass, area!.haArea!).length ? area!.id : undefined;
+  }
+
+  private _areaEntitiesAt(x: number, y: number): AreaEntityScope | undefined {
     const area = areaContainingPoint(this._floor(), x, y);
-    return areaFiltersEntities(area) ? entityIdsInHaArea(this.hass, area!.haArea!) : undefined;
+    if (!areaFiltersEntities(area)) return undefined;
+    const entities = entityIdsInHaArea(this.hass, area!.haArea!);
+    // An area with nothing assigned to it in HA must not produce an empty
+    // picker — the form treats an empty list as "no scoping" (see
+    // areaScopedEntity), and the name lets it say so when it does scope.
+    return { entities, name: area!.name };
   }
 
   /** Every entity in `area`'s linked HA area not already placed as an item on this floor. */
@@ -2317,6 +2399,10 @@ export class FloorplanCardEditor extends LitElement {
     const c = this._config;
     const floor = this._floor();
     const floors = c.floors ?? [];
+    // Which room, if any, is currently narrowing the selected element's
+    // entity picker — animated on the canvas so the scoping is never a
+    // mystery (see _scopingAreaId).
+    const scopingAreaId = this._scopingAreaId();
     const floorEmpty =
       !floor.walls.length &&
       !floor.openings.length &&
@@ -2375,6 +2461,23 @@ export class FloorplanCardEditor extends LitElement {
           >
             <ha-icon icon=${this._fullscreen ? "mdi:fullscreen-exit" : "mdi:fullscreen"}></ha-icon>
             ${this._fullscreen ? "Exit" : "Expand"}
+          </button>
+
+          <!-- Labels: declutter a dense plan while editing (issue #52). -->
+          <button
+            class="icon-btn"
+            aria-pressed=${this._hideLabels}
+            title=${this._hideLabels
+              ? "Show element labels on the canvas"
+              : "Hide element labels — easier to aim on a dense plan"}
+            @click=${() => {
+              this._hideLabels = !this._hideLabels;
+            }}
+          >
+            <ha-icon
+              icon=${this._hideLabels ? "mdi:label-off-outline" : "mdi:label-outline"}
+            ></ha-icon>
+            Labels
           </button>
 
           <span class="divider"></span>
@@ -2575,7 +2678,7 @@ export class FloorplanCardEditor extends LitElement {
               ${repeat(
                 floor.areas ?? [],
                 (a, i) => a.id || i,
-                (a) => this._renderAreaSel(a)
+                (a) => this._renderAreaSel(a, scopingAreaId)
               )}
               ${floor.furniture.map((f) => this._renderFurnitureSel(f))}
               ${renderWallMask(floor.openings, c.width, c.height, this._wallMaskId)}
@@ -2976,7 +3079,8 @@ export class FloorplanCardEditor extends LitElement {
           ? html`<p class="hint">
               Edit elements one at a time. Drag any selected element to move the whole group.
             </p>`
-          : html`<div class="rows">${this._renderSelectionEditor()}</div>`}
+          : html`${this._renderAreaScopeHint()}
+              <div class="rows">${this._renderSelectionEditor()}</div>`}
       </section>
     `;
   }
@@ -3084,11 +3188,30 @@ export class FloorplanCardEditor extends LitElement {
    * vertex (decision #1 in areas.md: vertices reshape independently, with
    * no cross-element corner-stretch).
    */
-  private _renderAreaSel(a: Area): TemplateResult {
+  /**
+   * States in words what the canvas animation shows: this element sits in a
+   * linked room, so its entity picker only lists that room's entities. Colour
+   * alone can't carry that, and the off-switch lives on the Area element.
+   */
+  private _renderAreaScopeHint(): TemplateResult | typeof nothing {
+    const id = this._scopingAreaId();
+    if (!id) return nothing;
+    const area = (this._floor().areas ?? []).find((a) => a.id === id);
+    const name = area?.name ? `the ${area.name} area` : "this area";
+    return html`<p class="hint area-scope-hint">
+      <ha-icon icon="mdi:vector-polygon"></ha-icon>
+      Inside ${name} — the entity pickers list only its entities. Select the area and turn
+      off <strong>Filter entities</strong> to see everything.
+    </p>`;
+  }
+
+  private _renderAreaSel(a: Area, scopingId?: string): TemplateResult {
     const selected = this._isSel("area", a.id);
+    const scoping = a.id === scopingId;
     const pts = a.points.map((p) => `${p.x},${p.y}`).join(" ");
     return svg`
-      <g class="area-hit ${selected ? "selected" : ""}">
+      <g class="area-hit ${selected ? "selected" : ""} ${scoping ? "scoping" : ""}">
+        ${scoping ? svg`<polygon points=${pts} class="area-scoping" />` : nothing}
         ${renderArea(a)}
         <polygon points=${pts} class="area-hit-shape"
                  @pointerdown=${(e: PointerEvent) => this._startDrag(e, { kind: "area", id: a.id })} />
@@ -3188,9 +3311,16 @@ export class FloorplanCardEditor extends LitElement {
         @pointercancel=${this._onPointerCancel}
       >
         ${visual}
-        <!-- The editor label always shows (identification while editing);
-             only its size previews the card's labelSize (issue #59). -->
-        <span class="ilabel" style="font-size:${it.labelSize != null ? itemLabelSize(it.labelSize) : 11}px;">${label}</span>
+        <!-- Identification while editing; the Labels toolbar toggle hides it
+             on dense plans (issue #52), and its size previews the card's
+             labelSize (issue #59). -->
+        ${this._hideLabels
+          ? nothing
+          : html`<span
+              class="ilabel"
+              style="font-size:${it.labelSize != null ? itemLabelSize(it.labelSize) : 11}px;"
+              >${label}</span
+            >`}
       </div>
     `;
   }
@@ -4293,11 +4423,54 @@ export class FloorplanCardEditor extends LitElement {
       stroke: none;
       pointer-events: all;
     }
+    .area-scope-hint {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 0 0 6px;
+      color: var(--primary-color, #03a9f4);
+    }
+    .area-scope-hint ha-icon {
+      --mdc-icon-size: 16px;
+      flex: 0 0 auto;
+    }
     .area-outline {
       fill: none;
       stroke: var(--primary-color, #03a9f4);
       stroke-width: 2;
       pointer-events: none;
+    }
+    /* The room currently scoping the selected element's entity picker: a
+       breathing tint plus marching-ants border, so "you are working inside
+       the Kitchen — that's why the picker is short" reads at a glance. */
+    .area-scoping {
+      fill: var(--primary-color, #03a9f4);
+      stroke: var(--primary-color, #03a9f4);
+      stroke-width: 2.5;
+      stroke-dasharray: 10 6;
+      pointer-events: none;
+      animation: fp-area-breathe 2.2s ease-in-out infinite,
+        fp-area-ants 1.4s linear infinite;
+    }
+    @keyframes fp-area-breathe {
+      0%,
+      100% {
+        fill-opacity: 0.1;
+      }
+      50% {
+        fill-opacity: 0.28;
+      }
+    }
+    @keyframes fp-area-ants {
+      to {
+        stroke-dashoffset: -16;
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .area-scoping {
+        animation: none;
+        fill-opacity: 0.2;
+      }
     }
     .area-draft-line {
       fill: none;
