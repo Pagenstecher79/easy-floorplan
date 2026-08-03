@@ -45,15 +45,15 @@ import {
   snapToGridPercent,
   trackerPresenceDetected,
   uid,
-  DEFAULT_GLOW_COLOR,
-  GLOW_MAX_OPACITY,
+  DEFAULT_GLOW_RADIUS,
 } from "./types";
 import {
   WALL_THICKNESS,
   renderOpening,
   renderWallMask,
-  glowPaint,
+  editorGlowPaint,
   renderGlow,
+  renderGlowMask,
   openingDefaultOpen,
   openingMotion,
   shutterStyleOf,
@@ -2712,16 +2712,31 @@ export class FloorplanCardEditor extends LitElement {
                    what you place is what you get. Previewed at full strength
                    with no hass in the editor, so the radius is adjustable
                    without having to turn the real light on. -->
-              <g class="fp-glows">
+              ${renderGlowMask(floor.furniture, c.width, c.height, `${this._wallMaskId}-glowmask`)}
+              <g class="fp-glows"
+                 mask=${floor.furniture.length ? `url(#${this._wallMaskId}-glowmask)` : nothing}>
                 ${floor.items.map((it, i) => {
                   if (!it.glow) return nothing;
-                  const paint = glowPaint(it, this.hass?.states[it.entity]) ?? {
-                    color: cssColorOr(it.glowColor, DEFAULT_GLOW_COLOR),
-                    opacity: GLOW_MAX_OPACITY,
-                  };
-                  return renderGlow(it, paint, `${this._wallMaskId}-glow-${i}`);
+                  // An off light draws nothing, as on the card; only a glow
+                  // with no readable state previews lit (issue #108).
+                  const paint = editorGlowPaint(it, this.hass?.states[it.entity]);
+                  return paint
+                    ? renderGlow(it, paint, `${this._wallMaskId}-glow-${i}`, floor.walls)
+                    : nothing;
                 })}
               </g>
+              ${
+                // Radius guide for the selected glow (issue #108). Sizing an
+                // unlit light would otherwise be blind, now that an off light
+                // correctly draws nothing. Editor-only chrome, like the
+                // tracker zone outline.
+                floor.items.map((it) =>
+                  it.glow && this._isSel("item", it.id)
+                    ? svg`<circle class="glow-guide" cx=${it.x} cy=${it.y}
+                                  r=${cssNumber(it.glowRadius, DEFAULT_GLOW_RADIUS)} />`
+                    : nothing
+                )
+              }
               ${floor.furniture.map((f) => this._renderFurnitureSel(f))}
               ${renderWallMask(floor.openings, c.width, c.height, this._wallMaskId)}
               ${floor.walls.map((w) => this._renderWall(w))}
@@ -4585,6 +4600,28 @@ export class FloorplanCardEditor extends LitElement {
       fill: var(--card-background-color, #fff);
       stroke: var(--primary-color, #03a9f4);
       stroke-width: 2;
+      pointer-events: none;
+    }
+    /* Light pools are decoration: they must never intercept a pointer. These
+       are filled circles drawn above the areas, so without this they swallow
+       pointerdown and areas under a lit lamp cannot be selected (issue #108).
+       The blend rules mirror the card's, so the editor previews the same
+       picture it will render — overlapping lamps add rather than stack. */
+    .fp-glows {
+      isolation: isolate;
+      pointer-events: none;
+    }
+    .fp-glow {
+      mix-blend-mode: screen;
+    }
+    /* Radius guide for the selected cast-light device (issue #108). Outline
+       only — it shows how far the light reaches without pretending it is on. */
+    .glow-guide {
+      fill: none;
+      stroke: var(--primary-color, #03a9f4);
+      stroke-width: 1.5;
+      stroke-dasharray: 6 5;
+      opacity: 0.7;
       pointer-events: none;
     }
     .tracker-draft {
