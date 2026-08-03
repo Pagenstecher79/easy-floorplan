@@ -11,12 +11,19 @@ import type {
   Area,
   AreaPoint,
   RenderHass,
+  HassEntity,
+  FloorItem,
 } from "./types";
 import {
   FURNITURE_COLOR,
   DEFAULT_TRACKER_DOT_SIZE,
   DEFAULT_RIPPLE_SIZE,
   DEFAULT_AREA_OPACITY,
+  DEFAULT_AREA_BORDER_WIDTH,
+  DEFAULT_GLOW_RADIUS,
+  DEFAULT_GLOW_COLOR,
+  GLOW_MIN_OPACITY,
+  GLOW_MAX_OPACITY,
   getFloors,
   trackerAxisFraction,
 } from "./types";
@@ -82,6 +89,12 @@ export function collectWatchedEntities(c: FloorplanCardConfig): Set<string> {
     // first-painted color forever.
     for (const fu of f.furniture) {
       if (fu.entity) ids.add(fu.entity);
+    }
+    // Entity-bound areas (issue #6) — same reasoning as furniture above: miss
+    // these and a room's color is painted once and then frozen, because
+    // shouldUpdate drops every hass tick that only moved an unwatched entity.
+    for (const a of f.areas) {
+      if (a.entity) ids.add(a.entity);
     }
     for (const tr of f.trackers) {
       for (const s of [tr.xSensor, tr.ySensor]) {
@@ -198,6 +211,100 @@ export function furnitureColor(f: Furniture, state: string | undefined): string 
   if (rule) return cssColor(rule);
   if (f.activeColor && entityIsActive(f.entity, state)) return cssColor(f.activeColor);
   return undefined;
+}
+
+/**
+ * Resolve the live fill color for an {@link Area} bound to an entity (issue #6),
+ * mirroring {@link furnitureColor}: `stateColor` rules win, then `activeColor`
+ * while the entity is active, else undefined so the static `color` applies.
+ *
+ * Returns a value already through the style-injection allowlist (#64), because
+ * it flows straight into a `fill` attribute.
+ */
+export function areaColor(a: Area, state: string | undefined): string | undefined {
+  if (!a.entity) return undefined;
+  const rule = resolveStateColor(a.stateColor, state);
+  if (rule) return cssColor(rule);
+  if (a.activeColor && entityIsActive(a.entity, state)) return cssColor(a.activeColor);
+  return undefined;
+}
+
+/** The light a device casts right now: a color and how strong at the center. */
+export interface GlowPaint {
+  /** Already through the style-injection allowlist (#64). */
+  color: string;
+  /** Opacity at the center of the pool, fading to 0 at the rim. */
+  opacity: number;
+}
+
+/**
+ * What a light contributes as a cast pool (issue #6), or undefined for "casts
+ * nothing".
+ *
+ * Lights vary in what they can report, so this degrades in rungs rather than
+ * demanding `rgb_color` and doing nothing without it — on a real install most
+ * lights are brightness-only or plain on/off switches:
+ *
+ * 1. **color-capable** — its own `rgb_color`. Home Assistant derives one even
+ *    for `color_temp`-only bulbs, so warm white still reads as amber.
+ * 2. **brightness-only** — `glowColor` (a warm white by default), with
+ *    `brightness` driving the strength.
+ * 3. **on/off-only** — `glowColor` at full strength.
+ *
+ * A light that is off, `unavailable` or `unknown` casts nothing — failing
+ * closed like every other state reader here, so a dead bulb never leaves a
+ * pool of light lying on the floor.
+ */
+export function glowPaint(
+  item: Pick<FloorItem, "glowColor">,
+  light: HassEntity | undefined,
+): GlowPaint | undefined {
+  if (!light || light.state !== "on") return undefined;
+  const attrs = (light.attributes ?? {}) as Record<string, unknown>;
+
+  // brightness is 0-255, and absent on on/off-only lights where "on" is full.
+  const raw = attrs.brightness;
+  const bright =
+    typeof raw === "number" && Number.isFinite(raw) ? Math.max(0, Math.min(255, raw)) : undefined;
+  const opacity =
+    bright === undefined
+      ? GLOW_MAX_OPACITY
+      : GLOW_MIN_OPACITY + (GLOW_MAX_OPACITY - GLOW_MIN_OPACITY) * (bright / 255);
+
+  const rgb = attrs.rgb_color;
+  if (Array.isArray(rgb) && rgb.length >= 3) {
+    const [r, g, b] = rgb;
+    if ([r, g, b].every((c) => typeof c === "number" && Number.isFinite(c))) {
+      const chan = (c: number) => Math.max(0, Math.min(255, Math.round(c)));
+      // Built from clamped integers, so it cannot carry a payload — but it
+      // still goes through the allowlist, as every color here does.
+      const color = cssColor(`rgb(${chan(r as number)}, ${chan(g as number)}, ${chan(b as number)})`);
+      if (color) return { color, opacity };
+    }
+  }
+  return { color: cssColorOr(item.glowColor, DEFAULT_GLOW_COLOR), opacity };
+}
+
+/**
+ * A light's cast pool: a radial gradient fading from `paint.color` at the
+ * device's position to fully transparent at `glowRadius`.
+ *
+ * Each pool carries `mix-blend-mode: screen` so overlapping lights **add**
+ * rather than the topmost one winning — two lamps in one room brighten where
+ * they meet, and a warm and a cool lamp blend between them, which is how real
+ * light behaves. The caller must isolate the layer (see `.fp-glows` in the
+ * card) so the pools mix with each other and not with the plan beneath.
+ */
+export function renderGlow(item: FloorItem, paint: GlowPaint, gradientId: string): SVGTemplateResult {
+  const r = cssNumber(item.glowRadius, DEFAULT_GLOW_RADIUS);
+  return svg`
+    <radialGradient id=${gradientId} gradientUnits="userSpaceOnUse"
+                    cx=${item.x} cy=${item.y} r=${r}>
+      <stop offset="0" stop-color=${paint.color} stop-opacity=${paint.opacity} />
+      <stop offset="1" stop-color=${paint.color} stop-opacity="0" />
+    </radialGradient>
+    <circle class="fp-glow" cx=${item.x} cy=${item.y} r=${r}
+            fill=${`url(#${gradientId})`} />`;
 }
 
 /**
@@ -1151,11 +1258,29 @@ export function polygonCentroid(points: readonly AreaPoint[]): { x: number; y: n
  * `color`/`opacity` are config-supplied style values, so they go through the
  * same injection allowlist as every other color/number field (see css-safe.ts).
  */
-export function renderArea(a: Area): SVGTemplateResult {
+export function renderArea(a: Area, liveColor?: string): SVGTemplateResult {
   const pts = a.points.map((p) => `${p.x},${p.y}`).join(" ");
+  // `liveColor` has already been through the allowlist by areaColor(). When it
+  // is present the area is "live" and `highlight` decides whether that color
+  // lands on the fill, the outline, or both.
+  const live = liveColor !== undefined;
+  const target = a.highlight ?? "fill";
+  const liveFill = live && target !== "border";
+  const liveBorder = live && target !== "fill";
+
+  // activeOpacity is a fill concern, so it only applies when the fill is live.
+  const opacity = liveFill ? a.activeOpacity ?? a.opacity : a.opacity;
+  const stroke = liveBorder
+    ? liveColor
+    : a.borderColor
+      ? cssColorOr(a.borderColor, "none")
+      : undefined;
+
   return svg`<polygon points=${pts}
-                       fill=${cssColorOr(a.color, "var(--primary-color, #03a9f4)")}
-                       fill-opacity=${cssNumber(a.opacity, DEFAULT_AREA_OPACITY)} />`;
+                       fill=${liveFill ? liveColor : cssColorOr(a.color, "var(--primary-color, #03a9f4)")}
+                       fill-opacity=${cssNumber(opacity, DEFAULT_AREA_OPACITY)}
+                       stroke=${stroke ?? "none"}
+                       stroke-width=${stroke ? cssNumber(a.borderWidth, DEFAULT_AREA_BORDER_WIDTH) : 0} />`;
 }
 
 /**

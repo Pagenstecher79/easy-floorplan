@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
 import type { Furniture, FurnitureType, ItemKind } from "./types";
-import { FURNITURE_DEFAULT_SIZE } from "./types";
+import {
+  FURNITURE_DEFAULT_SIZE,
+  DEFAULT_GLOW_RADIUS,
+  DEFAULT_GLOW_COLOR,
+  GLOW_MIN_OPACITY,
+  GLOW_MAX_OPACITY,
+} from "./types";
 import {
   snapToWall,
   openingDefaultOpen,
@@ -45,6 +51,9 @@ import {
   planRotationTransform,
   polygonCentroid,
   renderArea,
+  areaColor,
+  glowPaint,
+  renderGlow,
 } from "./render";
 import type { FloorplanCardConfig, Opening, RenderHass } from "./types";
 
@@ -1362,6 +1371,113 @@ describe("renderArea", () => {
     expect(markup).toContain("fill=var(--primary-color, #03a9f4)");
     expect(markup).not.toContain("position:fixed");
   });
+
+  it("uses the live fill color over the resting one (#6)", () => {
+    const markup = flatten(renderArea({ id: "a", points: square, color: "#ff0000" }, "#4caf50"));
+    expect(markup).toContain("fill=#4caf50");
+    expect(markup).not.toContain("fill=#ff0000");
+  });
+
+  it("applies activeOpacity only while live (#6)", () => {
+    const a = { id: "a", points: square, opacity: 0.2, activeOpacity: 0.7 };
+    expect(flatten(renderArea(a, "#4caf50"))).toContain("fill-opacity=0.7");
+    expect(flatten(renderArea(a))).toContain("fill-opacity=0.2");
+  });
+
+  it("keeps the resting opacity when activeOpacity is unset (#6)", () => {
+    const markup = flatten(renderArea({ id: "a", points: square, opacity: 0.2 }, "#4caf50"));
+    expect(markup).toContain("fill-opacity=0.2");
+  });
+
+  it("draws no outline by default (#6)", () => {
+    const markup = flatten(renderArea({ id: "a", points: square }));
+    expect(markup).toContain("stroke=none");
+    expect(markup).toContain("stroke-width=0");
+  });
+
+  it("honors a static borderColor and borderWidth (#6)", () => {
+    const markup = flatten(
+      renderArea({ id: "a", points: square, borderColor: "#123456", borderWidth: 5 })
+    );
+    expect(markup).toContain("stroke=#123456");
+    expect(markup).toContain("stroke-width=5");
+  });
+
+  it("falls back to the default border width (#6)", () => {
+    const markup = flatten(renderArea({ id: "a", points: square, borderColor: "#123456" }));
+    expect(markup).toContain("stroke-width=3");
+  });
+
+  it("gates an unsafe borderColor through css-safe (#64)", () => {
+    const markup = flatten(
+      renderArea({ id: "a", points: square, borderColor: "red;position:fixed;inset:0" })
+    );
+    expect(markup).not.toContain("position:fixed");
+  });
+
+  it("highlight=border paints the outline and leaves the fill at rest (#6)", () => {
+    const a = { id: "a", points: square, color: "#ff0000", highlight: "border" as const };
+    const markup = flatten(renderArea(a, "#4caf50"));
+    expect(markup).toContain("stroke=#4caf50");
+    expect(markup).toContain("fill=#ff0000");
+  });
+
+  it("highlight=border ignores activeOpacity, which is a fill concern (#6)", () => {
+    const a = {
+      id: "a",
+      points: square,
+      opacity: 0.2,
+      activeOpacity: 0.7,
+      highlight: "border" as const,
+    };
+    expect(flatten(renderArea(a, "#4caf50"))).toContain("fill-opacity=0.2");
+  });
+
+  it("highlight=both paints fill and outline (#6)", () => {
+    const a = { id: "a", points: square, highlight: "both" as const };
+    const markup = flatten(renderArea(a, "#4caf50"));
+    expect(markup).toContain("fill=#4caf50");
+    expect(markup).toContain("stroke=#4caf50");
+  });
+
+  it("a live color overrides a static borderColor when it targets the border (#6)", () => {
+    const a = { id: "a", points: square, borderColor: "#111111", highlight: "border" as const };
+    expect(flatten(renderArea(a, "#4caf50"))).toContain("stroke=#4caf50");
+  });
+});
+
+describe("areaColor", () => {
+  const base = { id: "a", points: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }] };
+
+  it("returns undefined for an unbound area", () => {
+    expect(areaColor({ ...base, activeColor: "#4caf50" }, "on")).toBeUndefined();
+  });
+
+  it("prefers a matching stateColor rule over activeColor", () => {
+    const a = {
+      ...base,
+      entity: "sensor.co2",
+      activeColor: "#4caf50",
+      stateColor: [{ above: 1000, color: "#ff0000" }, { color: "#00ff00" }],
+    };
+    expect(areaColor(a, "1200")).toBe("#ff0000");
+    expect(areaColor(a, "400")).toBe("#00ff00");
+  });
+
+  it("uses activeColor when active and no rule matches", () => {
+    const a = { ...base, entity: "binary_sensor.occupancy", activeColor: "#4caf50" };
+    expect(areaColor(a, "on")).toBe("#4caf50");
+  });
+
+  it("returns undefined when the bound entity is inactive", () => {
+    const a = { ...base, entity: "binary_sensor.occupancy", activeColor: "#4caf50" };
+    expect(areaColor(a, "off")).toBeUndefined();
+  });
+
+  it("gates an unsafe activeColor through css-safe (#64)", () => {
+    const a = { ...base, entity: "binary_sensor.occupancy", activeColor: "red;position:fixed;inset:0" };
+    expect(areaColor(a, "on")).toBeUndefined();
+  });
 });
 
 describe("shutterStyleOf (issue #74)", () => {
@@ -1377,6 +1493,105 @@ describe("shutterStyleOf (issue #74)", () => {
 
   it("defaults to roll with nothing bound, so existing configs are untouched", () => {
     expect(shutterStyleOf({})).toBe("roll");
+  });
+});
+
+describe("glowPaint (issue #6)", () => {
+  const light = (state: string, attributes: Record<string, unknown> = {}) =>
+    ({ entity_id: "light.x", state, attributes }) as never;
+
+  it("paints a color-capable light's own rgb", () => {
+    const paint = glowPaint({}, light("on", { rgb_color: [255, 170, 80], brightness: 255 }));
+    expect(paint?.color).toBe("rgb(255, 170, 80)");
+    expect(paint?.opacity).toBeCloseTo(GLOW_MAX_OPACITY, 5);
+  });
+
+  it("scales strength with brightness, inside the legible band", () => {
+    const dim = glowPaint({}, light("on", { rgb_color: [255, 255, 255], brightness: 0 }));
+    const half = glowPaint({}, light("on", { rgb_color: [255, 255, 255], brightness: 128 }));
+    expect(dim?.opacity).toBeCloseTo(GLOW_MIN_OPACITY, 5);
+    expect(half?.opacity).toBeGreaterThan(GLOW_MIN_OPACITY);
+    expect(half?.opacity).toBeLessThan(GLOW_MAX_OPACITY);
+    // The floor is the point: a dimmed lamp stays visible rather than vanishing.
+    expect(dim?.opacity).toBeGreaterThan(0);
+  });
+
+  it("a brightness-only light falls back to a warm white", () => {
+    // light.kitchen_lights on a real install: supported_color_modes ["brightness"].
+    const paint = glowPaint({}, light("on", { brightness: 255 }));
+    expect(paint?.color).toBe(DEFAULT_GLOW_COLOR);
+  });
+
+  it("an on/off-only light casts at full strength", () => {
+    // light.main_living_room_switch_l1: supported_color_modes ["onoff"].
+    const paint = glowPaint({}, light("on"));
+    expect(paint?.color).toBe(DEFAULT_GLOW_COLOR);
+    expect(paint?.opacity).toBeCloseTo(GLOW_MAX_OPACITY, 5);
+  });
+
+  it("honors a configured glowColor for a light that has none of its own", () => {
+    expect(glowPaint({ glowColor: "#00ff00" }, light("on", { brightness: 128 }))?.color)
+      .toBe("#00ff00");
+    // ...but never over a light that CAN report one.
+    expect(glowPaint({ glowColor: "#00ff00" }, light("on", { rgb_color: [1, 2, 3] }))?.color)
+      .toBe("rgb(1, 2, 3)");
+  });
+
+  it("gates an unsafe glowColor through css-safe (#64)", () => {
+    expect(glowPaint({ glowColor: "red;position:fixed;inset:0" }, light("on"))?.color)
+      .toBe(DEFAULT_GLOW_COLOR);
+  });
+
+  it("casts nothing when off, unavailable, unknown or missing (fails closed)", () => {
+    expect(glowPaint({}, light("off", { rgb_color: [255, 0, 0] }))).toBeUndefined();
+    expect(glowPaint({}, light("unavailable"))).toBeUndefined();
+    expect(glowPaint({}, light("unknown"))).toBeUndefined();
+    expect(glowPaint({}, undefined)).toBeUndefined();
+  });
+
+  it("ignores a malformed rgb_color rather than emitting a broken color", () => {
+    expect(glowPaint({}, light("on", { rgb_color: [255, 0] }))?.color).toBe(DEFAULT_GLOW_COLOR);
+    expect(glowPaint({}, light("on", { rgb_color: "red;position:fixed" }))?.color).toBe(DEFAULT_GLOW_COLOR);
+    expect(glowPaint({}, light("on", { rgb_color: [null, 1, 2] }))?.color).toBe(DEFAULT_GLOW_COLOR);
+  });
+
+  it("clamps out-of-range channels instead of trusting the integration", () => {
+    expect(glowPaint({}, light("on", { rgb_color: [300, -20, 12.6] }))?.color).toBe("rgb(255, 0, 13)");
+  });
+});
+
+describe("renderGlow (issue #6)", () => {
+  const flatten = (node: unknown): string => {
+    if (node == null || typeof node === "boolean") return "";
+    if (Array.isArray(node)) return node.map(flatten).join("");
+    if (typeof node === "object" && "strings" in (node as Record<string, unknown>)) {
+      const { strings, values } = node as { strings: string[]; values: unknown[] };
+      return strings.reduce((acc, s, i) => acc + s + (i < values.length ? flatten(values[i]) : ""), "");
+    }
+    return String(node);
+  };
+  const item = (extra: Record<string, unknown> = {}) =>
+    ({ id: "i", entity: "light.x", kind: "light", x: 300, y: 200, ...extra }) as never;
+
+  it("centers the pool on the device and fades to nothing at the rim", () => {
+    const markup = flatten(renderGlow(item(), { color: "rgb(1, 2, 3)", opacity: 0.5 }, "g1"));
+    expect(markup).toContain("cx=300");
+    expect(markup).toContain("cy=200");
+    expect(markup).toContain(`r=${DEFAULT_GLOW_RADIUS}`);
+    // Opaque at the centre, transparent at the edge — that's the falloff.
+    expect(markup).toContain('stop-opacity=0.5');
+    expect(markup).toContain('stop-opacity="0"');
+    expect(markup).toContain('fill=url(#g1)');
+  });
+
+  it("honors glowRadius, and gates a garbage one through css-safe", () => {
+    expect(flatten(renderGlow(item({ glowRadius: 250 }), { color: "#fff", opacity: 0.4 }, "g"))).toContain("r=250");
+    expect(flatten(renderGlow(item({ glowRadius: "6; evil" }), { color: "#fff", opacity: 0.4 }, "g")))
+      .toContain(`r=${DEFAULT_GLOW_RADIUS}`);
+  });
+
+  it("carries the class the blend mode hangs off, or lights would not mix", () => {
+    expect(flatten(renderGlow(item(), { color: "#fff", opacity: 0.4 }, "g"))).toContain('class="fp-glow"');
   });
 });
 
