@@ -1420,8 +1420,8 @@ export function polygonCentroid(points: readonly AreaPoint[]): { x: number; y: n
 }
 
 /**
- * A room's translucent fill polygon. Drawn with no stroke — the walls drawn
- * on top of it already imply an outline, so a second one would double it up.
+ * A room's translucent fill polygon, with no stroke of its own — the outline
+ * is a separate pass, drawn above the walls by {@link renderAreaBorder}.
  * `color`/`opacity` are config-supplied style values, so they go through the
  * same injection allowlist as every other color/number field (see css-safe.ts).
  */
@@ -1430,26 +1430,97 @@ export function renderArea(a: Area, liveColor?: string): SVGTemplateResult {
   // `liveColor` has already been through the allowlist by areaColor(). When it
   // is present the area is "live" and `highlight` decides whether that color
   // lands on the fill, the outline, or both.
-  const live = liveColor !== undefined;
-  const target = a.highlight ?? "fill";
-  const liveFill = live && target !== "border";
-  const liveBorder = live && target !== "fill";
+  const liveFill = liveColor !== undefined && (a.highlight ?? "fill") !== "border";
 
   // activeOpacity is a fill concern, so it only applies when the fill is live.
   const opacity = liveFill ? a.activeOpacity ?? a.opacity : a.opacity;
-  const stroke = liveBorder
-    ? liveColor
-    : a.borderColor
-      ? cssColorOr(a.borderColor, "none")
-      : undefined;
 
+  // Stroke stays pinned off rather than omitted: this element is reused across
+  // live/rest updates, and stating it keeps the fill pass unable to draw an
+  // outline no matter what the border pass above the walls is doing.
   return svg`<polygon class="fp-area" data-id=${cssIdent(a.id) ?? nothing}
                        data-entity=${cssEntityId(a.entity) ?? nothing}
                        points=${pts}
                        fill=${liveFill ? liveColor : cssColorOr(a.color, "var(--primary-color, #03a9f4)")}
                        fill-opacity=${cssNumber(opacity, DEFAULT_AREA_OPACITY)}
-                       stroke=${stroke ?? "none"}
-                       stroke-width=${stroke ? cssNumber(a.borderWidth, DEFAULT_AREA_BORDER_WIDTH) : 0} />`;
+                       stroke="none"
+                       stroke-width="0" />`;
+}
+
+/**
+ * A room's outline — drawn as its own pass **above the walls**.
+ *
+ * An area polygon almost always traces the room it encloses, which means it
+ * runs down the centerline of that room's walls. Walls are stroked at
+ * {@link WALL_THICKNESS} over the top of the fills, so an outline drawn with
+ * the fill lands underneath the very wall it follows and cannot be seen at
+ * all. That left `highlight: "border"` (#107) inert on any plan whose areas
+ * follow its walls, which is very nearly all of them.
+ *
+ * Drawn above, the outline colors the room's own walls: an occupied or lit
+ * room announces itself along its boundary instead of tinting everything
+ * inside it, which is what `highlight: "border"` was for. The caller draws
+ * this inside the wall mask, so doorways and windows stay cut out of the
+ * outline exactly as they are cut out of the wall.
+ *
+ * A **live** border is clipped to its own room (`clipId` names the clip path
+ * the caller must keep unique). Rooms share walls, and an unclipped stroke
+ * straddles the boundary and paints the neighbour's face as well as its own —
+ * so on a wall between two live rooms whichever area sits later in `areas:`
+ * simply wins the whole wall, and reordering the config silently changes what
+ * the plan says. Clipped, each room paints its own side and a corner where
+ * several rooms meet splits between them. A **static** `borderColor` is drawn
+ * as authored — centered on the polygon, unclipped — since it is decoration
+ * placed deliberately rather than a per-room signal.
+ *
+ * Carries the same `data-id` / `data-entity` hooks as the fill (#111) under its
+ * own `fp-area-border` class, so a rule can target a room's outline and its
+ * fill separately. They go on the drawn polygon only: a `<clipPath>` is never
+ * rendered, so a rule matching one would look like it silently does nothing.
+ *
+ * Returns `nothing` when there is no outline to draw — the default.
+ */
+export function renderAreaBorder(
+  a: Area,
+  liveColor?: string,
+  clipId?: string
+): SVGTemplateResult | typeof nothing {
+  const liveBorder = liveColor !== undefined && (a.highlight ?? "fill") !== "fill";
+  const stroke = liveBorder
+    ? liveColor
+    : a.borderColor
+      ? cssColorOr(a.borderColor, "none")
+      : undefined;
+  if (stroke === undefined || stroke === "none") return nothing;
+
+  const pts = a.points.map((p) => `${p.x},${p.y}`).join(" ");
+  // `borderWidth` is always the width actually seen. A live border defaults to
+  // half the wall: the wall is centered on the same line the polygon follows,
+  // so the room only owns the inner half of it. Anything wider runs past the
+  // wall's inner face onto the floor, over any furniture standing against that
+  // wall, and — since the opening mask only cuts WALL_THICKNESS + 4 — out
+  // through the doorways as a sliver either side of the cut. A static border is
+  // decoration and keeps its thinner default.
+  const width = cssNumber(
+    a.borderWidth,
+    liveBorder ? WALL_THICKNESS / 2 : DEFAULT_AREA_BORDER_WIDTH
+  );
+
+  if (!liveBorder || clipId === undefined) {
+    return svg`<polygon class="fp-area-border" data-id=${cssIdent(a.id) ?? nothing}
+                        data-entity=${cssEntityId(a.entity) ?? nothing}
+                        points=${pts} fill="none"
+                        stroke=${stroke} stroke-width=${width} />`;
+  }
+
+  // Clipping keeps only the inner half of the stroke, so it is drawn at twice
+  // the width to leave `width` showing on this room's own side.
+  return svg`
+    <clipPath id=${clipId}><polygon points=${pts} /></clipPath>
+    <polygon class="fp-area-border" data-id=${cssIdent(a.id) ?? nothing}
+             data-entity=${cssEntityId(a.entity) ?? nothing}
+             points=${pts} fill="none" clip-path=${`url(#${clipId})`}
+             stroke=${stroke} stroke-width=${width * 2} />`;
 }
 
 /**

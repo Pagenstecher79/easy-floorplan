@@ -27,6 +27,7 @@ import {
   furnitureColor,
   renderTracker,
   renderArea,
+  renderAreaBorder,
   areaColor,
   glowPaint,
   renderGlow,
@@ -425,6 +426,23 @@ export class FloorplanCard extends LitElement {
                 <line x1=${w.x1} y1=${w.y1} x2=${w.x2} y2=${w.y2}
                       class="wall fp-wall" data-id=${cssIdent(w.id) ?? nothing}
                       stroke-width=${WALL_THICKNESS} stroke-linecap="round" />`
+              )}
+            </g>
+            <!-- Room outlines, above the walls they trace. An area polygon runs
+                 down the centerline of the room's walls, so an outline drawn
+                 with the fill is buried under the wall and never seen. Drawn
+                 here it colors the wall instead. Same mask as the walls above,
+                 so a doorway is a gap in the outline exactly as it is a gap in
+                 the wall. Each live outline is clipped to its own room, so a
+                 shared wall splits down the middle rather than going to
+                 whichever area happens to sit later in the config. -->
+            <g mask=${`url(#${this._wallMaskId})`}>
+              ${active.areas?.map((a, i) =>
+                renderAreaBorder(
+                  a,
+                  areaColor(a, a.entity ? this.hass?.states[a.entity]?.state : undefined),
+                  `${this._wallMaskId}-area-${i}`
+                )
               )}
             </g>
             ${repeat(

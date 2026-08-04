@@ -62,6 +62,7 @@ import {
   renderFurniture,
   renderTracker,
   renderArea,
+  renderAreaBorder,
   trackerSensorReading,
   kindFromEntity,
   resolveItemIcon,
@@ -2740,6 +2741,16 @@ export class FloorplanCardEditor extends LitElement {
               ${floor.furniture.map((f) => this._renderFurnitureSel(f))}
               ${renderWallMask(floor.openings, c.width, c.height, this._wallMaskId)}
               ${floor.walls.map((w) => this._renderWall(w))}
+              <!-- Room outlines, same layer position as the card so what you
+                   place is what you get. Only a static borderColor draws here,
+                   there being no hass to resolve a live color from — but the
+                   clip ids are passed anyway, so wiring a live preview in later
+                   cannot silently land on the unclipped path. -->
+              <g mask=${`url(#${this._wallMaskId})`}>
+                ${(floor.areas ?? []).map((a, i) =>
+                  renderAreaBorder(a, undefined, `${this._wallMaskId}-area-${i}`)
+                )}
+              </g>
               ${repeat(
                 // Keyed by id: switching floors must create fresh DOM. Reused
                 // nodes would CSS-transition from the previous floor's opening

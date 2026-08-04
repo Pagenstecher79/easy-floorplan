@@ -773,6 +773,18 @@ trackers:
   `border` for a room that outlines itself while occupied without tinting everything
   inside it, which reads better on a busy plan.
 
+  An area's outline is drawn **on top of the walls it traces**, so `border` colors the
+  room's own walls rather than hiding a line underneath them. Doorways and windows are
+  cut out of the outline exactly as they are cut out of the wall.
+
+  A live outline is clipped to its own room, so rooms never paint each other: a wall
+  between two rooms splits down the middle and each side reports its own room, and a
+  corner where several rooms meet splits between them. An exterior wall colors on its
+  inside face only, leaving the plan's silhouette intact. `borderWidth` is the width
+  you actually see on the room's own side, and defaults to `4` — the room's own half
+  of the wall, since the wall is centred on the line the polygon follows. Widen it and
+  the band runs past the wall onto the floor and over furniture standing against it.
+
 ```yaml
 areas:
   - id: living_room
@@ -801,15 +813,15 @@ areas:
       - { x: 500, y: 900 }
       - { x: 100, y: 900 }
 
-  # Outline-only highlight: the room draws a green border while occupied and
-  # its fill never changes. activeOpacity is a fill concern, so it does not
-  # apply here.
+  # Outline-only highlight: the hall's own walls turn green while it is
+  # occupied and its fill never changes. activeOpacity is a fill concern, so it
+  # does not apply here. Without borderWidth the outline matches the wall it is
+  # painted over; 4 draws a thinner line down the middle of that wall instead.
   - id: hall
     name: Hall
     entity: binary_sensor.hall_occupancy
     activeColor: "#4caf50"
     highlight: border
-    borderWidth: 4
     points:
       - { x: 500, y: 100 }
       - { x: 900, y: 100 }
