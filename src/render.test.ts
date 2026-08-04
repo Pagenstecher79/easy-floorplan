@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { nothing } from "lit";
 import type { Furniture, FurnitureType, ItemKind } from "./types";
 import {
   FURNITURE_DEFAULT_SIZE,
@@ -57,6 +58,7 @@ import {
   editorGlowPaint,
   glowReach,
   renderGlowMask,
+  renderOpening,
   renderGlow,
 } from "./render";
 import type { FloorplanCardConfig, Opening, RenderHass } from "./types";
@@ -1647,6 +1649,104 @@ describe("glowReach — walls block light (issue #108)", () => {
   it("the wall the lamp is mounted on does not black out its own pool", () => {
     // Wall within one wall thickness of the light: non-blocking.
     expect(glowReach(500, 300, 140, [wall(200, 302, 800, 302)])).toBeUndefined();
+  });
+});
+
+describe("styling hooks reach the DOM (issue #105)", () => {
+  const flatten = (node: unknown): string => {
+    if (node == null || typeof node === "boolean") return "";
+    // Lit's `nothing` is a symbol; stringifying it would put the literal text
+    // "Symbol(lit-nothing)" in the markup, which is not what renders.
+    if (typeof node === "symbol") return "";
+    if (Array.isArray(node)) return node.map(flatten).join("");
+    if (typeof node === "object" && "strings" in (node as Record<string, unknown>)) {
+      const { strings, values } = node as { strings: string[]; values: unknown[] };
+      return strings.reduce((acc, s, i) => acc + s + (i < values.length ? flatten(values[i]) : ""), "");
+    }
+    return String(node);
+  };
+  const square = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }];
+
+  it("an area carries its config id, type class and bound entity", () => {
+    const markup = flatten(
+      renderArea({ id: "area_a5r5nwl", points: square, entity: "binary_sensor.smoke" } as never)
+    );
+    expect(markup).toContain('class="fp-area"');
+    expect(markup).toContain("data-id=area_a5r5nwl");
+    // Areas take an entity too (#107), so [data-entity=...] must reach them —
+    // they are the case this issue was actually about.
+    expect(markup).toContain("data-entity=binary_sensor.smoke");
+  });
+
+  it("every entity-bindable element answers the same [data-entity] selector", () => {
+    const ent = "light.kitchen";
+    const area = flatten(renderArea({ id: "a", points: square, entity: ent } as never));
+    const furn = flatten(renderFurniture({ id: "f", type: "sofa", x: 0, y: 0, w: 10, h: 10, entity: ent } as never));
+    const open = flatten(
+      renderOpening({ id: "o", type: "door", x: 0, y: 0, length: 40, angle: 0, entity: ent } as never,
+        { color: "#888", accent: "#0f0" } as never)
+    );
+    for (const m of [area, furn, open]) expect(m).toContain(`data-entity=${ent}`);
+  });
+
+  it("furniture carries its id, its type class and its entity", () => {
+    const markup = flatten(
+      renderFurniture({ id: "furn_3j66s50", type: "sofa", x: 0, y: 0, w: 10, h: 10, entity: "light.k" } as never)
+    );
+    expect(markup).toContain("fp-furniture fp-furniture-sofa");
+    expect(markup).toContain("data-id=furn_3j66s50");
+    expect(markup).toContain("data-entity=light.k");
+  });
+
+  it("an opening carries its id and door/window class", () => {
+    const markup = flatten(
+      renderOpening(
+        { id: "door_1", type: "door", x: 0, y: 0, length: 40, angle: 0, entity: "binary_sensor.d" } as never,
+        { color: "#888", accent: "#0f0" } as never
+      )
+    );
+    expect(markup).toContain("fp-opening fp-opening-door");
+    expect(markup).toContain("data-id=door_1");
+    expect(markup).toContain("data-entity=binary_sensor.d");
+  });
+
+  it("hands Lit its omit sentinel, so the attribute is absent not \"undefined\"", () => {
+    // A hand-written config need not carry ids, and data-id="undefined" would
+    // be a hook that silently matches every element lacking one.
+    //
+    // Asserting on flattened markup cannot show this: String(nothing) is
+    // "Symbol(lit-nothing)", so a `not.toContain("undefined")` check passes
+    // without the attribute being omitted at all. Assert the slot itself is
+    // Lit's `nothing` — that is the documented contract for removing an
+    // attribute.
+    const slotFor = (tpl: unknown, attr: string): unknown => {
+      const { strings, values } = tpl as { strings: string[]; values: unknown[] };
+      const i = strings.findIndex((s) => s.trimEnd().endsWith(`${attr}=`));
+      expect(i, `no ${attr}= slot found`).toBeGreaterThanOrEqual(0);
+      return values[i];
+    };
+
+    const area = renderArea({ points: square } as never);
+    expect(slotFor(area, "data-id")).toBe(nothing);
+    expect(slotFor(area, "data-entity")).toBe(nothing);
+
+    const furn = renderFurniture({ type: "sofa", x: 0, y: 0, w: 10, h: 10 } as never);
+    expect(slotFor(furn, "data-id")).toBe(nothing);
+    expect(slotFor(furn, "data-entity")).toBe(nothing);
+
+    // And the sentinel really is distinct from the failure it guards against.
+    expect(nothing).not.toBe(undefined);
+    expect(String(nothing)).not.toContain("undefined");
+  });
+
+  it("a hostile id stays one harmless token instead of a second class", () => {
+    const markup = flatten(renderArea({ id: 'x" class="fp-wall', points: square } as never));
+    // The class list is untouched, and the id collapses to a single token —
+    // no quote to close the attribute, no space to start another class.
+    expect(markup).toContain('class="fp-area"');
+    const id = /data-id=(\S*)/.exec(markup)?.[1];
+    expect(id).toBe("xclassfp-wall");
+    expect(id).not.toMatch(/["'\s=]/);
   });
 });
 
