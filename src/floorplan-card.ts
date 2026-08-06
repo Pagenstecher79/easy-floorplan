@@ -421,23 +421,38 @@ export class FloorplanCard extends LitElement {
       <ha-card .header=${c.title ?? nothing}>
         <div
           class="stage"
-          style="aspect-ratio: ${dims.w} / ${dims.h}; background:${cssColorOr(
-          c.background, "var(--card-background-color, #fff)")};"
+          style="aspect-ratio: ${dims.w} / ${dims.h};"
         >
-<!-- preserveAspectRatio="none" is correct here, and it took a wrong fix to
-               see why. .stage pins aspect-ratio: width / height inline, so the
-               SVG's box already matches its viewBox and "none" never distorts.
+          <!-- The plan box: exactly the canvas ratio, fitted inside whatever
+               height the card was actually given, and centred there (closes
+               #115). Sized off the container's height so it shrinks when the
+               height is the binding axis — clamping a full-width box with
+               max-height instead would break the ratio rather than the box.
 
-               "meet" letterboxes the SVG inside its box. The .items overlay is
-               HTML, positioned with raw left/top percentages of .stage, and it
-               does not letterbox. So the moment anything overrides the stage's
-               ratio (card-mod, a grid row count) the drawing shrinks away from
-               the badges and every icon drifts off the wall it was placed on.
-               "none" stretches both layers identically: distorted, but aligned.
+               The stage carries the same aspect-ratio so it still has a
+               definite height in a content-sized (masonry) card; without it,
+               size containment leaves 100cqh with nothing to resolve against
+               and the plan collapses to nothing. -->
+          <div
+            class="plan"
+            style="aspect-ratio: ${dims.w} / ${dims.h};
+                   width: min(100%, calc(100cqh * ${dims.w} / ${dims.h}));
+                   background:${cssColorOr(
+                     c.background, "var(--card-background-color, #fff)")};"
+          >
+          <!-- preserveAspectRatio="none" is correct here, and it took a wrong
+               fix to see why. Fitting the plan into a card that is the wrong
+               shape for it is .plan's job, not this line's (#115): .plan
+               carries the canvas ratio, so the SVG's box always matches its
+               viewBox, and "none" and "meet" are equivalent while that holds.
 
-               The real fix letterboxes both layers together -- wrap the svg and
-               the overlay in one aspect-ratio box and centre it. Until then, do
-               not "fix" this line. -->
+               "none" is still the deliberate choice, because it is the one
+               that fails safely. The .items overlay is HTML, positioned with
+               raw left/top percentages of .plan, and it does not letterbox. So
+               if anything ever overrides .plan's ratio (card-mod, a grid row
+               count), "meet" letterboxes the SVG away from the overlay and
+               every icon drifts off the wall it was placed on, while "none"
+               stretches both layers identically: distorted, but aligned. -->
           <svg viewBox="0 0 ${dims.w} ${dims.h}" preserveAspectRatio="none">
             <g transform=${rotTransform || nothing}>
             ${active.image
@@ -587,6 +602,7 @@ export class FloorplanCard extends LitElement {
               (it) => this._renderItem(it, c, rot)
             )}
           </div>
+          </div>
           ${floors.length > 1 ? this._renderFloorSwitcher(floors, active) : nothing}
         </div>
       </ha-card>
@@ -625,11 +641,32 @@ export class FloorplanCard extends LitElement {
       height: 100%;
       box-sizing: border-box;
       overflow: hidden;
+      /* A column, so the stage takes the height left over after the card's
+         own header rather than the card's whole height. With a title set, a
+         full-height stage measures past the bottom of the card by exactly the
+         header, and the plan is cut off by that much. */
+      display: flex;
+      flex-direction: column;
     }
     .stage {
       position: relative;
       width: 100%;
+      /* Takes the space the header leaves, and may shrink below its content:
+         without min-height a flex item floors at its content size and the
+         plan pushes the stage past the card again. */
+      flex: 1 1 auto;
+      min-height: 0;
       padding: 0;
+      /* Centres the plan box in whatever the card was given, and makes the
+         stage's own height queryable so the plan can size against it. */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      container-type: size;
+    }
+    .plan {
+      position: relative;
+      height: auto;
     }
     .floor-switcher {
       position: absolute;
