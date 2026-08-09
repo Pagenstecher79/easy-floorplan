@@ -55,6 +55,8 @@ import {
   imageFitRatio,
   editorGlowPaint,
   renderGlow,
+  resolveOpeningAmount,
+  wallsLightPassesThrough,
   renderGlowMask,
   openingDefaultOpen,
   openingMotion,
@@ -2503,6 +2505,15 @@ export class FloorplanCardEditor extends LitElement {
     const deadSpaceRings = c.showDeadSpaces
       ? deadSpacesCached(floor.walls, floor.openings)
       : [];
+    // Walls as light meets them (issue #143), same as the card — so dropping a
+    // door into a wall spills the pool through it while you are still drawing.
+    // Skipped entirely on a floor with no cast light, which is most of them:
+    // this sits on the path of every keystroke and drag in the editor.
+    const lightWalls = floor.items.some((it) => it.glow)
+      ? wallsLightPassesThrough(floor.walls, floor.openings, (o) =>
+          resolveOpeningAmount(o, o.entity ? this.hass?.states[o.entity] : undefined)
+        )
+      : floor.walls;
     const floorEmpty =
       !floor.walls.length &&
       !floor.openings.length &&
@@ -2825,7 +2836,7 @@ export class FloorplanCardEditor extends LitElement {
                   // with no readable state previews lit (issue #108).
                   const paint = editorGlowPaint(it, this.hass?.states[it.entity]);
                   return paint
-                    ? renderGlow(it, paint, `${this._wallMaskId}-glow-${i}`, floor.walls)
+                    ? renderGlow(it, paint, `${this._wallMaskId}-glow-${i}`, lightWalls)
                     : nothing;
                 })}
               </g>

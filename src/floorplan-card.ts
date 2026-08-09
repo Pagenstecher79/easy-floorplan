@@ -44,6 +44,7 @@ import {
   renderGlow,
   renderGlowMask,
   renderSunDimMask,
+  wallsLightPassesThrough,
   polygonCentroid,
   trackerSensorReading,
   entityIsActive,
@@ -464,6 +465,18 @@ export class FloorplanCard extends LitElement {
     const deadSpaceRings = c.showDeadSpaces
       ? deadSpacesCached(active.walls, active.openings)
       : [];
+    // Walls as light meets them (issue #143): open doors and windows are holes,
+    // exactly as the plan draws them. Computed once here rather than inside
+    // each pool — every lamp sweeps the same walls, and the sun-dimming
+    // clearing has to agree with the pool it is cut from.
+    //
+    // Only when something actually casts light. A plan with no lit pools and
+    // no sun dimming never reads these walls, and this is on the path of every
+    // state change the card takes.
+    const castsLight = c.sunDimming || active.items.some((it) => it.glow);
+    const lightWalls = castsLight
+      ? wallsLightPassesThrough(active.walls, active.openings, (o) => this._openingAmount(o))
+      : active.walls;
     // Lit rooms hold back the night (issue #113): without this the flat dim
     // multiplies the lit-vs-unlit contrast too, and a lamp ends up *less*
     // visible after dark than at noon.
@@ -475,7 +488,7 @@ export class FloorplanCard extends LitElement {
           c.width,
           c.height,
           sunDimMaskId,
-          active.walls
+          lightWalls
         )
       : nothing;
     return html`
@@ -563,7 +576,7 @@ export class FloorplanCard extends LitElement {
                 const paint = glowPaint(it, this.hass?.states[it.entity]);
                 // Walls block the pool (issue #108) — light stops at the room.
                 return paint
-                  ? renderGlow(it, paint, `${this._glowIdBase}-${i}`, active.walls)
+                  ? renderGlow(it, paint, `${this._glowIdBase}-${i}`, lightWalls)
                   : nothing;
               })}
             </g>
