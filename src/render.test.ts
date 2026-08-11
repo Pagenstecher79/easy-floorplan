@@ -55,6 +55,10 @@ import {
   itemHiddenWhenInactive,
   resolveStateColor,
   itemLabelSize,
+  areaLabelSize,
+  areaLabelFontSize,
+  normalizeOverlayScale,
+  overlayLength,
   hassRenderInputsChanged,
   collectWatchedEntities,
   isEntityOn,
@@ -87,6 +91,7 @@ import {
   renderGlowMask,
   renderOpening,
   renderGlow,
+  renderRipple,
 } from "./render";
 import type { FloorplanCardConfig, Opening, RenderHass } from "./types";
 
@@ -731,6 +736,78 @@ describe("editorItemLabel (#135)", () => {
       text: "light.k",
       live: false,
     });
+  });
+});
+
+describe("overlay scaling", () => {
+  it("normalizes the mode, defaulting anything unrecognized to fixed", () => {
+    expect(normalizeOverlayScale("plan")).toBe("plan");
+    expect(normalizeOverlayScale(undefined)).toBe("fixed");
+    expect(normalizeOverlayScale("fixed")).toBe("fixed");
+    expect(normalizeOverlayScale("PLAN")).toBe("fixed");
+    expect(normalizeOverlayScale(1)).toBe("fixed");
+  });
+
+  it("emits screen pixels under fixed and canvas units under plan", () => {
+    expect(overlayLength(14, "fixed")).toBe("14px");
+    expect(overlayLength(14, "plan")).toBe("calc(14 * var(--fp-u, 1px))");
+  });
+
+  // Without the fallback an undefined --fp-u makes the whole declaration
+  // invalid at computed-value time and the measure silently inherits.
+  it("falls back to a sane length if --fp-u never resolves", () => {
+    expect(overlayLength(14, "plan")).toContain("var(--fp-u, 1px)");
+  });
+
+  // Nothing else asserts that `scale` is actually threaded through a render
+  // path: dropping the argument at one of the badge/item call sites would
+  // otherwise still pass. renderRipple is exported, so it anchors the wiring.
+  it("threads the mode through a real render path, not just the helper", () => {
+    expect(flattenMarkup(renderRipple(true, "#fff", 80, 3, "plan"))).toContain(
+      "width:calc(80 * var(--fp-u, 1px))"
+    );
+    expect(flattenMarkup(renderRipple(true, "#fff", 80, 3, "fixed"))).toContain("width:80px");
+  });
+
+  it("clamps the area name size to the same range item labels use", () => {
+    expect(areaLabelSize(undefined)).toBe(14);
+    expect(areaLabelSize(20)).toBe(20);
+    expect(areaLabelSize(2)).toBe(8);
+    expect(areaLabelSize(999)).toBe(40);
+  });
+
+  // Review on #148: an inline font-size beats any non-!important card-mod rule,
+  // and card-mod was the only way to resize a room name before this option
+  // existed. An untouched card must keep leaving the size to the stylesheet.
+  describe("areaLabelFontSize — leaves card-mod's hook alone when it can", () => {
+    it("emits nothing for a default area under the default mode", () => {
+      expect(areaLabelFontSize(undefined, "fixed")).toBe("");
+    });
+
+    it("emits the size once the area asks for one", () => {
+      expect(areaLabelFontSize(20, "fixed")).toBe("font-size:20px;");
+    });
+
+    it("always emits under plan, where the stylesheet's px would be wrong", () => {
+      expect(areaLabelFontSize(undefined, "plan")).toBe(
+        "font-size:calc(14 * var(--fp-u, 1px));"
+      );
+      expect(areaLabelFontSize(20, "plan")).toBe("font-size:calc(20 * var(--fp-u, 1px));");
+    });
+
+    it("clamps and neutralizes a hand-edited size on the way to the sink", () => {
+      expect(areaLabelFontSize(999, "fixed")).toBe("font-size:40px;");
+      expect(areaLabelFontSize("14;}body{display:none", "fixed")).toBe("font-size:14px;");
+    });
+  });
+
+  // Same style-sink guard as itemLabelSize: these land in an inline style, so a
+  // hand-edited config must not be able to close the declaration.
+  it("neutralizes style-injection payloads before they reach the style sink", () => {
+    expect(areaLabelSize("20px;color:red")).toBe(14);
+    expect(overlayLength(areaLabelSize("14;}body{display:none"), "plan")).toBe(
+      "calc(14 * var(--fp-u, 1px))"
+    );
   });
 });
 

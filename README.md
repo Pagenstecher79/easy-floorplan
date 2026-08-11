@@ -313,6 +313,7 @@ The editor writes this config for you; manual editing is optional.
 | `sunBrightnessMax` | number | `1` | Brightness in full daylight, 0–1. |
 | `skin`       | string   | `default`          | Built-in look for the whole plan: `default`, `odnetnin`, `pastel` or `tron`. See [Skins](#skins). |
 | `pressEffect`| string   | `scale`            | Feedback when a device is pressed: `scale`, `ripple`, `flash` or `none`. Only devices that actually do something respond. See [Press feedback](#press-feedback). |
+| `overlayScale`| string  | `fixed`            | How badges, labels, room names and text are sized: `fixed` = screen pixels, `plan` = canvas units so they scale with the drawing. See [Overlay scale](#overlay-scale). |
 | `background` | string   | skin / card bg     | Canvas background color (CSS / hex). Overrides the skin's paper. |
 | `floors`     | Floor[]  | —                  | Per-floor element groups (see [Floor](#floor)).   |
 | `defaultFloor`| string  | first floor        | Id of the floor shown first.                 |
@@ -511,11 +512,15 @@ animated inside a rectangular tracked area:
 
 ### Area
 
-`{ id, points, name?, showName?, color?, opacity?, haArea?, filterEntities?, entity?, stateColor?, activeColor?, activeOpacity?, borderColor?, borderWidth?, highlight? }`
+`{ id, points, name?, showName?, labelSize?, color?, opacity?, haArea?, filterEntities?, entity?, stateColor?, activeColor?, activeOpacity?, borderColor?, borderWidth?, highlight? }`
 
 - `points` — `{ x, y }` vertices in drawing order, implicitly closed last-to-first.
 - `name` / `showName` — label centered on the polygon (`showName` defaults `true`).
   Mirrors the linked HA area's name when `haArea` is set.
+- `labelSize` — that label's size, `8`–`40`, default `14`. Px under `overlayScale: fixed`,
+  canvas units under `plan`. Small rooms want a smaller number than the big ones beside them.
+  Left unset on a `fixed` card the size stays in the stylesheet, so a card-mod rule on
+  `.area-label` still wins; set it, or switch to `plan`, and it moves inline and takes over.
 - `color` / `opacity` — the room's fill; theme primary and `0.25` by default.
 - `haArea` — id of a linked Home Assistant area, set by the editor when `name` matches one.
 - `filterEntities` — with `haArea` set, scopes the entity picker for devices inside this
@@ -784,6 +789,63 @@ card_mod:
     }
 ```
 
+## Overlay scale
+
+The card draws in two layers. Walls, doors, furniture and room fills are SVG, scaled from
+the canvas to whatever width the card gets — draw at any size, they always fit. Badges,
+labels, room names and text are HTML on top of that, so they stay upright under
+`rotation` and can take clicks, and by default they are sized in **screen pixels**.
+
+Those two agree while the card renders at roughly its canvas size. Below that they drift
+apart: a `980`-wide plan shown `500` wide draws every wall at half size while a 14px room
+name stays 14px, so names spill past their rooms and collide with the badges under them.
+Nothing in the config can fix that, because a label's px size doesn't know what scale the
+plan ended up at.
+
+`overlayScale: plan` sizes the overlay in **canvas units** instead, so both layers shrink
+together and the card looks the same at every size — a scale drawing rather than a drawing
+with fixed-size furniture on it. Every measure follows: `size` and `labelSize` on a
+device, the reading drawn inside a badge, `size` on text, an area's `labelSize`, and
+`rippleSize`. Hairlines deliberately don't — a badge border and a label's drop shadow
+are about a pixel either way, and scaling them down is how you lose them.
+
+```yaml
+type: custom:easy-floorplan-card
+width: 980
+height: 700
+overlayScale: plan
+```
+
+Sizes are read in canvas units under `plan`, so the numbers mean the same thing as
+everything else in the config: `labelSize: 14` is 14 units on a `980`-unit-wide canvas,
+about 1.4 % of the card's width whatever that turns out to be.
+
+### Where it helps, and where it costs
+
+Scaling with the drawing cuts both ways: it stops text overflowing its room, and it also
+keeps shrinking past the point text can be read. On a `980`-wide canvas at the default
+sizes (room name `14`, device label `12`):
+
+| Card width | Room name | Device label |
+| --- | --- | --- |
+| 1200 | 17px | 15px |
+| 800 | 11px | 10px |
+| 600 | 9px | 7px |
+| 450 | 6px | 6px |
+| 350 | 5px | 4px |
+
+So `plan` suits a card rendering down to roughly **two-thirds of its canvas width** on the
+defaults. Below that it trades collision for illegibility, and the sizes have to come up
+to compensate — a `labelSize` of `20`–`24` on a card at half its canvas width lands back
+where the default was. That is a real trade, not a free win: sizes are relative, and
+nothing puts a floor under them.
+
+Use it whenever the card renders smaller than its canvas but not drastically so — a
+dashboard tile, a sidebar, a desktop widget. Leave it off for a wall tablet showing the
+plan at full size, where fixed px is what keeps text legible from across the room, and
+for a card so small that scaled text would disappear. The default stays `fixed`, so an
+existing card looks exactly as it did.
+
 ## Styling hooks (card-mod)
 
 Every rendered element carries its config `id` as `data-id`, plus a type class, so
@@ -800,6 +862,7 @@ it by something stable.
 | Wall | `wall`, `fp-wall` | `data-id` |
 | Device | `item`, `fp-item` | `data-id`, `data-entity`, `data-kind` |
 | Text | `text`, `fp-text` | `data-id` |
+| Room name | `area-label` | — |
 | Tracker | `tracker`, `fp-tracker` | `data-id` |
 
 Ids come from the editor (`area_a5r5nwl`, `furn_3j66s50`, …) and are stable across edits.

@@ -2,7 +2,15 @@ import { LitElement, html, css, svg, nothing, type TemplateResult, type Property
 import { customElement, property, state } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import { keyed } from "lit/directives/keyed.js";
-import type { HomeAssistant, FloorplanCardConfig, FloorItem, FloorText, Floor, Area } from "./types";
+import type {
+  HomeAssistant,
+  FloorplanCardConfig,
+  FloorItem,
+  FloorText,
+  Floor,
+  Area,
+  OverlayScale,
+} from "./types";
 import { cssColor, cssColorOr, cssNumber, cssIdent, cssEntityId, contrastText } from "./css-safe";
 import {
   DEFAULT_WIDTH,
@@ -10,6 +18,7 @@ import {
   DEFAULT_ITEM_SIZE,
   DEFAULT_TEXT_SIZE,
   DEFAULT_RIPPLE_SIZE,
+  DEFAULT_AREA_LABEL_SIZE,
   DEFAULT_SUN_MIN,
   DEFAULT_SUN_MAX,
   PRESS_SCALE,
@@ -57,6 +66,9 @@ import {
   pressEffectOf,
   itemHiddenWhenInactive,
   itemLabelSize,
+  areaLabelFontSize,
+  normalizeOverlayScale,
+  overlayLength,
   hassRenderInputsChanged,
   collectWatchedEntities,
   resolveItemIcon,
@@ -240,8 +252,9 @@ export class FloorplanCard extends LitElement {
     }
   }
 
-  private _renderBadge(item: FloorItem): TemplateResult {
+  private _renderBadge(item: FloorItem, scale: OverlayScale): TemplateResult {
     const size = cssNumber(item.size, DEFAULT_ITEM_SIZE);
+    const box = overlayLength(size, scale);
     // Animation goes on the inner ha-icon, not the badge: the badge carries
     // the user's `angle` rotation, and a spin on the same element would
     // overwrite it.
@@ -256,16 +269,18 @@ export class FloorplanCard extends LitElement {
     return html`
       <div
         class="badge"
-        style="width:${size}px;height:${size}px;transform:rotate(${cssNumber(item.angle, 0)}deg);"
+        style="width:${box};height:${box};transform:rotate(${cssNumber(item.angle, 0)}deg);"
       >
         ${value
-          ? html`<span class="badge-value" style="font-size:${badgeValueSize(size, value)}px;"
+          ? html`<span
+              class="badge-value"
+              style="font-size:${overlayLength(badgeValueSize(size, value), scale)};"
               >${value}</span
             >`
           : html`<ha-icon
               class=${anim ? `anim-${anim}` : ""}
               icon=${this._itemIcon(item)}
-              style="--mdc-icon-size:${itemIconSize(size)}px;"
+              style="--mdc-icon-size:${overlayLength(itemIconSize(size), scale)};"
             ></ha-icon>`}
       </div>
     `;
@@ -273,6 +288,8 @@ export class FloorplanCard extends LitElement {
 
   /**
    * Start the ink ripple at the point that was actually touched (issue #134).
+   * Positions are real screen pixels off the event, so they are unaffected by
+   * overlayScale — the ink lands where the finger did at any plan scale.
    *
    * The position cannot come from CSS — only the event knows where the finger
    * landed — so it is handed over as two custom properties and the animation
@@ -295,7 +312,12 @@ export class FloorplanCard extends LitElement {
     ink.classList.add("inking");
   }
 
-  private _renderItem(item: FloorItem, c: FloorplanCardConfig, rot: PlanRotation): TemplateResult {
+  private _renderItem(
+    item: FloorItem,
+    c: FloorplanCardConfig,
+    rot: PlanRotation,
+    scale: OverlayScale
+  ): TemplateResult {
     const on = this._isOn(item);
     // Name/state composition lives in itemBadgeLabel, including #39's
     // no-entity guard (an unbound device gets no state line).
@@ -333,14 +355,14 @@ export class FloorplanCard extends LitElement {
 
     let visual: TemplateResult | typeof nothing = nothing;
     if (display === "ripple") {
-      visual = renderRipple(on, rippleColor, rippleSize);
+      visual = renderRipple(on, rippleColor, rippleSize, 3, scale);
     } else if (display === "iconRipple") {
       visual = html`<div class="stack">
-        ${renderRipple(on, rippleColor, rippleSize)}
-        ${showIcon ? html`<div class="stack-icon">${this._renderBadge(item)}</div>` : nothing}
+        ${renderRipple(on, rippleColor, rippleSize, 3, scale)}
+        ${showIcon ? html`<div class="stack-icon">${this._renderBadge(item, scale)}</div>` : nothing}
       </div>`;
     } else if (showIcon) {
-      visual = this._renderBadge(item);
+      visual = this._renderBadge(item, scale);
     }
 
     // Rotated frame: the overlay is HTML, so each anchor is remapped instead
@@ -394,7 +416,7 @@ export class FloorplanCard extends LitElement {
         ${labelText
           ? html`<span
               class="label ${visual === nothing ? "inflow" : ""}"
-              style="font-size:${itemLabelSize(item.labelSize)}px;${labelColor
+              style="font-size:${overlayLength(itemLabelSize(item.labelSize), scale)};${labelColor
                 ? `color:${labelColor};`
                 : ""}"
               >${labelText}</span
@@ -404,22 +426,35 @@ export class FloorplanCard extends LitElement {
     `;
   }
 
-  private _renderAreaLabel(a: Area, c: FloorplanCardConfig, rot: PlanRotation): TemplateResult | typeof nothing {
+  private _renderAreaLabel(
+    a: Area,
+    c: FloorplanCardConfig,
+    rot: PlanRotation,
+    scale: OverlayScale
+  ): TemplateResult | typeof nothing {
     if (!a.name || (a.showName ?? true) === false) return nothing;
     const centroid = polygonCentroid(a.points);
     const p = rotatePlanPoint(centroid.x, centroid.y, c.width, c.height, rot);
     const d = rotatedCanvasSize(c.width, c.height, rot);
+    // Empty unless the size has something to say the stylesheet doesn't — see
+    // areaLabelFontSize, which keeps card-mod's `.area-label` hook working.
+    const fontSize = areaLabelFontSize(a.labelSize, scale);
     return html`
       <div
         class="area-label"
-        style="left:${(p.x / d.w) * 100}%; top:${(p.y / d.h) * 100}%;"
+        style="left:${(p.x / d.w) * 100}%; top:${(p.y / d.h) * 100}%;${fontSize}"
       >
         ${a.name}
       </div>
     `;
   }
 
-  private _renderText(t: FloorText, c: FloorplanCardConfig, rot: PlanRotation): TemplateResult {
+  private _renderText(
+    t: FloorText,
+    c: FloorplanCardConfig,
+    rot: PlanRotation,
+    scale: OverlayScale
+  ): TemplateResult {
     const p = rotatePlanPoint(t.x, t.y, c.width, c.height, rot);
     const d = rotatedCanvasSize(c.width, c.height, rot);
     return html`
@@ -427,7 +462,7 @@ export class FloorplanCard extends LitElement {
         class="text fp-text"
         data-id=${cssIdent(t.id) ?? nothing}
         style="left:${(p.x / d.w) * 100}%; top:${(p.y / d.h) * 100}%;
-               font-size:${cssNumber(t.size, DEFAULT_TEXT_SIZE)}px;
+               font-size:${overlayLength(cssNumber(t.size, DEFAULT_TEXT_SIZE), scale)};
                color:${cssColorOr(t.color, SKIN_TEXT)};
                transform:translate(-50%,-50%) rotate(${cssNumber(t.angle, 0)}deg);"
       >
@@ -450,6 +485,9 @@ export class FloorplanCard extends LitElement {
     const rot = normalizePlanRotation(c.rotation);
     const dims = rotatedCanvasSize(cssNumber(c.width, DEFAULT_WIDTH), cssNumber(c.height, DEFAULT_HEIGHT), rot);
     const rotTransform = planRotationTransform(c.width, c.height, rot);
+    // Overlay sizing mode. --fp-plan-w is the canvas width *as displayed*, so a
+    // rotated plan divides by the dimension 100cqw actually measures.
+    const scale = normalizeOverlayScale(c.overlayScale);
     // Follow the real sun (issue #113). Elevation comes from the HA instance,
     // so every viewer sees the same picture regardless of their own timezone.
     const sunLevel = c.sunDimming
@@ -512,9 +550,10 @@ export class FloorplanCard extends LitElement {
                size containment leaves 100cqh with nothing to resolve against
                and the plan collapses to nothing. -->
           <div
-            class="plan"
+            class="plan ${scale === "plan" ? "scale-plan" : ""}"
             style="aspect-ratio: ${dims.w} / ${dims.h};
                    width: min(100%, calc(100cqh * ${dims.w} / ${dims.h}));
+                   --fp-plan-w: ${dims.w};
                    background:${cssColorOr(c.background, SKIN_PAPER)};"
           >
           <!-- preserveAspectRatio="none" is correct here, and it took a wrong
@@ -683,8 +722,8 @@ export class FloorplanCard extends LitElement {
           </svg>`
           )}
           <div class="items">
-            ${active.areas?.map((a) => this._renderAreaLabel(a, c, rot))}
-            ${active.texts.map((t) => this._renderText(t, c, rot))}
+            ${active.areas?.map((a) => this._renderAreaLabel(a, c, rot, scale))}
+            ${active.texts.map((t) => this._renderText(t, c, rot, scale))}
             ${repeat(
               // No entity filter: devices that exist physically but have no HA
               // entity still deserve their badge (issue #39). Keyed by id so a
@@ -699,7 +738,7 @@ export class FloorplanCard extends LitElement {
                   )
               ),
               (it, i) => it.id || i,
-              (it) => this._renderItem(it, c, rot)
+              (it) => this._renderItem(it, c, rot, scale)
             )}
           </div>
           </div>
@@ -782,6 +821,46 @@ export class FloorplanCard extends LitElement {
     .plan {
       position: relative;
       height: auto;
+    }
+    /*
+     * overlayScale: plan. The container is .plan, not .stage: since #115 the
+     * stage is only the box the plan is *centred in*, and it is wider than the
+     * plan on any card that isn't the canvas's ratio. Measuring the stage would
+     * oversize every label by exactly the letterboxing.
+     *
+     * --fp-u -- one canvas unit as a length -- is declared on the overlay
+     * *inside* .plan rather than on .plan itself. Both work today: --fp-u is an
+     * unregistered custom property, so its value is substituted as a token
+     * stream and the cqw resolves wherever it is finally used -- always a
+     * descendant of .plan. Declaring it here is what stays correct if --fp-u is
+     * ever registered with @property, which would resolve the cqw at the
+     * declaring element instead. (.plan's own width reads 100cqh against
+     * .stage, since container units look at an element's *ancestor* container;
+     * adding inline-size containment to .plan doesn't disturb it.)
+     *
+     * inline-size containment is enough for cqw and is cheaper than the size
+     * containment .stage needs; .plan's height comes from its inline
+     * aspect-ratio, so nothing here depends on the overlay's own size.
+     */
+    .plan.scale-plan {
+      container-type: inline-size;
+    }
+    .plan.scale-plan .items {
+      --fp-u: calc(100cqw / var(--fp-plan-w));
+    }
+    /* The measures that aren't config-driven, so they never reach an inline
+       style. Label padding goes to em rather than canvas units because it
+       should track the label's own size either way.
+       Hairlines are deliberately left alone: a badge border and the label's
+       drop shadow are 1px-ish either way, and scaling them with the plan puts
+       them below a pixel on exactly the small cards this mode is for. Skins
+       own those tokens now in any case. */
+    .plan.scale-plan .label {
+      padding: 0.08em 0.33em;
+      border-radius: 0.33em;
+    }
+    .plan.scale-plan .item > .label {
+      top: calc(100% + 0.17em);
     }
     .floor-switcher {
       position: absolute;
@@ -1145,7 +1224,12 @@ export class FloorplanCard extends LitElement {
       white-space: nowrap;
       transform: translate(-50%, -50%);
       font-weight: 600;
-      font-size: 14px;
+      /* The default size stays a normal rule so card-mod can still override it
+         — room names had no config option before overlayScale landed, and this
+         selector was the only way to change them. An area's own labelSize, and
+         overlayScale: plan, come through as an inline style that wins over
+         this. Keep in step with DEFAULT_AREA_LABEL_SIZE. */
+      font-size: ${DEFAULT_AREA_LABEL_SIZE}px;
       letter-spacing: 0.02em;
       text-transform: uppercase;
       line-height: 1;

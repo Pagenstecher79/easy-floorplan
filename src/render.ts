@@ -18,12 +18,14 @@ import type {
   RenderHass,
   HassEntity,
   FloorItem,
+  OverlayScale,
 } from "./types";
 import {
   FURNITURE_COLOR,
   DEFAULT_TRACKER_DOT_SIZE,
   DEFAULT_RIPPLE_SIZE,
   DEFAULT_AREA_OPACITY,
+  DEFAULT_AREA_LABEL_SIZE,
   DEFAULT_AREA_BORDER_WIDTH,
   SUN_ELEVATION_NIGHT,
   SUN_ELEVATION_DAY,
@@ -917,6 +919,61 @@ export function editorItemLabel(
  */
 export function itemLabelSize(v: unknown): number {
   return Math.min(40, Math.max(8, cssNumber(v, DEFAULT_LABEL_SIZE)));
+}
+
+/** Clamp a config area `labelSize` to the same 8–40 range item labels use. */
+export function areaLabelSize(v: unknown): number {
+  return Math.min(40, Math.max(8, cssNumber(v, DEFAULT_AREA_LABEL_SIZE)));
+}
+
+// ---- overlay scaling --------------------------------------------------------
+//
+// The card draws in two layers. The SVG is a viewBox scaled to the stage, so
+// walls and furniture are resolution-independent. The overlay on top is HTML —
+// it has to be, so badges stay upright under rotation and take pointer events —
+// and its measures were plain screen pixels. The two only agree when the card
+// renders at roughly its canvas size; at half that, every badge and label is
+// twice the size the drawing expects and rooms fill up with colliding text.
+//
+// `overlayScale: plan` expresses those measures in canvas units instead. The
+// plan box becomes a query container and `--fp-u` (declared on the overlay
+// inside it, see the card's stylesheet) is one canvas unit as a length, so
+// `calc(14 * var(--fp-u))` is 14 canvas units however large the card ends up.
+
+/** Coerce a config `overlayScale`; anything unrecognised means the default. */
+export function normalizeOverlayScale(v: unknown): OverlayScale {
+  return v === "plan" ? "plan" : "fixed";
+}
+
+/**
+ * A CSS length for one overlay measure: screen px under `fixed`, canvas units
+ * under `plan`. `units` is already coerced by the caller (cssNumber and the
+ * per-measure clamps), which is what makes this safe to drop into an inline
+ * `style` — it interpolates a number, never a config string.
+ *
+ * The `1px` fallback only matters if a caller ever renders outside `.items`,
+ * where `--fp-u` is undefined: without it the whole property is invalid at
+ * computed-value time and the measure silently inherits. A wrong-but-visible
+ * size is the better failure.
+ */
+export function overlayLength(units: number, scale: OverlayScale): string {
+  return scale === "plan" ? `calc(${units} * var(--fp-u, 1px))` : `${units}px`;
+}
+
+/**
+ * The `font-size` declaration for a room name, or `""` to leave it to the
+ * stylesheet.
+ *
+ * Room names are the one overlay measure with no config option before
+ * `overlayScale` landed, so `card-mod` on `.area-label` was the only way to
+ * resize them — and an inline style beats any non-`!important` rule. So the
+ * size is written inline only when it says something the stylesheet cannot:
+ * canvas units under `plan`, or an explicit `labelSize`. An untouched card
+ * keeps its rule, and the override that worked before keeps working.
+ */
+export function areaLabelFontSize(labelSize: unknown, scale: OverlayScale): string {
+  if (scale !== "plan" && labelSize === undefined) return "";
+  return `font-size:${overlayLength(areaLabelSize(labelSize), scale)};`;
 }
 
 /** Default mdi icon per item kind, used when neither config nor entity supplies one. */
@@ -2686,12 +2743,14 @@ export function renderRipple(
   active: boolean,
   color: string,
   sizePx: number,
-  rings = 3
+  rings = 3,
+  scale: OverlayScale = "fixed"
 ): TemplateResult {
+  const size = overlayLength(cssNumber(sizePx, DEFAULT_RIPPLE_SIZE), scale);
   return html`
     <div
       class="ripple ${active ? "active" : ""}"
-      style="width:${cssNumber(sizePx, DEFAULT_RIPPLE_SIZE)}px;height:${cssNumber(sizePx, DEFAULT_RIPPLE_SIZE)}px;--fp-ripple-color:${cssColorOr(color, SKIN_ACCENT)};"
+      style="width:${size};height:${size};--fp-ripple-color:${cssColorOr(color, SKIN_ACCENT)};"
     >
       <span class="dot"></span>
       ${Array.from(
