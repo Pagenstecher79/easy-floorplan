@@ -92,6 +92,7 @@ import {
   IDENTITY_ZOOM,
   type PlanRotation,
 } from "./render";
+import { symbolCatalog } from "./symbols";
 import { deadSpacesCached } from "./dead-space";
 import type { Opening } from "./types";
 import {
@@ -742,7 +743,10 @@ export class FloorplanCard extends LitElement {
                  pools screen-blend with each other (two lamps brighten where
                  they meet) without screening against the plan beneath, which
                  would wash out on a light theme. -->
-            ${renderGlowMask(active.furniture, c.width, c.height, `${this._glowIdBase}-mask`)}
+            ${renderGlowMask(
+              active.furniture, c.width, c.height,
+              `${this._glowIdBase}-mask`, symbolCatalog(c.symbols)
+            )}
             <g class="fp-glows"
                mask=${active.furniture.length ? `url(#${this._glowIdBase}-mask)` : nothing}>
               ${active.items.map((it, i) => {
@@ -755,7 +759,11 @@ export class FloorplanCard extends LitElement {
               })}
             </g>
             ${active.furniture.map((f) =>
-              renderFurniture(f, furnitureColor(f, f.entity ? this.hass?.states[f.entity]?.state : undefined))
+              renderFurniture(
+                f,
+                furnitureColor(f, f.entity ? this.hass?.states[f.entity]?.state : undefined),
+                symbolCatalog(c.symbols)
+              )
             )}
             ${renderWallMask(active.openings, c.width, c.height, this._wallMaskId)}
             <g mask=${`url(#${this._wallMaskId})`}>
