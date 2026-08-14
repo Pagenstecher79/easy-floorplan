@@ -20,6 +20,9 @@ import {
   openingMotion,
   openingMirror,
   sliderStyleOf,
+  openingHasTwoPanels,
+  sliderStyleHasTwoPanels,
+  secondPanelOf,
   openingFromDeviceClass,
   windowSash,
   shutterAmount,
@@ -98,6 +101,7 @@ import {
   editorGlowPaint,
   glowReach,
   wallsLightPassesThrough,
+  openingClearFraction,
   renderGlowMask,
   renderOpening,
   renderGlow,
@@ -251,6 +255,69 @@ describe("sliderStyleOf", () => {
   });
   it("is single for swinging openings regardless of sliderStyle", () => {
     expect(sliderStyleOf({ type: "door", sliderStyle: "bypass" } as Opening)).toBe("single");
+  });
+  it("carries the two-panel styles through (issue #145)", () => {
+    for (const sliderStyle of ["biparting-bypass", "converging"] as const) {
+      expect(sliderStyleOf({ type: "door", motion: "slide", sliderStyle } as Opening)).toBe(
+        sliderStyle,
+      );
+    }
+  });
+});
+
+describe("openingHasTwoPanels / secondPanelOf (issue #145)", () => {
+  const slider = (extra: Partial<Opening> = {}) =>
+    ({ type: "door", motion: "slide", ...extra }) as Opening;
+
+  it("is true for exactly the styles that move both panels", () => {
+    for (const sliderStyle of ["biparting", "biparting-bypass", "converging"] as const) {
+      expect(openingHasTwoPanels(slider({ sliderStyle }))).toBe(true);
+      expect(sliderStyleHasTwoPanels(sliderStyle)).toBe(true);
+    }
+    // bypass moves one panel past a fixed one; single moves the only panel.
+    expect(openingHasTwoPanels(slider({ sliderStyle: "bypass" }))).toBe(false);
+    expect(openingHasTwoPanels(slider())).toBe(false);
+    expect(sliderStyleHasTwoPanels("bypass")).toBe(false);
+    expect(sliderStyleHasTwoPanels("single")).toBe(false);
+    // A swing door has leaves, but no sliding panel to bind a second sensor to.
+    expect(openingHasTwoPanels({ type: "door", sliderStyle: "biparting" } as Opening)).toBe(false);
+  });
+
+  it("swaps in the second entity and keeps everything else", () => {
+    const o = slider({
+      sliderStyle: "biparting",
+      entity: "binary_sensor.left",
+      secondaryEntity: "binary_sensor.right",
+      invert: true,
+      length: 90,
+    });
+    expect(secondPanelOf(o)).toEqual({ ...o, entity: "binary_sensor.right" });
+  });
+
+  it("resolves the second panel independently, sharing invert", () => {
+    const o = slider({
+      sliderStyle: "biparting",
+      entity: "binary_sensor.left",
+      secondaryEntity: "binary_sensor.right",
+    });
+    const panel = secondPanelOf(o);
+    expect(resolveOpeningAmount(panel, { state: "on" })).toBe(1);
+    expect(resolveOpeningAmount(panel, { state: "off" })).toBe(0);
+    expect(openingIsActive(panel, { state: "on" })).toBe(true);
+    expect(openingIsActive(panel, { state: "off" })).toBe(false);
+    // Position-aware covers drive the panel partway, and invert flips it.
+    expect(
+      resolveOpeningAmount(panel, { state: "open", attributes: { current_position: 40 } }),
+    ).toBeCloseTo(0.4);
+    expect(
+      resolveOpeningAmount(secondPanelOf({ ...o, invert: true }), {
+        state: "open",
+        attributes: { current_position: 40 },
+      }),
+    ).toBeCloseTo(0.6);
+    // An outage on one leaf fails that leaf closed, not the whole opening.
+    expect(resolveOpeningAmount(panel, { state: "unavailable" })).toBe(0);
+    expect(openingIsActive(panel, { state: "unavailable" })).toBe(false);
   });
 });
 
@@ -2459,6 +2526,66 @@ describe("collectWatchedEntities includes shutter entities (issue #74)", () => {
   });
 });
 
+/**
+ * Review on #151: the openings loop took `entity` and `shutterEntity` and not
+ * `secondaryEntity`, so a plan never re-rendered when only the *second* panel's
+ * contact moved — the headline case of #145, silently not working.
+ *
+ * The failure was worse than a frozen panel: any other watched entity moving
+ * dragged a render along with it and the panel caught up, so it looked
+ * intermittent. Both halves are asserted below, because set membership alone
+ * would not have caught it — `hassRenderInputsChanged` compares state objects
+ * by identity, which is the thing that actually decides whether a render runs.
+ */
+describe("collectWatchedEntities includes a slider's second panel (issue #145)", () => {
+  const twoPanelPlan = (secondaryEntity?: string) =>
+    ({
+      type: "t", width: 1000, height: 600,
+      floors: [{ id: "f", name: "F", walls: [], items: [], texts: [], furniture: [], trackers: [],
+        openings: [{ id: "o", type: "window", x: 0, y: 0, length: 200, angle: 0,
+          motion: "slide", sliderStyle: "converging",
+          entity: "binary_sensor.left", ...(secondaryEntity ? { secondaryEntity } : {}) }] }],
+    }) as unknown as FloorplanCardConfig;
+
+  it("watches both leaves' sensors", () => {
+    const ids = collectWatchedEntities(twoPanelPlan("binary_sensor.right"));
+    expect(ids.has("binary_sensor.left")).toBe(true);
+    expect(ids.has("binary_sensor.right")).toBe(true);
+  });
+
+  it("adds nothing when the opening has only one sensor", () => {
+    expect(collectWatchedEntities(twoPanelPlan()).size).toBe(1);
+  });
+
+  // The assertion that actually pins the bug: HA hands over a fresh state
+  // object for what changed and carries the rest across by identity, so a
+  // render only happens if the *second* sensor's id is in the watched set.
+  it("re-renders when only the second panel's sensor changes", () => {
+    const watched = collectWatchedEntities(twoPanelPlan("binary_sensor.right"));
+    const left = { state: "off" };
+    const prev = {
+      states: { "binary_sensor.left": left, "binary_sensor.right": { state: "off" } },
+    } as unknown as RenderHass;
+    const next = {
+      // Same object for the left sensor — nothing about it moved.
+      states: { "binary_sensor.left": left, "binary_sensor.right": { state: "on" } },
+    } as unknown as RenderHass;
+    expect(hassRenderInputsChanged(prev, next, watched)).toBe(true);
+  });
+
+  it("still skips a tick where neither leaf moved", () => {
+    const watched = collectWatchedEntities(twoPanelPlan("binary_sensor.right"));
+    const states = { "binary_sensor.left": { state: "off" }, "binary_sensor.right": { state: "off" } };
+    expect(
+      hassRenderInputsChanged(
+        { states } as unknown as RenderHass,
+        { states } as unknown as RenderHass,
+        watched
+      )
+    ).toBe(false);
+  });
+});
+
 describe("polygonCentroid", () => {
   it("averages the vertices", () => {
     const square = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }];
@@ -3268,6 +3395,71 @@ describe("lightBadgePaint (#106)", () => {
 // Issue #143: "doors act as walls and stop the light pool, regardless of
 // open/close status". Walls and openings are stored independently, so the glow
 // sweep saw uncut walls where the plan draws a hole.
+// Issue #145 meets #143: a two-panel slider has two sensors and its leaves do
+// not travel the full width, so neither the amount nor the leaf count could be
+// read off `entity` alone.
+describe("openingClearFraction (#145 / #143)", () => {
+  const slider = (sliderStyle: string): Opening =>
+    ({ id: "o", type: "window", motion: "slide", sliderStyle, x: 300, y: 300, length: 200, angle: 0 }) as Opening;
+
+  it("counts both leaves, so the second panel alone opens a gap", () => {
+    // The bug: a door whose only open leaf was the second one blocked light
+    // outright, because the light asked `entity` and nothing else.
+    for (const s of ["biparting", "biparting-bypass", "converging"]) {
+      expect({ s, clear: openingClearFraction(slider(s), 0, 1) > 0 }).toEqual({ s, clear: true });
+    }
+  });
+
+  it("matches how far each style's leaves actually travel", () => {
+    // Measured against the drawn geometry: biparting sends its leaves into the
+    // walls, the patio styles keep theirs inside the frame at a quarter each.
+    const table = [
+      ["biparting", 1, 1, 1],
+      ["biparting", 1, 0, 0.5],
+      ["biparting-bypass", 1, 1, 0.5],
+      ["biparting-bypass", 1, 0, 0.25],
+      ["converging", 1, 1, 0.5],
+      ["converging", 1, 0, 0.25],
+    ] as Array<[string, number, number, number]>;
+    for (const [s, a1, a2, want] of table) {
+      expect({ s, a1, a2, clear: openingClearFraction(slider(s), a1, a2) }).toEqual({
+        s, a1, a2, clear: want,
+      });
+    }
+  });
+
+  it("never lets a patio slider through more light than it draws", () => {
+    // The ceiling is the point: these two keep their leaves in the frame, so
+    // reading `amount` alone would pass twice the light that is drawn.
+    for (const s of ["biparting-bypass", "converging"]) {
+      expect(openingClearFraction(slider(s), 1, 1)).toBeLessThanOrEqual(0.5);
+    }
+  });
+
+  it("leaves every other opening exactly as it was", () => {
+    const shut = 0;
+    const open = 1;
+    const half = 0.4;
+    for (const o of [
+      { id: "d", type: "door", x: 0, y: 0, length: 90, angle: 0 } as Opening,
+      { id: "r", type: "window", motion: "roll", x: 0, y: 0, length: 90, angle: 0 } as Opening,
+      slider("single"),
+      slider("bypass"),
+    ]) {
+      for (const a of [shut, half, open]) {
+        expect(openingClearFraction(o, a)).toBe(a);
+      }
+    }
+    // …including a single-sensor biparting, where the mean of one amount is itself.
+    expect(openingClearFraction(slider("biparting"), 0.6)).toBeCloseTo(0.6, 10);
+  });
+
+  it("clamps a junk reading rather than cutting a gap wider than the wall", () => {
+    expect(openingClearFraction(slider("biparting"), 5, 5)).toBe(1);
+    expect(openingClearFraction(slider("converging"), -3, -3)).toBe(0);
+  });
+});
+
 describe("wallsLightPassesThrough (#143)", () => {
   const wall = (x1: number, y1: number, x2: number, y2: number, id = "w") => ({ id, x1, y1, x2, y2 });
   // A door centred on a horizontal wall at y=100, spanning x 480..520.

@@ -10,6 +10,7 @@ import type {
   FloorplanCardConfig,
   Floor,
   Opening,
+  SliderStyle,
   ItemKind,
   IconAnimation,
   StateColorRule,
@@ -113,6 +114,11 @@ export function collectWatchedEntities(c: FloorplanCardConfig): Set<string> {
     for (const o of f.openings) {
       if (o.entity) ids.add(o.entity);
       if (o.shutterEntity) ids.add(o.shutterEntity);
+      // The second panel of a two-panel slider (issue #145). Exactly the trap
+      // named above, and the worst version of it: the panel is not frozen, it
+      // catches up whenever some *other* watched entity moves, so it reads as
+      // intermittent rather than broken.
+      if (o.secondaryEntity) ids.add(o.secondaryEntity);
     }
     for (const it of f.items) {
       if (it.entity) ids.add(it.entity);
@@ -516,6 +522,52 @@ function clipWallToBox(
  * circle with no clip at all.
  */
 /**
+ * How much of an opening's width is actually clear, 0–1 — what {@link
+ * wallsLightPassesThrough} cuts out of the wall for light to pass through.
+ *
+ * Not simply the leaf's `amount`, for two reasons that both arrived with the
+ * two-panel sliders (issue #145):
+ *
+ * **Both panels count.** A door with a sensor per leaf and only its *second*
+ * panel open was drawing that panel open while still blocking light outright,
+ * because the light asked `entity` and nothing else.
+ *
+ * **Travel is not the same as clearance.** `biparting` sends each leaf out into
+ * a wall, so two open leaves clear the whole opening. The patio styles keep
+ * their leaves inside it — each travels a quarter — so even wide open they
+ * clear only half. Reading `amount` alone would have `converging` letting
+ * through twice the light it draws.
+ *
+ *  | style                    | both open | one open |
+ *  | ------------------------ | --------- | -------- |
+ *  | `biparting`              | all of it | half     |
+ *  | `biparting-bypass`       | half      | a quarter|
+ *  | `converging`             | half      | a quarter|
+ *
+ * Every other opening keeps `amount` untouched, so a swing door, a roll-up and
+ * a single-panel slider all behave exactly as they did — as does a
+ * single-sensor `biparting`, where both leaves share one amount and the mean
+ * of it is itself.
+ */
+export function openingClearFraction(o: Opening, amount: number, secondAmount?: number): number {
+  const a1 = Math.max(0, Math.min(1, amount));
+  const a2 = Math.max(0, Math.min(1, secondAmount ?? amount));
+  switch (sliderStyleOf(o)) {
+    case "biparting":
+      // Each leaf recesses into its own wall, so between them they can clear
+      // the opening completely.
+      return (a1 + a2) / 2;
+    case "biparting-bypass":
+    case "converging":
+      // Each leaf is a quarter wide and travels a quarter, and stays in the
+      // frame — so the pair tops out at half the opening however wide open.
+      return (a1 + a2) / 4;
+    default:
+      return a1;
+  }
+}
+
+/**
  * The walls as **light** meets them (issue #143): the plan's walls with a gap
  * cut wherever an opening is currently open.
  *
@@ -533,9 +585,19 @@ function clipWallToBox(
  * A window behaves the same way: shut it blocks, open it spills light outside,
  * which is what an open window does.
  *
- * The gap is `length * amount`, centred. A half-open slider really clears one
- * side rather than the middle, but the pool is a soft radial wash and centring
- * keeps this to one interval per opening instead of a handed special case.
+ * The caller supplies how much of each opening is clear — see
+ * {@link openingClearFraction}, which is where a two-panel slider's two
+ * sensors are reconciled into one number.
+ *
+ * The gap is `length * fraction`, **centred**, and that is an approximation
+ * worth naming. A half-open slider really clears one side rather than the
+ * middle; `converging` is the sharpest case, since its two leaves stack in the
+ * centre and what actually clears is a quarter at each jamb — so the gap is
+ * the right *size* and the wrong *place*. The amount of light through the wall
+ * is right, where it lands is approximate, and the pool is a soft radial wash
+ * that hides most of the difference. Fixing it properly means letting one
+ * opening contribute several intervals rather than one, which is a change to
+ * this function's contract rather than to its arithmetic.
  */
 export function wallsLightPassesThrough(
   walls: readonly Wall[],
@@ -1662,8 +1724,37 @@ export function openingMirror(o: Opening): { sx: 1 | -1; sy: 1 | -1 } {
  * Resolve a sliding opening's panel arrangement. Only meaningful while sliding
  * (swinging openings always resolve to `single`), defaulting to `single`.
  */
-export function sliderStyleOf(o: Opening): "single" | "bypass" | "biparting" {
+export function sliderStyleOf(o: Opening): SliderStyle {
   return openingMotion(o) === "slide" ? (o.sliderStyle ?? "single") : "single";
+}
+
+/**
+ * Whether a slider style draws **two** moving panels, and so has a second leaf
+ * for `secondaryEntity` to drive (issue #145). `single` and `bypass` both move
+ * one panel — bypass's other panel is fixed — so neither qualifies.
+ *
+ * Takes the style rather than the opening because the editor asks about a style
+ * the user has just picked, before it is on any opening.
+ */
+export function sliderStyleHasTwoPanels(style: SliderStyle): boolean {
+  return style === "biparting" || style === "biparting-bypass" || style === "converging";
+}
+
+/** {@link sliderStyleHasTwoPanels} for an opening as configured. */
+export function openingHasTwoPanels(o: Opening): boolean {
+  return sliderStyleHasTwoPanels(sliderStyleOf(o));
+}
+
+/**
+ * The second moving panel as an opening in its own right, so it can go through
+ * {@link resolveOpeningAmount} / {@link openingIsActive} unchanged rather than
+ * threading a "which panel" argument down the whole resolver chain (issue #145).
+ * Shares the geometry and `invert`; only the bound entity differs. Callers must
+ * check {@link openingHasTwoPanels} and a set `secondaryEntity` first — with no
+ * entity this resolves to the type default, not to the first panel's state.
+ */
+export function secondPanelOf(o: Opening): Opening {
+  return { ...o, entity: o.secondaryEntity };
 }
 
 /**
@@ -2184,6 +2275,13 @@ export interface OpeningStyle {
     accent?: string;
     flip?: boolean;
   };
+  /**
+   * The second moving panel of a biparting slider (issue #145), when it has a
+   * sensor of its own. Omitted — the only case before that issue — leaves both
+   * panels sharing `amount` and `active`, so a single-entity slider parts
+   * symmetrically exactly as it always has. Ignored by every other style.
+   */
+  second?: { amount: number; active?: boolean };
 }
 
 /**
@@ -2286,6 +2384,15 @@ export function renderOpening(o: Opening, style: OpeningStyle): SVGTemplateResul
         <line x1=${half} y1=${-cutH / 2} x2=${half} y2=${cutH / 2}
               stroke=${color} stroke-width="2" />`;
     const sliderStyle = sliderStyleOf(o);
+    // The second moving panel of a biparting slider (issue #145). With a sensor
+    // of its own it opens and accents independently; without one it mirrors the
+    // first panel, which is what a single-entity slider has always drawn.
+    const amt2 = style.second
+      ? Math.max(0, Math.min(1, style.second.amount))
+      : amt;
+    const tone2 = style.second
+      ? cssColorOr(style.second.active ? accent : color, SKIN_ACCENT)
+      : tone;
     if (sliderStyle === "bypass") {
       // Double bypass: two half-width panels on parallel tracks. The moving
       // (back) panel slides left to stack behind the fixed (front) panel.
@@ -2307,17 +2414,79 @@ export function renderOpening(o: Opening, style: OpeningStyle): SVGTemplateResul
     } else if (sliderStyle === "biparting") {
       // Biparting: two half-width panels meet at the centre and part, each
       // recessing into the wall on its own side (left panel → left, right → right).
-      const shift = half * amt;
       body = svg`
         ${jambs}
         <!-- track -->
         <line x1=${-half} y1="0" x2=${half} y2="0"
               stroke=${color} stroke-width="0.75" opacity="0.6" />
-        <g class="fp-slide-panel" style="transform:translateX(${-shift}px);">
+        <g class="fp-slide-panel" style="transform:translateX(${-half * amt}px);">
           <rect x=${-half} y=${-t / 2} width=${half} height=${t} style="fill:${tone};" />
         </g>
-        <g class="fp-slide-panel" style="transform:translateX(${shift}px);">
-          <rect x="0" y=${-t / 2} width=${half} height=${t} style="fill:${tone};" />
+        <g class="fp-slide-panel" style="transform:translateX(${half * amt2}px);">
+          <rect x="0" y=${-t / 2} width=${half} height=${t} style="fill:${tone2};" />
+        </g>`;
+    } else if (sliderStyle === "biparting-bypass") {
+      // Biparting over fixed panels (issue #145) — the patio / bay slider. The
+      // opening divides into four: a fixed panel at each jamb on the front
+      // track, and two moving panels on the back track that meet in the middle
+      // and part until each sits over the fixed panel on its side. Nothing
+      // recesses into the wall, so travel is a quarter of the opening rather
+      // than half, and even wide open the outer quarters stay glazed — which is
+      // the whole difference from `biparting` and the reason it can't be faked
+      // by clamping that one's travel.
+      const off = 1.75; // half the gap between the two tracks, as in bypass
+      const q = half / 2; // one panel: the opening splits into four
+      body = svg`
+        ${jambs}
+        <!-- tracks -->
+        <line x1=${-half} y1=${-off} x2=${half} y2=${-off}
+              stroke=${color} stroke-width="0.75" opacity="0.6" />
+        <line x1=${-half} y1=${off} x2=${half} y2=${off}
+              stroke=${color} stroke-width="0.75" opacity="0.6" />
+        <!-- fixed panels: outer quarters, front track. Never accented, even
+             wide open — the accent marks what has moved, and lighting these
+             would accent exactly the half that is still glazed shut. -->
+        <rect x=${-half} y=${off - t / 2} width=${q} height=${t} fill=${color} />
+        <rect x=${half - q} y=${off - t / 2} width=${q} height=${t} fill=${color} />
+        <!-- moving panels: inner quarters, back track -->
+        <g class="fp-slide-panel" style="transform:translateX(${-q * amt}px);">
+          <rect x=${-q} y=${-off - t / 2} width=${q} height=${t} style="fill:${tone};" />
+        </g>
+        <g class="fp-slide-panel" style="transform:translateX(${q * amt2}px);">
+          <rect x="0" y=${-off - t / 2} width=${q} height=${t} style="fill:${tone2};" />
+        </g>`;
+    } else if (sliderStyle === "converging") {
+      // Two moving panels and nothing else (issue #145) — the slider whose
+      // leaves are both operable. They ride parallel tracks, so neither blocks
+      // the other, and they travel *toward* each other until they stack over
+      // the middle half: the mirror image of `biparting-bypass`, which clears
+      // the middle and leaves the ends glazed.
+      //
+      // Travel is a quarter, not a panel's full width, and that is the whole
+      // design of this style. A leaf physically can slide its own width, right
+      // across its neighbour — but then two open leaves simply swap sides and
+      // cover the opening again, which is the one thing a floor plan must not
+      // draw. Parking each at the halfway point makes both-open the case it
+      // reads as: stacked in the middle, a quarter clear at each jamb. The
+      // price is that a single open leaf draws a quarter clear rather than the
+      // half it could reach, and that is the right way round — under-promising
+      // the gap you can walk through beats inventing one that isn't there.
+      const off = 1.75; // half the gap between the two tracks, as in bypass
+      const q = half / 2; // each panel parks over the middle half
+      body = svg`
+        ${jambs}
+        <!-- tracks -->
+        <line x1=${-half} y1=${-off} x2=${half} y2=${-off}
+              stroke=${color} stroke-width="0.75" opacity="0.6" />
+        <line x1=${-half} y1=${off} x2=${half} y2=${off}
+              stroke=${color} stroke-width="0.75" opacity="0.6" />
+        <!-- both panels move, so both take the accent on their own state:
+             front track travels right, back track left, and they meet. -->
+        <g class="fp-slide-panel" style="transform:translateX(${q * amt}px);">
+          <rect x=${-half} y=${off - t / 2} width=${half} height=${t} style="fill:${tone};" />
+        </g>
+        <g class="fp-slide-panel" style="transform:translateX(${-q * amt2}px);">
+          <rect x="0" y=${-off - t / 2} width=${half} height=${t} style="fill:${tone2};" />
         </g>`;
     } else {
       // Single panel: fills the opening closed, slides fully aside when open.
