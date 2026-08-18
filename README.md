@@ -200,7 +200,8 @@ window, a `blind` → a slider, a `garage` or `shutter` → a roll-up); adjust a
 - **One sensor per panel** — a two-panel slider with a contact on each leaf takes a
   **Second panel** entity, and then each panel opens and accents on its own state: left
   open and right shut draws exactly that. Leave it empty and both panels follow the first
-  entity, as they always have. **Invert** covers both, and a tap still acts on the first.
+  entity, as they always have. The opening's own invert switch covers both, and a tap
+  still acts on the first.
 - **Orientation** — **Hinge** (left / right) and **Opens** (this side / other side) face a
   swing door any of four ways; they're pure mirrors (`flipH` / `flipV`), so the animation
   follows.
@@ -210,8 +211,15 @@ window, a `blind` → a slider, a `garage` or `shutter` → a roll-up); adjust a
   against the façade) or *Roll-up*, defaulting from the entity.
 - **Active color** — the leaf, sash and arc take an accent color while open. Defaults to
   the primary color.
-- **Invert** — flip the open/closed interpretation (and the percentage) for sensors wired
-  the other way.
+- **Show icon** — an optional badge beside the opening carrying its own entity's icon,
+  which changes with the state, and its dialog on a tap. Off by default: a leaf that has
+  swung is still on screen saying so. The roll-up is the case that wants it — raised, its
+  curtain has left the floor plane and only the coloured track remains. With a shutter
+  bound too, the two badges take opposite faces of the wall.
+- **Invert door animation** (**Invert window animation** on a window) — flip the
+  open/closed interpretation (and the percentage) for sensors wired the other way. A bound
+  shutter gets its own **Invert shutter animation**, since a reed contact on the panels
+  routinely disagrees with the sensor behind them about which way round `on` means open.
 - **Tap to control** — a controllable `cover` toggles (`cover.toggle`); read-only sensors
   and position-only covers open the more-info dialog.
 
@@ -401,9 +409,11 @@ distorted anyway.
 | `entity`      | string                      | Contact `binary_sensor` / `cover` driving open/closed (or `current_position` for partial). |
 | `secondaryEntity` | string                  | Two-panel sliders (`biparting`, `biparting-bypass`, `converging`): a second contact / `cover` for the other panel, so each leaf moves on its own state. Unset = both follow `entity`. |
 | `invert`      | boolean                     | Flip the open/closed interpretation.                   |
-| `activeColor` | string                      | Leaf/arc color while actively open (default primary).  |
+| `activeColor` | string                      | Leaf/arc color while actively open (default primary). On a roll-up it colours the curtain and the track it leaves behind, so a fully raised shutter still reads as open. |
 | `flipH`       | boolean                     | Mirror left↔right. Swing door: hinge jamb. Sliding: slide direction. |
 | `flipV`       | boolean                     | Mirror across the wall so a swing opening faces the other room. |
+| `showIcon`    | boolean                     | Draw this opening's **own** icon beside it (default `false`). Editor: **Show icon**. For the roll-up: raised, its curtain is gone and only the coloured track is left, which is easy to miss across a room. Tapping the badge opens the entity's dialog. It sits on the opposite face of the wall from the shutter's badge, so an opening with both never stacks them. |
+| `icon`        | string                      | Override that icon. Absent, it is the entity's own — a **pair**, so the glyph itself says open or closed; an override is one glyph for both, and colour still reports the state. |
 | `showShutterIcon` | boolean                 | Draw that icon (default `true` whenever both are bound). Editor: **Shutter icon**. Turning it off changes nothing about the gestures — for a plan where every window has a shutter and the icons start to shout. |
 | `shutterIcon` | string                      | Override the icon's glyph. Left unset it follows the shutter entity, whose default comes in an open/closed pair; an override is one glyph for both states, and colour still reports the state. |
 | `tapTarget`   | `opening` \| `shutter`      | With both entities bound, which one a tap acts on (default `opening`); the other moves to press-and-hold. Editor: **Tap opens**. Pointing it at the shutter opens the shutter's dialog — it does not drive the motor; set `tap_action: toggle` for that. |

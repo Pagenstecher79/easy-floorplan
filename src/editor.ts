@@ -62,6 +62,7 @@ import {
   editorGlowPaint,
   renderGlow,
   resolveOpeningAmount,
+  openingIsActive,
   wallsLightPassesThrough,
   openingClearFraction,
   openingHasTwoPanels,
@@ -75,6 +76,10 @@ import {
   shutterMarkIcon,
   shutterMarkPoint,
   shutterMarkNormal,
+  openingMarkIcon,
+  openingMarkPoint,
+  openingMarkNormal,
+  hasOpeningMark,
   SHUTTER_MARK_PIXEL_OFFSET,
   SHUTTER_MARK_SIZE,
   hasShutterMark,
@@ -2983,6 +2988,9 @@ export class FloorplanCardEditor extends LitElement {
               ${floor.openings
                 .filter((o) => hasShutterMark(o))
                 .map((o) => this._renderShutterMarkOverlay(o, c))}
+              ${floor.openings
+                .filter((o) => hasOpeningMark(o))
+                .map((o) => this._renderOpeningMarkOverlay(o, c))}
               ${floor.items.map((it) => this._renderItemOverlay(it, c))}
             </div>
           </div>
@@ -3401,7 +3409,7 @@ export class FloorplanCardEditor extends LitElement {
       <section class="edit-area">
         <div class="edit-head">
           <ha-icon icon=${icon}></ha-icon>
-          <span class="edit-title">${summary}</span>
+          <span class="edit-title" title=${summary}>${summary}</span>
           <span class="head-spacer"></span>
           <button aria-label="Duplicate" title="Duplicate (Ctrl/Cmd+D)" @click=${this._duplicate}>
             <ha-icon icon="mdi:content-duplicate"></ha-icon>
@@ -3638,6 +3646,32 @@ export class FloorplanCardEditor extends LitElement {
                n.y * SHUTTER_MARK_PIXEL_OFFSET
              }px);--fp-active:${accent};"
       title=${`${(st?.attributes?.friendly_name as string | undefined) ?? id} — shown on the card, tap it there to open the shutter`}
+    >
+      <ha-icon icon=${icon}></ha-icon>
+    </div>`;
+  }
+
+  /**
+   * The card's opening badge, previewed (issue #154 follow-up). Same reason as
+   * the shutter's preview above: turning **Show icon** on and finding out where
+   * the badge lands is the whole point of having a canvas. Inert here too.
+   */
+  private _renderOpeningMarkOverlay(o: Opening, c: FloorplanCardConfig): TemplateResult {
+    const id = o.entity!;
+    const st = this.hass?.states[id];
+    const open = resolveOpeningAmount(o, st) > 0;
+    const icon = openingMarkIcon(o, st, open, this.hass?.entities?.[id]?.icon);
+    const accent = cssColor(o.activeColor) ?? SKIN_ACCENT;
+    const at = openingMarkPoint(o);
+    const n = openingMarkNormal(o);
+    return html`<div
+      class="shutter-mark ${openingIsActive(o, st) ? "on" : "off"}"
+      style="left:${(at.x / c.width) * 100}%; top:${(at.y / c.height) * 100}%;
+             width:${SHUTTER_MARK_SIZE}px;height:${SHUTTER_MARK_SIZE}px;
+             transform:translate(-50%,-50%) translate(${n.x * SHUTTER_MARK_PIXEL_OFFSET}px, ${
+               n.y * SHUTTER_MARK_PIXEL_OFFSET
+             }px);--fp-active:${accent};"
+      title=${`${(st?.attributes?.friendly_name as string | undefined) ?? id} — shown on the card, tap it there to open its dialog`}
     >
       <ha-icon icon=${icon}></ha-icon>
     </div>`;
@@ -5382,7 +5416,12 @@ export class FloorplanCardEditor extends LitElement {
       letter-spacing: 0.06em;
       color: var(--secondary-text-color);
     }
-    /* Element header: kind icon + summary + the selection's actions. */
+    /* Element header: kind icon + summary + the selection's actions.
+       The actions are the fixed part and the summary is the elastic one: a
+       device named after a long entity id used to push Duplicate and Delete
+       off the panel entirely (issue #163), which is unreachable rather than
+       merely ugly. So everything but the title refuses to shrink, and the
+       title truncates instead — its full text stays available on hover. */
     .edit-head {
       display: flex;
       align-items: center;
@@ -5392,18 +5431,28 @@ export class FloorplanCardEditor extends LitElement {
     .edit-head ha-icon {
       --mdc-icon-size: 18px;
       color: var(--secondary-text-color);
+      flex: none;
     }
     .edit-head .edit-title {
       font-size: 13px;
       font-weight: 600;
+      /* min-width:0 is what lets a flex item shrink below its content. */
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .edit-head .head-spacer {
-      flex: 1;
+      /* Grows to push the actions right, but never shrinks the title away
+         while there is still slack of its own to give back. */
+      flex: 1 1 0;
+      min-width: 0;
     }
     .edit-head button {
       display: inline-flex;
       align-items: center;
       padding: 4px 8px;
+      flex: none;
     }
     .edit-head button ha-icon {
       --mdc-icon-size: 16px;

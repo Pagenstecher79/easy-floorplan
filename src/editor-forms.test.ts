@@ -122,6 +122,16 @@ describe("openingForm", () => {
     expect(bi.fields.map((x) => x.name)).not.toContain("slide");
   });
 
+  it("names the roll-up motion after the door, not the shutter it isn't", () => {
+    // "Roll up (garage / shutter)" read as the place to set up an external
+    // shutter, which is the Shutter field further down and works on any motion.
+    const motionField = openingForm(door).fields.find((x) => x.name === "motion")!;
+    const labels = (
+      motionField.selector as { select: { options: { label: string; value: string }[] } }
+    ).select.options.map((o) => o.label);
+    expect(labels).toEqual(["Swing", "Slide", "Roll up (garage)"]);
+  });
+
   it("roll-up opening hides swing and slide fields (issue #45)", () => {
     const motionField = openingForm(door).fields.find((x) => x.name === "motion")!;
     const opts = (motionField.selector as { select: { options: { value: string }[] } }).select
@@ -915,6 +925,46 @@ describe("openingForm — shutter invert and side (issue #74 follow-up)", () => 
     expect(names(both)).toContain("shutterInvert");
     expect(openingForm({ ...both, shutterInvert: true, invert: false } as Opening).data)
       .toMatchObject({ shutterInvert: true, invert: false });
+  });
+
+  it("says which animation each invert flips, so the pair can be told apart", () => {
+    // Stacked one above the other, "Invert" and "Invert shutter" left you
+    // guessing which switch drove which layer.
+    const both = { ...hinged, entity: "binary_sensor.win" } as Opening;
+    const labels = new Map(openingForm(both).fields.map((f) => [f.name, f.label]));
+    expect(labels.get("invert")).toBe("Invert window animation");
+    expect(labels.get("shutterInvert")).toBe("Invert shutter animation");
+    // …and the opening's own switch is named after what it actually moves.
+    const door = { ...both, type: "door" } as Opening;
+    expect(new Map(openingForm(door).fields.map((f) => [f.name, f.label])).get("invert")).toBe(
+      "Invert door animation"
+    );
+  });
+
+  it("offers the opening's own badge, opt-in and only once bound", () => {
+    const bound = { ...win, entity: "cover.garage" } as Opening;
+    expect(names(win)).not.toContain("showIcon");
+    expect(names(bound)).toContain("showIcon");
+    // The glyph override is only worth asking once the badge is drawn.
+    expect(names(bound)).not.toContain("icon");
+    expect(names({ ...bound, showIcon: true } as Opening)).toContain("icon");
+    // Off is the default, so only "on" is worth writing down — the mirror of
+    // the shutter badge, which defaults the other way.
+    const { toPatch, data } = openingForm(bound);
+    expect(data.showIcon).toBe(false);
+    expect(toPatch({ showIcon: true })).toEqual({ showIcon: true });
+    expect(toPatch({ showIcon: false })).toEqual({ showIcon: undefined, icon: undefined });
+  });
+
+  it("drops the badge with the entity it was badging", () => {
+    const { toPatch } = openingForm({ ...win, entity: "cover.garage", showIcon: true } as Opening);
+    expect(toPatch({ entity: "" })).toEqual({
+      entity: "",
+      showIcon: undefined,
+      icon: undefined,
+    });
+    // Binding a different entity keeps it: the badge is still wanted.
+    expect(toPatch({ entity: "cover.other" })).toEqual({ entity: "cover.other" });
   });
 
   it("asks which side only for hinged panels", () => {
