@@ -1003,27 +1003,66 @@ npm test           # vitest (pure-logic tests; no browser)
 Releases are built and attached automatically by GitHub Actions when a GitHub release
 is published.
 
-### Browser dev harness
+### Local Home Assistant
 
-Iterate on the editor / card without a Home Assistant instance:
+A throwaway Home Assistant in a container: the way to test a change against the real
+thing. The card is loaded the way a user's instance loads it, `hass` arrives over the
+real websocket, and the house is busy enough that there is real recorder history to
+scrub within a couple of minutes of starting it.
+
+Needs Docker, with **Compose v2** — the scripts call `docker compose` (a subcommand), not
+the older standalone `docker-compose` binary. Docker Desktop ships it; for a CLI-only
+setup, `brew install colima docker docker-compose && colima start`. Check with `docker
+compose version`.
 
 ```bash
-npm run serve      # opens /dev/ on the Vite dev server with HMR
+npm run ha
 ```
 
-It mounts the **real** editor and card side-by-side over a minimal `hass` mock, with
-`<ha-card>` / `<ha-icon>` / `<ha-entity-picker>` / `<ha-combo-box>` stubs so the harness
-drives the same code branch a real HA install does. Editor changes round-trip through
-`config-changed` into the live preview, and a **Tracker emulator** panel appears whenever
-the config has a tracker — per-axis sliders write into the mock states, and **Auto-orbit**
-drives them on `requestAnimationFrame`.
+That builds the card and starts Home Assistant at **<http://localhost:8123>**.
 
-The harness lives entirely under `dev/` and is not in the production build. Flip
-`START_WITH_DEMO` in `dev/dev.ts` to start with a sample room instead of a blank floor.
+**First run only**, Home Assistant ends at its onboarding screen. Create an account —
+any username and password; the instance is not reachable from outside your machine —
+then skip through location, analytics and the "found these devices" page. It is a
+one-time step: the account persists in `docker/config/.storage`, so every later
+`npm run ha` goes straight to the dashboard.
 
-`/dev/symbols.html` on the same server draws every symbol in [`furniture/`](furniture/) on
-one page — the contact sheet to check a new one against. It reads the directory, so a file
-you add appears with no other edit.
+Then, in the sidebar:
+
+| Where | What it is for |
+| --- | --- |
+| **Floorplan Demo** | The sample plan, and fully editable — click the pencil and the card's visual editor opens on it. Its starting content is [`docker/config/floorplan-demo.yaml`](docker/config/floorplan-demo.yaml), seeded into an editable dashboard on first run, so the plan lives in git *and* in the editor. `npm run ha:reseed` puts the committed version back. |
+| **Overview** | Home Assistant's auto-generated dashboard. Not needed for anything here, but if you want a second surface, click the pencil and choose **⋮ → Take control** first — auto-generated dashboards are read-only until claimed. |
+| **History** (a view inside Floorplan Demo) | A plain history graph over the same entities, plus switches for the sample-data generators. When the card and Home Assistant disagree about what happened, this is where you find out which of them is wrong. |
+
+While working, run `npm run watch` in a second terminal. It rebuilds `dist/` on save and
+`dist/` is mounted into the container, so the new file is in place immediately — but the
+browser has cached the old one, so a change needs a hard refresh (Cmd/Ctrl-Shift-R). This
+is the one place the container is more friction than `dev/`, which hot-reloads.
+
+```bash
+npm run ha:logs    # follow the Home Assistant log
+npm run ha:down    # stop the container
+npm run ha:reset   # wipe account, dashboards and history, back to onboarding
+```
+
+**The sample data.** A container that has just booted has an empty recorder — nothing to
+replay, nothing on a graph, every entity sitting where it started. So automations keep
+the house busy: lights toggling and recolouring, covers driving to intermediate
+positions, temperature and humidity walking a couple of hundredths at a time, a door open
+for four seconds, a tracker drifting across the room, and one sensor that goes genuinely
+`unavailable` for 45s every five minutes. Switch the lot off with
+`input_boolean.history_generator` when you want to read a still plan.
+
+History only ever builds forward from boot — recorder timestamps are wall-clock, so there
+is no handing yourself a plan that was busy yesterday.
+
+[`docker/README.md`](docker/README.md) has the detail: what each generator produces and
+why, which entities come from where, and how to pin a Home Assistant version.
+
+The container is the only harness. There was a mock-`hass` one under `dev/`, faster to
+start but only ever able to agree with itself; it is gone, and `npm run ha` is the way to
+see a change running.
 
 ## License
 
