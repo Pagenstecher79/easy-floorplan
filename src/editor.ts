@@ -66,8 +66,8 @@ import {
   openingIsActive,
   wallsLightPassesThrough,
   openingClearFraction,
-  openingHasTwoPanels,
-  secondPanelOf,
+  openingHasTwoLeaves,
+  secondLeafOf,
   renderGlowMask,
   openingDefaultOpen,
   openingMotion,
@@ -2570,9 +2570,9 @@ export class FloorplanCardEditor extends LitElement {
           return openingClearFraction(
             o,
             amt(o.entity),
-            o.secondaryEntity && openingHasTwoPanels(o)
+            o.secondaryEntity && openingHasTwoLeaves(o)
               ? resolveOpeningAmount(
-                  secondPanelOf(o),
+                  secondLeafOf(o),
                   this.hass?.states[o.secondaryEntity]
                 )
               : undefined
