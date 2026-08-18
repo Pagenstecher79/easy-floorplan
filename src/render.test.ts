@@ -27,6 +27,20 @@ import {
   openingFromDeviceClass,
   openingSash,
   defaultSash,
+  planDirection,
+  sunBearingOf,
+  openingAdmitsSun,
+  openingSunFraction,
+  openingIsGlazed,
+  sunBeamPolygon,
+  sunLightDirection,
+  sunlightStrength,
+  sunlightStrengthOf,
+  sunIsPinned,
+  SUN_ELEVATION_FULL,
+  sunShadowPolygon,
+  SUN_REACH,
+  DEFAULT_SUN_BEARING,
   shutterAmount,
   shutterStyleOf,
   imageFitRatio,
@@ -2207,6 +2221,263 @@ describe("openingSash (issues #73 / double doors)", () => {
   });
 });
 
+describe("where the light comes from", () => {
+  const cfg = (extra = {}) =>
+    ({ type: "t", width: 1000, height: 1000, ...extra }) as FloorplanCardConfig;
+  const near = (v: number, want: number) => expect(v).toBeCloseTo(want, 6);
+
+  it("reads a bearing as a compass direction on the canvas", () => {
+    // North is up the canvas until the plan says otherwise.
+    near(planDirection(0).x, 0);
+    near(planDirection(0).y, -1);
+    near(planDirection(90).x, 1); // east, to the right
+    near(planDirection(90).y, 0);
+    near(planDirection(180).y, 1); // south, down
+  });
+
+  it("turns every bearing with the plan's own north", () => {
+    // A plan drawn with north to the right: east then points down the canvas.
+    near(planDirection(0, 90).x, 1);
+    near(planDirection(90, 90).y, 1);
+    // The whole reason north exists: the same house traced sideways must be
+    // lit from the same side of the *house*.
+    near(planDirection(135, 0).x, planDirection(45, 90).x);
+    near(planDirection(135, 0).y, planDirection(45, 90).y);
+  });
+
+  it("prefers a stated sun angle, then the live one, then a default", () => {
+    expect(sunBearingOf(cfg({ sunBearing: 200 }), 10)).toBe(200);
+    expect(sunBearingOf(cfg(), 10)).toBe(10);
+    expect(sunBearingOf(cfg(), "10.5")).toBe(10.5);
+    // A dead or absent sun.sun must not leave the plan lit from nowhere.
+    expect(sunBearingOf(cfg(), undefined)).toBe(DEFAULT_SUN_BEARING);
+    expect(sunBearingOf(cfg(), "unavailable")).toBe(DEFAULT_SUN_BEARING);
+    // 0 is a real bearing (due north), not a missing one.
+    expect(sunBearingOf(cfg({ sunBearing: 0 }), 99)).toBe(0);
+  });
+
+});
+
+describe("sunlight through the openings", () => {
+  const win = (extra: Partial<Opening> = {}) =>
+    ({ id: "o", type: "window", x: 100, y: 100, length: 40, angle: 0, ...extra }) as Opening;
+  // Light travelling straight down the canvas (sun in the north).
+  const down = { x: 0, y: 1 };
+
+  it("glass admits light whether it is open or shut; a door only when open", () => {
+    // The reason this cannot reuse the lamp rule: that one asks whether there
+    // is a hole, and a shut window is not a hole — it is still transparent.
+    expect(openingAdmitsSun({ type: "window" }, 0)).toBe(true);
+    expect(openingAdmitsSun({ type: "window" }, 1)).toBe(true);
+    expect(openingAdmitsSun({ type: "door" }, 0)).toBe(false);
+    expect(openingAdmitsSun({ type: "door" }, 0.4)).toBe(true);
+  });
+
+  it("admits a fraction of its gap, not a yes or a no", () => {
+    // A door open a crack is not a door standing open. Read as a boolean it
+    // was: both the wall gap and the beam were then taken at full width, so
+    // the crack threw the patch of a doorway wide open.
+    expect(openingSunFraction({ type: "door" }, 0.25)).toBeCloseTo(0.25);
+    expect(openingSunFraction({ type: "door" }, 1)).toBe(1);
+    expect(openingSunFraction({ type: "door" }, 0)).toBe(0);
+    // Glass admits its whole gap whatever its sash is doing — that is the one
+    // rule that ignores the amount rather than scaling by it.
+    expect(openingSunFraction({ type: "window" }, 0)).toBe(1);
+    expect(openingSunFraction({ type: "window" }, 0.3)).toBe(1);
+    expect(openingSunFraction({ type: "door", glazed: true }, 0)).toBe(1);
+    // An opaque window is scaled like any other opaque thing (a glass brick,
+    // a hatch).
+    expect(openingSunFraction({ type: "window", glazed: false }, 0.4)).toBeCloseTo(0.4);
+    // A shutter all the way down beats both.
+    expect(openingSunFraction({ type: "window" }, 1, 0)).toBe(0);
+    expect(openingSunFraction({ type: "door" }, 1, 0)).toBe(0);
+    // …and out-of-range input cannot widen a gap past its own opening.
+    expect(openingSunFraction({ type: "door" }, 4)).toBe(1);
+    expect(openingSunFraction({ type: "door" }, -2)).toBe(0);
+  });
+
+  it("counts the gap a sliding style clears, not the distance a leaf travels", () => {
+    // The composition the card performs: openingClearFraction first (both
+    // leaves, per-style travel), then the glazing and shutter rules on top.
+    // Without the first half a door whose *second* panel was open read as
+    // shut and let nothing in — the #145 bug, in the sunlight this time.
+    const conv = {
+      id: "o", type: "door", x: 0, y: 0, length: 200, angle: 0,
+      motion: "slide", sliderStyle: "converging",
+    } as Opening;
+    const sun = (a: number, b?: number) => openingSunFraction(conv, openingClearFraction(conv, a, b));
+    expect(sun(0, 0)).toBe(0);
+    expect(sun(0, 1)).toBeGreaterThan(0); // only the second leaf open: still light
+    expect(sun(1, 0)).toBeCloseTo(sun(0, 1)); // and the two leaves are worth the same
+    expect(sun(1, 1)).toBeCloseTo(0.5); // both leaves stack in the middle: half the gap
+    // A raw amount would have called that same door shut.
+    expect(openingSunFraction(conv, 0)).toBe(0);
+  });
+
+  it("a shutter that is all the way down stops the light, whatever the glass says", () => {
+    // What a shutter is for. A window behind a closed one is as dark as a wall.
+    expect(openingAdmitsSun({ type: "window" }, 0, 0)).toBe(false);
+    expect(openingAdmitsSun({ type: "door", glazed: true }, 1, 0)).toBe(false);
+    // Any daylight at all gets through — a shutter half up is not a wall.
+    expect(openingAdmitsSun({ type: "window" }, 0, 0.2)).toBe(true);
+    expect(openingAdmitsSun({ type: "window" }, 0, 1)).toBe(true);
+    // No shutter bound is not the same as one that is shut.
+    expect(openingAdmitsSun({ type: "window" }, 0, undefined)).toBe(true);
+    // …and an opaque door stays opaque behind an open shutter.
+    expect(openingAdmitsSun({ type: "door" }, 0, 1)).toBe(false);
+  });
+
+  it("a glazed door is glass too — which is what a patio door is", () => {
+    // Drawn as a door because that is how it swings, but a wall of glass all
+    // the same. Left opaque it kept the sunniest side of a house dark.
+    expect(openingIsGlazed({ type: "window" })).toBe(true);
+    expect(openingIsGlazed({ type: "door" })).toBe(false);
+    expect(openingIsGlazed({ type: "door", glazed: true })).toBe(true);
+    expect(openingAdmitsSun({ type: "door", glazed: true }, 0)).toBe(true);
+    // …and a window can be told it is not, for a glass-brick or a hatch.
+    expect(openingIsGlazed({ type: "window", glazed: false })).toBe(false);
+    expect(openingAdmitsSun({ type: "window", glazed: false }, 0)).toBe(false);
+    expect(openingAdmitsSun({ type: "window", glazed: false }, 1)).toBe(true);
+  });
+
+  it("sends the light the opposite way from where the sun stands", () => {
+    // A bearing says where the sun *is*. Reading it as the direction of travel
+    // lights the house from precisely the wrong side — with the sun in the
+    // south-west, the beams came in through the north-east windows.
+    const sw = sunLightDirection({ sunBearing: 230 });
+    expect(sw.x).toBeGreaterThan(0); // travelling east…
+    expect(sw.y).toBeLessThan(0); // …and north: toward the north-east
+    // Due south sun → light straight up the canvas.
+    const south = sunLightDirection({ sunBearing: 180 });
+    expect(south.x).toBeCloseTo(0);
+    expect(south.y).toBeCloseTo(-1);
+    // Always the far side of the compass from the sun itself.
+    for (const b of [0, 45, 137, 300]) {
+      const d = sunLightDirection({ sunBearing: b });
+      const at = planDirection(b);
+      expect(d.x).toBeCloseTo(-at.x);
+      expect(d.y).toBeCloseTo(-at.y);
+    }
+  });
+
+  it("turns the light with the plan's north, like every other bearing", () => {
+    const plain = sunLightDirection({ sunBearing: 90 });
+    const turned = sunLightDirection({ sunBearing: 0, north: 90 });
+    expect(turned.x).toBeCloseTo(plain.x);
+    expect(turned.y).toBeCloseTo(plain.y);
+  });
+
+  it("sweeps the opening's gap along the light, and only forwards", () => {
+    const p = sunBeamPolygon(win(), down, 200);
+    expect(p).toHaveLength(4);
+    // The gap itself: 40 wide, centred on the opening, along its own angle.
+    expect(p[0]).toEqual({ x: 80, y: 100 });
+    expect(p[1]).toEqual({ x: 120, y: 100 });
+    // …then 200 further along the light, never against it.
+    expect(p[2]).toEqual({ x: 120, y: 300 });
+    expect(p[3]).toEqual({ x: 80, y: 300 });
+  });
+
+  it("narrows the patch to the part of the gap that is actually clear", () => {
+    const o = win();
+    const full = sunBeamPolygon(o, down, 200);
+    const ajar = sunBeamPolygon(o, down, 200, 0.25);
+    // Same centre, a quarter of the width: the gap is 40, so 10 across.
+    expect(ajar[1].x - ajar[0].x).toBeCloseTo((full[1].x - full[0].x) * 0.25);
+    expect((ajar[0].x + ajar[1].x) / 2).toBeCloseTo((full[0].x + full[1].x) / 2);
+    // It still reaches just as far — a crack is narrower, not shorter.
+    expect(ajar[3].y - ajar[0].y).toBeCloseTo(full[3].y - full[0].y);
+    // The default is the whole gap, so every existing caller is unchanged.
+    expect(sunBeamPolygon(o, down, 200, 1)).toEqual(full);
+    expect(sunBeamPolygon(o, down, 200)).toEqual(full);
+  });
+
+  it("turns the patch with the opening it comes through", () => {
+    const p = sunBeamPolygon(win({ angle: 90 }), down, 100);
+    // A wall running north-south: the gap now spans in y, not x.
+    expect(p[0].x).toBeCloseTo(100);
+    expect(p[0].y).toBeCloseTo(80);
+    expect(p[1].y).toBeCloseTo(120);
+  });
+
+  it("casts a wall's shadow as that wall, moved along the light", () => {
+    // Exact for parallel rays — which is why the beams can be cut by these
+    // rather than traced ray by ray.
+    const w = { id: "w", x1: 0, y1: 50, x2: 100, y2: 50 };
+    const p = sunShadowPolygon(w, down, 300);
+    expect(p[0]).toEqual({ x: 0, y: 50 });
+    expect(p[1]).toEqual({ x: 100, y: 50 });
+    expect(p[2]).toEqual({ x: 100, y: 350 });
+    expect(p[3]).toEqual({ x: 0, y: 350 });
+  });
+
+  it("a beam and the shadow of the wall it pierces run the same way", () => {
+    // They are the same sweep of different segments, so a wall standing in a
+    // beam cuts it cleanly instead of leaving a sliver.
+    const dir = planDirection(135); // from the north-west, going south-east
+    const beam = sunBeamPolygon(win(), dir, 100);
+    const shadow = sunShadowPolygon({ id: "w", x1: 0, y1: 0, x2: 10, y2: 0 }, dir, 100);
+    const along = (p: { x: number; y: number }[]) => ({
+      x: p[3].x - p[0].x,
+      y: p[3].y - p[0].y,
+    });
+    expect(along(beam).x).toBeCloseTo(along(shadow).x);
+    expect(along(beam).y).toBeCloseTo(along(shadow).y);
+  });
+
+  it("has no light at all once the sun is down", () => {
+    // The azimuth says where the light comes from; only the elevation says
+    // whether there is any. Without it the plan kept its beams all night,
+    // aimed at a sun that had set hours ago.
+    expect(sunlightStrength(-0.5)).toBe(0);
+    expect(sunlightStrength(-30)).toBe(0);
+    expect(sunlightStrength(0)).toBe(0);
+  });
+
+  it("fades in over the first degrees, rather than switching on", () => {
+    expect(sunlightStrength(SUN_ELEVATION_FULL)).toBe(1);
+    expect(sunlightStrength(60)).toBe(1);
+    const low = sunlightStrength(2);
+    const mid = sunlightStrength(6);
+    expect(low).toBeGreaterThan(0);
+    expect(low).toBeLessThan(mid);
+    expect(mid).toBeLessThan(1);
+  });
+
+  it("fails bright: an unreadable sun leaves the plan lit, not stuck at night", () => {
+    // Same trap sunBrightness documents — Number(null), Number("") and
+    // Number(false) are all 0, and 0 here means "exactly at the horizon".
+    expect(sunlightStrength(undefined)).toBe(1);
+    expect(sunlightStrength(null)).toBe(1);
+    expect(sunlightStrength("")).toBe(1);
+    expect(sunlightStrength(false)).toBe(1);
+    expect(sunlightStrength("unavailable")).toBe(1);
+    // …but a real number in a string is a real reading.
+    expect(sunlightStrength("-10")).toBe(0);
+    expect(sunlightStrength("40")).toBe(1);
+  });
+
+  it("a pinned angle keeps its light on, whatever the sky is doing", () => {
+    // Stating a bearing is a decision about the picture, not a reading of the
+    // sky: it says where the light goes and, by saying so, that it stays.
+    // Fading it out at dusk would half-follow a sun the plan already declined
+    // to follow, and leave it dark all evening with nothing on screen to say why.
+    expect(sunIsPinned({ sunBearing: 225 })).toBe(true);
+    expect(sunIsPinned({})).toBe(false);
+    expect(sunlightStrengthOf({ sunBearing: 225 }, -40)).toBe(1);
+    // Due north is a real bearing, so it pins just as firmly as any other.
+    expect(sunlightStrengthOf({ sunBearing: 0 }, -40)).toBe(1);
+    // Following the real sun still follows it all the way down.
+    expect(sunlightStrengthOf({}, -40)).toBe(0);
+    expect(sunlightStrengthOf({}, 50)).toBe(1);
+  });
+
+  it("reaches across a fair part of the plan, but not forever", () => {
+    expect(SUN_REACH).toBeGreaterThan(0);
+    expect(SUN_REACH).toBeLessThanOrEqual(1);
+  });
+});
+
 describe("shutterAmount / shutterActive (issue #74)", () => {
   const st = (state: string, pos?: number) =>
     ({ state, attributes: pos === undefined ? {} : { current_position: pos } });
@@ -2795,6 +3066,94 @@ describe("collectWatchedEntities includes a slider's second panel (issue #145)",
         watched
       )
     ).toBe(false);
+  });
+});
+
+describe("collectWatchedEntities watches the sun the sunlight actually reads", () => {
+  const plan = (extra: Record<string, unknown>) =>
+    ({
+      type: "t", width: 1000, height: 600,
+      floors: [{ id: "f", name: "F", walls: [], items: [], texts: [], furniture: [],
+        trackers: [], openings: [] }],
+      ...extra,
+    }) as unknown as FloorplanCardConfig;
+
+  it("subscribes when the sunlight follows the real sun", () => {
+    // The whole feature reads sun.sun — azimuth for the direction, elevation
+    // for whether there is any light — and sunDimming is a separate opt-in,
+    // so this is the ordinary case rather than an exotic one.
+    expect(collectWatchedEntities(plan({ sunlight: true })).has("sun.sun")).toBe(true);
+  });
+
+  it("does not subscribe for a pinned bearing, which reads neither attribute", () => {
+    // sunBearingOf short-circuits on the config and sunlightStrengthOf returns
+    // 1, so there is nothing on sun.sun left to watch.
+    expect(
+      collectWatchedEntities(plan({ sunlight: true, sunBearing: 135 })).has("sun.sun")
+    ).toBe(false);
+    // …unless the dimming is also on, which reads the elevation regardless.
+    expect(
+      collectWatchedEntities(plan({ sunlight: true, sunBearing: 135, sunDimming: true })).has("sun.sun")
+    ).toBe(true);
+  });
+
+  it("leaves a plan without sunlight exactly as it was", () => {
+    expect(collectWatchedEntities(plan({})).has("sun.sun")).toBe(false);
+    expect(collectWatchedEntities(plan({ sunDimming: true })).has("sun.sun")).toBe(true);
+  });
+
+  // The assertion that pins the bug, in the same shape as #145's above: HA
+  // carries unchanged entities across by identity, so the beams only move if
+  // sun.sun is in the watched set. Without it the plan is painted once and
+  // then frozen at whatever the sun was doing when the card loaded.
+  it("re-renders as the sun moves across the sky", () => {
+    const watched = collectWatchedEntities(plan({ sunlight: true }));
+    const lamp = { state: "on" };
+    const morning = {
+      states: {
+        "sun.sun": { state: "above_horizon", attributes: { azimuth: 100, elevation: 30 } },
+        "light.a": lamp,
+      },
+    } as unknown as RenderHass;
+    const noon = {
+      states: {
+        // Same object for the lamp — only the sun moved.
+        "sun.sun": { state: "above_horizon", attributes: { azimuth: 180, elevation: 60 } },
+        "light.a": lamp,
+      },
+    } as unknown as RenderHass;
+    expect(hassRenderInputsChanged(morning, noon, watched)).toBe(true);
+    // And the picture really would have changed, so the re-render is earned.
+    expect(sunLightDirection({ sunlight: true } as FloorplanCardConfig, 100)).not.toEqual(
+      sunLightDirection({ sunlight: true } as FloorplanCardConfig, 180)
+    );
+  });
+});
+
+describe("a dead sun.sun falls back rather than pointing north", () => {
+  const cfg = (extra = {}) =>
+    ({ type: "t", width: 1000, height: 1000, ...extra }) as FloorplanCardConfig;
+  // The elevation had this guard from the start; the azimuth did not, and its
+  // failure is the quieter one: Number(null) is 0, 0 is due north, and a plan
+  // lit from the wrong side looks entirely deliberate.
+  it("takes the default bearing for anything that is not a reading", () => {
+    for (const dead of [undefined, null, "", "   ", false, "unavailable", "unknown", NaN, {}]) {
+      expect(sunBearingOf(cfg(), dead)).toBe(DEFAULT_SUN_BEARING);
+    }
+  });
+
+  it("still takes a real reading, including the ones that look falsy", () => {
+    expect(sunBearingOf(cfg(), 0)).toBe(0); // due north, an actual bearing
+    expect(sunBearingOf(cfg(), "0")).toBe(0);
+    expect(sunBearingOf(cfg(), 212.5)).toBe(212.5);
+    expect(sunBearingOf(cfg(), "212.5")).toBe(212.5);
+  });
+
+  it("and the two attributes now fail the same way as each other", () => {
+    for (const dead of [null, "", false, "unavailable"]) {
+      expect(sunBearingOf(cfg(), dead)).toBe(DEFAULT_SUN_BEARING);
+      expect(sunlightStrength(dead)).toBe(1);
+    }
   });
 });
 
