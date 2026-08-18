@@ -4,12 +4,17 @@
 [![release][release-badge]][release-url]
 [![license][license-badge]](LICENSE)
 
+<a href="https://www.buymeacoffee.com/nicosandller" target="_blank">
+  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important; width: 217px !important;" >
+</a>
+
+--
+
 A Home Assistant Lovelace card for building an interactive floorplan — **with a visual
 drag-and-drop editor**. Draw walls, drop doors and windows, add furniture and labels, and
 place your entities as icons, ripples or live state. Everything scales to the card and
 screen size.
 
-<a href="https://www.buymeacoffee.com/nicosandller"><img src="https://img.buymeacoffee.com/button-api/?text=Buy me a coffee&emoji=&slug=nicosandller&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" /></a>
 
 <img width="1080" height="608" alt="demo" src="https://github.com/user-attachments/assets/98abaddc-b713-492f-be85-ca5f778f3779" />
 
