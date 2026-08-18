@@ -9,6 +9,8 @@ drag-and-drop editor**. Draw walls, drop doors and windows, add furniture and la
 place your entities as icons, ripples or live state. Everything scales to the card and
 screen size.
 
+<a href="https://www.buymeacoffee.com/nicosandller"><img src="https://img.buymeacoffee.com/button-api/?text=Buy me a coffee&emoji=&slug=nicosandller&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" /></a>
+
 <img width="1080" height="608" alt="demo" src="https://github.com/user-attachments/assets/98abaddc-b713-492f-be85-ca5f778f3779" />
 
 ## What you can end up with
