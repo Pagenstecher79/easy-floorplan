@@ -1085,7 +1085,8 @@ export class FloorplanCard extends LitElement {
                 (it) =>
                   !itemHiddenWhenInactive(
                     it,
-                    it.entity ? this.hass?.states[it.entity]?.state : undefined
+                    it.entity ? this.hass?.states[it.entity]?.state : undefined,
+                    this.hass
                   )
               ),
               (it, i) => it.id || i,
