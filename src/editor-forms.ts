@@ -730,8 +730,6 @@ export function itemForm(
       helper: "From the second entity, or this entity if none",
       selector: { attribute: { entity_id: it.secondaryEntity || it.entity } },
     },
-    // The icon is *not* here: it sits by the state rules that can override it
-    // (issue #127), rendered by the editor next to them.
     { name: "name", label: "Name", selector: { text: {} } },
     {
       name: "size",
@@ -753,13 +751,7 @@ export function itemForm(
       ),
     },
   ];
-  // Which entity the value comes from (issue #136) — offered only where it is
-  // a real question: the badge has to be showing a value, and the device has
-  // to have a second entity to choose between. Most devices never see this.
-  //
-  // The options name the entities rather than offering an "Automatic", the
-  // precedent from #127's dropdown above: "auto" is a fact about the config
-  // format, not about what the user is looking at.
+
   if (badgeModeOf(it) === "value" && it.secondaryEntity) {
     fields.push({
       name: "badgeEntity",
@@ -771,15 +763,11 @@ export function itemForm(
       ),
     });
   }
-  // A presence device can ring the spot it watches (issue #127) — the same
-  // shape of option as "Cast light" below, offered only where it means
-  // something. A ring on a thermostat says "someone is here", which is a lie.
+
   if (presence) {
     fields.push({
       name: "ripple",
       label: "Ripple",
-      // "Presence detected" rather than "the sensor is on": this is offered to
-      // a device_tracker and a person too, and neither of those is a sensor.
       helper: "Draws a pulsing ring while presence is detected here",
       selector: { boolean: {} },
     });
@@ -793,8 +781,7 @@ export function itemForm(
       });
     }
   }
-  // A light can cast a pool of light onto the plan from where it sits (issue
-  // #6). Offered only for lights, since nothing else has a color to cast.
+
   if (it.kind === "light" || it.entity?.startsWith("light.")) {
     fields.push({
       name: "glow",
@@ -818,6 +805,7 @@ export function itemForm(
       );
     }
   }
+
   fields.push(
     {
       name: "hideWhenInactive",
@@ -825,6 +813,60 @@ export function itemForm(
       helper: "Hide on the card while the entity is off/idle (still editable here)",
       selector: { boolean: {} },
     },
+    {
+      name: "enableHideByEntity",
+      label: "Hide by condition",
+      selector: { boolean: {} }
+    }
+  );
+
+  // New logic for conditional hiding
+  if (it.enableHideByEntity) {
+    fields.push(
+      {
+        name: "hideEntity",
+        label: "Evaluation Entity (Optional)",
+        helper: "Leave empty to use the main object entity",
+        selector: { entity: {} }
+      },
+      {
+        name: "hideMode",
+        label: "Condition Type",
+        selector: { select: { options: [{value: "state", label: "State Match"}, {value: "threshold", label: "Numeric Threshold"}] } }
+      }
+    );
+
+    if (it.hideMode === "threshold") {
+      fields.push(
+        {
+          name: "hideOperator",
+          label: "Operator",
+          selector: { select: { mode: "dropdown", options: [{value: "<", label: "<"}, {value: "<=", label: "<="}, {value: "==", label: "=="}, {value: ">=", label: ">="}, {value: ">", label: ">"}] } }
+        },
+        {
+          name: "hideThreshold",
+          label: "Threshold Value",
+          selector: { number: { mode: "box", step: "any" } }
+        }
+      );
+    } else {
+      fields.push({
+        name: "hideState",
+        label: "Hide State",
+        helper: "Select the state that triggers the hide action",
+        selector: { state: { entity_id: it.hideEntity || it.entity } }
+      });
+    }
+
+    fields.push({
+      name: "hideInvert",
+      label: "Invert condition",
+      helper: "Hide when condition is NOT met",
+      selector: { boolean: {} }
+    });
+  }
+
+  fields.push(
     { name: "showState", label: "Show state", selector: { boolean: {} } },
     {
       name: "showName",
@@ -833,7 +875,7 @@ export function itemForm(
       selector: { boolean: {} },
     }
   );
-  // Label size only matters while a label line renders.
+
   if (it.showName || (it.showState ?? it.kind === "sensor")) {
     fields.push({
       name: "labelSize",
@@ -841,6 +883,7 @@ export function itemForm(
       selector: { number: { min: 8, max: 40, step: 1, mode: "slider", unit_of_measurement: "px" } },
     });
   }
+
   fields.push(
     {
       name: "tap_action",
@@ -854,6 +897,7 @@ export function itemForm(
       selector: { ui_action: { default_action: "none" } },
     }
   );
+
   return {
     fields,
     data: {
@@ -865,9 +909,6 @@ export function itemForm(
       size: it.size ?? DEFAULT_ITEM_SIZE,
       angle: it.angle ?? 0,
       badgeMode: badgeModeOf(it),
-      // The stored choice, else the entity the badge is *actually* reading —
-      // never a bare "primary" default, which would contradict the canvas for
-      // every device relying on the fallback. See {@link BadgeSourceInfo}.
       badgeEntity: it.badgeEntity ?? badgeSource?.source ?? "primary",
       ripple,
       rippleSize: it.rippleSize ?? DEFAULT_RIPPLE_SIZE,
@@ -875,6 +916,16 @@ export function itemForm(
       glowRadius: it.glowRadius ?? DEFAULT_GLOW_RADIUS,
       glowColor: it.glowColor ?? "",
       hideWhenInactive: it.hideWhenInactive ?? false,
+      
+      // New data keys
+      enableHideByEntity: it.enableHideByEntity ?? false,
+      hideEntity: it.hideEntity,
+      hideMode: it.hideMode ?? "state",
+      hideState: it.hideState,
+      hideOperator: it.hideOperator ?? ">",
+      hideThreshold: it.hideThreshold,
+      hideInvert: it.hideInvert ?? false,
+      
       showState: it.showState ?? false,
       showName: it.showName ?? false,
       labelSize: it.labelSize ?? DEFAULT_LABEL_SIZE,
@@ -882,9 +933,6 @@ export function itemForm(
       hold_action: it.hold_action,
       double_tap_action: it.double_tap_action,
     },
-    // "Badge shows" and "Ripple" are the editor's spelling of three config
-    // keys (issue #127) — expand them back. Either control alone is a complete
-    // statement about both, so the untouched one is read off the item.
     toPatch: (patch) => {
       if (!("badgeMode" in patch) && !("ripple" in patch)) return patch;
       const { badgeMode, ripple: ring, ...rest } = patch;
