@@ -3220,8 +3220,34 @@ export function sunlightStrengthOf(
 // precisely its gap translated the same way. No ray casting, no per-pixel
 // work — two polygon families and a mask.
 
-/** How far light reaches into the plan, as a fraction of its shorter side. */
-export const SUN_REACH = 0.55;
+/**
+ * How far light reaches into the plan, as a fraction of its shorter side, for
+ * a sun at {@link SUN_REACH_REF} degrees.
+ *
+ * A patch of sun on a floor is bounded by the room, not by the drawing: it is
+ * about as deep as the opening is tall divided by the tangent of the sun's
+ * angle, which for an ordinary window and an ordinary sun is a stripe a few
+ * paces long — not one that crosses the whole house (issue #185). This used
+ * to be 0.55 of the plan and flat all the way, so a single window lit every
+ * room in line with it at exactly the brightness it lit the first.
+ */
+export const SUN_REACH = 0.34;
+/**
+ * The sun angle {@link SUN_REACH} describes — a mid-morning sun. Reach is
+ * scaled from here by {@link sunReachScale}.
+ */
+export const SUN_REACH_REF = 30;
+/**
+ * How much wider a beam grows over its full reach, as a multiple of the gap
+ * it came through.
+ *
+ * Light scatters. A beam drawn as the gap swept along the sun is exact for a
+ * perfect ray, and reads as a cut-out: hard parallel edges the whole way,
+ * which is the other half of what makes issue #185's screenshots look wrong.
+ * Widening as it travels is what a real patch does, and it costs one number
+ * rather than a blur filter over the whole canvas.
+ */
+export const SUN_SPREAD = 0.9;
 /** How dark the plan goes where no sunlight lands. */
 export const SUN_SHADE = 0.16;
 /** How strongly the sunlit patches are tinted. */
@@ -3233,6 +3259,34 @@ export const SUN_PATCH_OPACITY = 0.3;
  */
 export const SUN_LIGHT_COLOR = "var(--fp-skin-sunlight, #ffd9a0)";
 export const SUN_SHADE_COLOR = "var(--fp-skin-sunshade, #000)";
+
+/**
+ * How far the light reaches for a sun at `elevation`, as a multiple of the
+ * base reach.
+ *
+ * The steeper the sun, the shorter the patch — that is the whole reason a
+ * midday sun does not lay a stripe across the house, and it is the reason
+ * issue #185 gives for the beams looking wrong. Depth goes as `1/tan(e)`, so
+ * this is that ratio against {@link SUN_REACH_REF}: a 30° sun reaches exactly
+ * the base, a 60° one a little over half as far, a 10° evening sun nearly
+ * twice as far and raking.
+ *
+ * Clamped at both ends. Near the horizon the tangent runs away to infinity
+ * and would throw a beam of unbounded length for a sun that is barely up;
+ * near the zenith it collapses to nothing, and a patch that vanishes entirely
+ * at noon reads as a bug rather than as physics.
+ *
+ * An unreadable elevation returns 1 — the base reach — for the same reason
+ * {@link sunlightStrength} returns full strength: an outage should leave the
+ * plan looking ordinary.
+ */
+export function sunReachScale(elevation: unknown): number {
+  const e = liveSunAttribute(elevation);
+  if (e === undefined) return 1;
+  const rad = (deg: number) => (deg * Math.PI) / 180;
+  const scale = Math.tan(rad(SUN_REACH_REF)) / Math.tan(rad(Math.max(1, Math.min(89, e))));
+  return Math.max(0.45, Math.min(1.9, scale));
+}
 
 /**
  * **How much** of an opening lets sunlight in, 0..1 of its gap.
@@ -3413,14 +3467,31 @@ export function sunBeamPolygon(
    * beam and the shade it sits in line up exactly instead of leaking.
    */
   clear = 1,
+  /**
+   * How much wider the far end is than the gap, as a multiple of the gap —
+   * see {@link SUN_SPREAD}. 0 keeps the exact parallel-ray parallelogram.
+   */
+  spread = 0,
 ): AreaPoint[] {
   const [a, b] = openingEnds(o);
   const f = Math.max(0, Math.min(1, clear));
-  if (f >= 1) return sweep(a, b, dir, reach);
   const mx = (a.x + b.x) / 2;
   const my = (a.y + b.y) / 2;
-  const lerp = (p: AreaPoint) => ({ x: mx + (p.x - mx) * f, y: my + (p.y - my) * f });
-  return sweep(lerp(a), lerp(b), dir, reach);
+  // Scale about the opening's own centre, so the clear part of a half-open
+  // door sits where the wall left the gap.
+  const at = (p: AreaPoint, k: number) => ({ x: mx + (p.x - mx) * k, y: my + (p.y - my) * k });
+  const near = [at(a, f), at(b, f)];
+  if (spread <= 0) return sweep(near[0]!, near[1]!, dir, reach);
+  // The far edge is the same gap, widened — light scatters, so the patch is a
+  // fan rather than a stripe cut with a knife. Widened about the centre line,
+  // which keeps the fan symmetric about the direction the light travels.
+  const far = [at(a, f * (1 + spread)), at(b, f * (1 + spread))];
+  return [
+    near[0]!,
+    near[1]!,
+    { x: far[1]!.x + dir.x * reach, y: far[1]!.y + dir.y * reach },
+    { x: far[0]!.x + dir.x * reach, y: far[0]!.y + dir.y * reach },
+  ];
 }
 
 /**
@@ -3473,6 +3544,14 @@ export interface SunlightOptions {
    * is no layer at all rather than a transparent one.
    */
   strength?: number;
+  /**
+   * How far the light carries, as a fraction of the plan's shorter side.
+   * Defaults to {@link SUN_REACH}; the card scales it by the sun's height
+   * (see {@link sunReachScale}).
+   */
+  reach?: number;
+  /** How much the beam fans over that distance — {@link SUN_SPREAD}. */
+  spread?: number;
   light?: string;
   /**
    * `null` draws the light without darkening anything else — the patches
@@ -3491,7 +3570,7 @@ export function renderSunlight(
   id: string,
   opts: SunlightOptions,
 ): SVGTemplateResult | typeof nothing {
-  const { dir, openAmount, shutterOpen, strength = 1 } = opts;
+  const { dir, openAmount, shutterOpen, strength = 1, spread = SUN_SPREAD } = opts;
   const paint = {
     light: opts.light ?? SUN_LIGHT_COLOR,
     // `?? ` would swallow the explicit null that means "no shade at all".
@@ -3500,7 +3579,7 @@ export function renderSunlight(
   // Below the horizon there is nothing to let in, so there is nothing to draw
   // — not a layer at zero opacity, which would still cost every polygon.
   if (strength <= 0) return nothing;
-  const reach = Math.min(width, height) * SUN_REACH;
+  const reach = Math.min(width, height) * (opts.reach ?? SUN_REACH);
   // Doorways already subtracted, so an open door casts no shadow across the
   // room behind it. Windows too — glass casts none whatever its sash is doing.
   // How much of each gap is clear, asked once and used for both families —
@@ -3519,7 +3598,18 @@ export function renderSunlight(
   // shaded façade threw a patch out of the house (issues #177 / #178).
   const lit = openings.filter((o) => clear(o) > 0 && sunReachesOpening(o, walls, dir));
   if (!lit.length) return nothing;
-  const beams = lit.map((o) => polyPoints(sunBeamPolygon(o, dir, reach, clear(o))));
+  // Each beam keeps the opening it came from: the fade runs from that
+  // opening's own centre along the light, so every patch dims over its own
+  // length rather than sharing one gradient across the plan.
+  const beams = lit.map((o, i) => ({
+    points: polyPoints(sunBeamPolygon(o, dir, reach, clear(o), spread)),
+    x1: o.x,
+    y1: o.y,
+    x2: o.x + dir.x * reach,
+    y2: o.y + dir.y * reach,
+    lightId: `${id}-b${i}`,
+    shadeId: `${id}-s${i}`,
+  }));
   const shadows = shadowPolys.map(polyPoints);
   const pad = WALL_THICKNESS;
   const shadeId = `${id}-shade`;
@@ -3539,6 +3629,18 @@ export function renderSunlight(
   // without this the light leaks along both edges of every wall it passes.
   const shadowPoly = (p: string, paint: string) =>
     svg`<polygon points=${p} fill=${paint} stroke=${paint} stroke-width=${WALL_THICKNESS} />`;
+  // A patch is brightest where it comes in and gone by the end of its reach —
+  // the half of issue #185 that geometry alone cannot fix, since a fanned
+  // beam at flat opacity still ends in a straight edge across the room. The
+  // middle stop keeps it from reading as a linear ramp, which looks like a
+  // gradient rather than like light.
+  const fade = (gid: string, x1: number, y1: number, x2: number, y2: number, color: string) =>
+    svg`<linearGradient id=${gid} gradientUnits="userSpaceOnUse"
+                        x1=${x1} y1=${y1} x2=${x2} y2=${y2}>
+          <stop offset="0" stop-color=${color} stop-opacity="1" />
+          <stop offset="0.45" stop-color=${color} stop-opacity="0.55" />
+          <stop offset="1" stop-color=${color} stop-opacity="0" />
+        </linearGradient>`;
   // Only built when it is going to be used: the shade mask is the one that
   // needs every beam *and* every shadow, so declining the shade halves the
   // shapes this emits rather than hiding them behind an opacity of zero.
@@ -3550,7 +3652,8 @@ export function renderSunlight(
            back wherever a wall stands in one. The order is the whole logic. -->
       <mask id=${shadeId} maskUnits="userSpaceOnUse" x=${x} y=${y} width=${w} height=${h}>
         ${cover("#fff")}
-        ${beams.map((p) => svg`<polygon points=${p} fill="#000" />`)}
+        ${beams.map((b) => fade(b.shadeId, b.x1, b.y1, b.x2, b.y2, "#000"))}
+        ${beams.map((b) => svg`<polygon points=${b.points} fill=${`url(#${b.shadeId})`} />`)}
         ${shadows.map((p) => shadowPoly(p, "#fff"))}
       </mask>`;
   return svg`
@@ -3571,10 +3674,13 @@ export function renderSunlight(
             opacity=${SUN_SHADE * strength} mask=${`url(#${shadeId})`} />`
       }
       <g mask=${`url(#${shadowId})`} opacity=${SUN_PATCH_OPACITY * strength}>
+        ${beams.map((b) =>
+          fade(b.lightId, b.x1, b.y1, b.x2, b.y2, cssColorOr(paint.light, SUN_LIGHT_COLOR))
+        )}
         ${beams.map(
-          (p) =>
-            svg`<polygon class="fp-sunbeam" points=${p}
-                        style=${`fill:${cssColorOr(paint.light, SUN_LIGHT_COLOR)};`} />`
+          (b) =>
+            svg`<polygon class="fp-sunbeam" points=${b.points}
+                        fill=${`url(#${b.lightId})`} />`
         )}
       </g>
     </g>`;

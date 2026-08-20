@@ -41,6 +41,8 @@ import {
   SUN_ELEVATION_FULL,
   sunShadowPolygon,
   SUN_REACH,
+  SUN_REACH_REF,
+  sunReachScale,
   DEFAULT_SUN_BEARING,
   shutterAmount,
   shutterStyleOf,
@@ -2760,6 +2762,61 @@ describe("sunlight through the openings", () => {
   it("reaches across a fair part of the plan, but not forever", () => {
     expect(SUN_REACH).toBeGreaterThan(0);
     expect(SUN_REACH).toBeLessThanOrEqual(1);
+  });
+
+  it("stops well short of crossing the plan (issue #185)", () => {
+    // The complaint was a stripe that ran the length of the house at the
+    // brightness it started with. Half the plan's short side is the point at
+    // which a patch stops reading as a patch and starts reading as a corridor.
+    expect(SUN_REACH).toBeLessThan(0.5);
+  });
+
+  it("fans as it travels, symmetrically about the light", () => {
+    const o = win();
+    const straight = sunBeamPolygon(o, down, 200, 1, 0);
+    const fanned = sunBeamPolygon(o, down, 200, 1, 1);
+    const widthOf = (p: { x: number }[], i: number, j: number) => Math.abs(p[j]!.x - p[i]!.x);
+    // Same mouth: it still leaves the gap it came through.
+    expect(widthOf(fanned, 0, 1)).toBeCloseTo(widthOf(straight, 0, 1));
+    // …and a wider far edge, which is what scattering looks like.
+    expect(widthOf(fanned, 3, 2)).toBeCloseTo(widthOf(straight, 3, 2) * 2);
+    // Symmetric about the opening's centre, so the fan follows the light
+    // rather than leaning to one side of it.
+    const mid = (o.x * 2) / 2;
+    expect((fanned[2]!.x + fanned[3]!.x) / 2).toBeCloseTo(mid);
+    // It reaches exactly as far as before — wider, not longer.
+    expect(fanned[3]!.y - fanned[0]!.y).toBeCloseTo(straight[3]!.y - straight[0]!.y);
+    // Spread defaults to off, so every existing caller gets the old shape.
+    expect(sunBeamPolygon(o, down, 200, 1)).toEqual(straight);
+  });
+
+  it("shortens the patch as the sun climbs, and lengthens it at dusk", () => {
+    // A patch of sun is as deep as the opening is tall over tan(elevation) —
+    // which is why a midday sun does not lay a stripe across the house.
+    expect(sunReachScale(SUN_REACH_REF)).toBeCloseTo(1);
+    expect(sunReachScale(60)).toBeLessThan(1);
+    expect(sunReachScale(15)).toBeGreaterThan(1);
+    expect(sunReachScale(60)).toBeLessThan(sunReachScale(45));
+    expect(sunReachScale(45)).toBeLessThan(sunReachScale(20));
+  });
+
+  it("clamps the reach scale at both ends", () => {
+    // Near the horizon tan runs away and would throw a beam of unbounded
+    // length; near the zenith it collapses and the patch would vanish at noon.
+    expect(sunReachScale(0.2)).toBeLessThanOrEqual(1.9);
+    expect(sunReachScale(89.9)).toBeGreaterThanOrEqual(0.45);
+    for (const e of [0.1, 1, 5, 30, 60, 89, 90]) {
+      expect(sunReachScale(e)).toBeGreaterThan(0);
+      expect(Number.isFinite(sunReachScale(e))).toBe(true);
+    }
+  });
+
+  it("falls back to the plain reach on an unreadable sun", () => {
+    // Same allowlist and the same fail-ordinary rule as sunlightStrength.
+    for (const dead of [undefined, null, "", false, "unavailable", NaN]) {
+      expect(sunReachScale(dead)).toBe(1);
+    }
+    expect(sunReachScale("45")).toBeCloseTo(sunReachScale(45));
   });
 });
 

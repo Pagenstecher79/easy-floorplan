@@ -1287,6 +1287,17 @@ export interface FloorplanCardConfig extends LovelaceCardConfig {
    */
   sunShadeColor?: string;
   /**
+   * How far sunlight carries from an opening, as a fraction of the plan's
+   * shorter side. Default {@link SUN_REACH} (0.34).
+   *
+   * The light fades out over this distance rather than stopping at it, and
+   * while the plan follows the real sun it is shortened as the sun climbs —
+   * a midday sun lays a short patch, an evening one rakes across the room
+   * (issue #185). Raise it for a plan whose rooms read as too dark, lower it
+   * for one where the patches still reach further than they should.
+   */
+  sunReach?: number;
+  /**
    * What a device does when you press it (issue #134). Tapping used to change
    * nothing on screen until the entity itself came back — which on a cover or
    * a slow bulb is long enough to wonder whether the tap registered at all.

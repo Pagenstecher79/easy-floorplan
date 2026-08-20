@@ -369,6 +369,7 @@ The editor writes this config for you; manual editing is optional.
 | `sunShade`   | boolean  | `true`             | Darken everywhere the light does not reach. Off draws the patches alone, leaving the plan as bright as it was. |
 | `sunlightColor` | string | warm white        | Colour of the light the openings let in. |
 | `sunShadeColor` | string | black             | Colour of that shade — a blue reads as cold north light, a warm grey as dusk. |
+| `sunReach`   | number   | `0.34`             | How far light carries from an opening, as a fraction of the plan's shorter side. It fades out over that distance rather than stopping at it, and shortens as the sun climbs. |
 | `skin`       | string   | `default`          | Built-in look for the whole plan: `default`, `odnetnin`, `pastel` or `tron`. See [Skins](#skins). |
 | `pressEffect`| string   | `scale`            | Feedback when a device is pressed: `scale`, `ripple`, `flash` or `none`. Only devices that actually do something respond. See [Press feedback](#press-feedback). |
 | `offlineStyle`| string  | `dim`              | How a device whose entity is **offline** is drawn: `dim`, `strike` (dimmed with a diagonal through the badge) or `none`. See [Offline devices](#offline-devices). |
@@ -948,6 +949,14 @@ gap moved the same way. So:
   throws a narrow patch, not the one it would throw standing wide open. Sliding styles
   count the gap they actually clear rather than the distance a leaf travels, so a
   converging pair reads the same here as it draws;
+- a patch **fades out as it travels**, and fans a little as it goes: light scatters, and a
+  beam drawn as a hard-edged stripe at flat brightness reads as a cut-out rather than as
+  light. It reaches `sunReach` of the plan's shorter side and is gone by the end of it,
+  instead of crossing the whole house at the brightness it started with;
+- while the plan follows the real sun, that reach **shortens as the sun climbs** — a patch
+  is about as deep as the opening is tall over the tangent of the sun's angle, so a midday
+  sun lays a short patch at your feet and an evening one rakes across the room. A pinned
+  `sunBearing` states a picture rather than reading the sky, so it keeps the plain reach;
 - **walls cast the shade behind them**, cutting the patches — and the part of a door that
   is still shut casts shade like the wall it stands in, while an open doorway casts none,
   the same rule the lamps already follow;

@@ -95,6 +95,9 @@ import {
   renderSunlight,
   sunLightDirection,
   sunlightStrengthOf,
+  sunReachScale,
+  sunIsPinned,
+  SUN_REACH,
   SUN_LIGHT_COLOR,
   SUN_SHADE_COLOR,
   hassRenderInputsChanged,
@@ -952,6 +955,17 @@ export class FloorplanCard extends LitElement {
                         c,
                         this.hass?.states["sun.sun"]?.attributes?.elevation
                       ),
+                      // How far a patch carries, shortened as the sun climbs
+                      // (issue #185): a midday sun drops its light almost
+                      // straight down and lays a short patch, an evening one
+                      // rakes it across the room. A pinned bearing states a
+                      // picture rather than reading the sky, so it keeps the
+                      // plain reach — same rule as the strength above.
+                      reach:
+                        (c.sunReach ?? SUN_REACH) *
+                        (sunIsPinned(c)
+                          ? 1
+                          : sunReachScale(this.hass?.states["sun.sun"]?.attributes?.elevation)),
                       // The gap each style actually clears, both leaves
                       // included — the same reading the lamps get above, and
                       // for the same reason (#145): `entity` alone leaves a
