@@ -58,6 +58,7 @@ import {
   sliderStyleOf,
   shutterStyleOf,
   DEFAULT_SUN_BEARING,
+  SUN_REACH,
   openingSash,
   defaultSash,
   openingIsGlazed,
@@ -1593,6 +1594,15 @@ export function projectReliefForm(c: FloorplanCardConfig): FormSpec {
         selector: { boolean: {} },
       },
       {
+        name: "sunReach",
+        label: "Reach",
+        helper:
+          "How far a patch carries before it fades out, as a share of the plan's shorter side",
+        selector: {
+          number: { min: 0.05, max: 1, step: 0.01, mode: "slider" },
+        },
+      },
+      {
         name: "sunFollows",
         label: "Follow the real sun",
         helper: "Swings through the day and goes out at night. Off keeps the light where you put it, always on",
@@ -1618,6 +1628,7 @@ export function projectReliefForm(c: FloorplanCardConfig): FormSpec {
       sunlight: c.sunlight ?? false,
       sunShade: c.sunShade ?? true,
       north: c.north ?? 0,
+      sunReach: c.sunReach ?? SUN_REACH,
       sunFollows: typeof c.sunBearing !== "number",
       sunBearing: c.sunBearing ?? DEFAULT_SUN_BEARING,
     },
@@ -1635,6 +1646,7 @@ export function projectReliefForm(c: FloorplanCardConfig): FormSpec {
           sunlight: undefined,
           north: undefined,
           sunBearing: undefined,
+          sunReach: undefined,
           sunShade: undefined,
           sunlightColor: undefined,
           sunShadeColor: undefined,
@@ -1648,6 +1660,8 @@ export function projectReliefForm(c: FloorplanCardConfig): FormSpec {
       }
       // The defaults stay out of the YAML — shading is on unless declined.
       if ("north" in out && !out.north) out.north = undefined;
+      // The default stays out of the YAML, like every other default here.
+      if ("sunReach" in out && out.sunReach === SUN_REACH) out.sunReach = undefined;
       if ("sunShade" in out && out.sunShade) out.sunShade = undefined;
       return out;
     },
