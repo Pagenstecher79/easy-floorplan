@@ -32,6 +32,7 @@ screen size.
 <img width="195" height="278" alt="light blend" src="https://github.com/user-attachments/assets/23104587-687b-4c9a-83e8-e83c3d5eb6eb" />
 <img width="240" height="358" alt="conditionals" src="https://github.com/user-attachments/assets/11d359b6-de8c-483c-8763-105ddf7d915b" />
 
+- (${\color{red}NEW!}$) **Many readings, one device** — a sensor that reports temperature, humidity and pressure needs one badge, not three. Add entities one at a time; they show whether or not the device's own state does, so a smart plug can label itself `1.2 kW · 84 · 5 min ago` while the badge colour carries the on/off. The label can sit below, left or right of the badge.
 - **Animated doors & windows** — bind a contact `binary_sensor`, `cover` or `lock` and openings swing, slide or roll with their real state, partial positions included. A lock reads `unlocked` as open, so a door with no contact sensor still animates.
   - (${\color{red}NEW!}$) **A sensor per leaf** — anything with two leaves takes a second contact and draws them independently: a casement window with one sash open and one shut, a double door ajar on one side, a pair of shutters with one folded back.
 - (${\color{red}NEW!}$) **Offline devices read as offline** — an entity that is unavailable, unknown, or gone from Home Assistant is dimmed (or crossed out), instead of looking exactly like a device someone switched off.
@@ -102,9 +103,14 @@ then pick the entity in the **Element** section below the canvas.
   both read `Name · state`. **Label size** sets the font size. The editor canvas draws
   the same line the card will, so turning one on is visible straight away; a device
   showing neither still gets a dimmed editor-only label so you can tell it apart.
-- **Two readings in one** — add a **Second entity** to render e.g. `21.5 °C · 45%`. Or set
-  **Attribute** / **2nd attribute** to read attributes instead of states, so a single
-  climate entity shows its temperature and humidity.
+- **Other entities** — **+ Add entity**, right under the first one, appends as many as the
+  device has: `21.5 °C · 45% · 1013 hPa`. Each row picks an entity, an attribute, or both
+  — leave the entity empty and it reads that attribute off this device, so one climate
+  entity can show four of its own numbers. See
+  [More readings per device](#more-readings-per-device).
+- **Label position** — **Below** the badge (the default), or hung off its **left** or
+  **right**. A reading under a badge grows in both directions and meets whatever sits
+  beside it; hung off one side it grows one way only.
 - **Badge shows** — one dropdown for what the device draws: *Icon* — **still**,
   **spinning** or **pulsing** — its *Value*, or *Nothing* (label only). **Value** draws
   the reading inside the badge — a thermostat reads `21°` in the circle your state rules
@@ -367,7 +373,7 @@ The editor writes this config for you; manual editing is optional.
 | `pressEffect`| string   | `scale`            | Feedback when a device is pressed: `scale`, `ripple`, `flash` or `none`. Only devices that actually do something respond. See [Press feedback](#press-feedback). |
 | `offlineStyle`| string  | `dim`              | How a device whose entity is **offline** is drawn: `dim`, `strike` (dimmed with a diagonal through the badge) or `none`. See [Offline devices](#offline-devices). |
 | `compactHeader`| boolean | `false`           | Draw the title inside the plan and the floor buttons in a row, instead of spending a card header row on them. See [Compact header](#compact-header). |
-| `overlayScale`| string  | `fixed`            | How badges, labels, room names and text are sized: `fixed` = screen pixels, `plan` = canvas units so they scale with the drawing. See [Overlay scale](#overlay-scale). |
+| `overlayScale`| string  | `plan`             | How badges, labels, room names and text are sized: `plan` = canvas units so they scale with the drawing, `fixed` = screen pixels. See [Overlay scale](#overlay-scale). |
 | `background` | string   | skin / card bg     | Canvas background color (CSS / hex). Overrides the skin's paper. |
 | `floors`     | Floor[]  | —                  | Per-floor element groups (see [Floor](#floor)).   |
 | `defaultFloor`| string  | first floor        | Id of the floor shown first.                 |
@@ -455,9 +461,9 @@ distorted anyway.
 | ------------- | -------------------------------------- | ------------ | ------------------------------------------------------ |
 | `id`          | string                                 | —            | Unique id.                                             |
 | `entity`      | string                                 | —            | Entity to bind. Without one the device is a static badge. |
-| `secondaryEntity` | string                             | —            | Second entity shown alongside (e.g. humidity).         |
+| `secondaryEntity` | string                             | —            | **Legacy** spelling of the first `readings` row. Still read — it goes at the head of the list — but it has no editor field, and editing a device's readings rewrites it. Use `readings`. |
 | `attribute`   | string                                 | —            | Show this attribute instead of the state (e.g. `current_temperature`). |
-| `secondaryAttribute` | string                          | —            | Attribute for the 2nd reading — from `secondaryEntity`, or from `entity` when none. |
+| `secondaryAttribute` | string                          | —            | **Legacy**, as above: the attribute for that first row — from `secondaryEntity`, or from `entity` when none. |
 | `stateColor`  | rule[]                                 | —            | Badge/label color rules, regardless of on/off; beats `activeColor`. Each is `{ above? , state?, color, icon? }` — an exact `state` beats a threshold, the highest matching `above` wins, neither is the default, and a matching `icon` beats the device's own. |
 | `x`, `y`      | number                                 | —            | Position.                                              |
 | `kind`        | light/switch/sensor/binary_sensor/climate/cover/media_player/fan/camera/lock/humidifier/vacuum/generic | inferred | Used for the default icon. |
@@ -474,11 +480,13 @@ distorted anyway.
 | `glowRadius`  | number                                 | `140`        | Radius of the cast pool at full brightness, in canvas units. A dimmer lamp casts a proportionally smaller pool, down to half this. |
 | `glowColor`   | string                                 | `#ffd9a0`    | Pool color for a bulb that can't report one; color-capable lights use their own. |
 | `badgeContent` | `icon` \| `value` \| `none`           | `icon`       | What the badge holds. `value` draws the reading inside it, falling back to the icon when there is no number; `none` leaves the label alone. |
-| `badgeEntity` | `primary` \| `secondary`               | automatic    | Which entity a `value` badge reads. Unset picks the first with a number to show; set, only that entity is read. |
+| `badgeEntity` | `primary` \| number                    | automatic    | Which reading a `value` badge shows: the device's own entity, or an index into `readings`. Unset picks the first with a number; set, only that one is read (an index past the end shows the icon). `secondary` is accepted as the legacy spelling of `0`. |
 | `showIcon`    | boolean                                | `true`       | **Deprecated** — use `badgeContent`. Honoured only when it is unset (`false` = `none`). |
 | `hideWhenInactive` | boolean                           | `false`      | Hide on the card while the entity is inactive. Always shown, dimmed, in the editor. |
-| `showState`   | boolean                                | sensors only | Show the entity state in the label line.               |
+| `showState`   | boolean                                | sensors only | Show the entity state in the label line. Governs this device's **own** state only — `readings` show regardless. |
 | `showName`    | boolean                                | `false`      | Show the device's name in the label line (`Name · state` when combined). |
+| `readings`    | `{ entity?, attribute? }[]`            | —            | Everything this device reads beyond its own state — a sensor's humidity and pressure, a plug's power, link quality and battery. Shown whether or not `showState` is. See [More readings per device](#more-readings-per-device). |
+| `labelPosition` | `below` \| `left` \| `right`         | `below`      | Where the label sits relative to the badge. |
 | `labelSize`   | number                                 | `12`         | Label line font size (px).                             |
 | `tap_action`  | ActionConfig                           | per domain   | Standard Lovelace action. By default `light`, `switch`, `fan` and `input_boolean` toggle and everything else — covers included — opens more-info. |
 | `hold_action` / `double_tap_action` | ActionConfig         | —            | Optional extra gestures.                               |
@@ -631,7 +639,8 @@ animated inside a rectangular tracked area:
 - `points` — `{ x, y }` vertices in drawing order, implicitly closed last-to-first.
 - `name` / `showName` — label centered on the polygon (`showName` defaults `true`).
   Mirrors the linked HA area's name when `haArea` is set.
-- `labelSize` — that label's size, `8`–`40`, default `14`. Px under `overlayScale: fixed`,
+- `labelSize` — that label's size, `8`–`40`, default `14`. Canvas units under the default
+  `overlayScale: plan`, px under `fixed`,
   canvas units under `plan`. Small rooms want a smaller number than the big ones beside them.
   Left unset on a `fixed` card the size stays in the stylesheet, so a card-mod rule on
   `.area-label` still wins; set it, or switch to `plan`, and it moves inline and takes over.
@@ -990,32 +999,55 @@ Skins can restyle both through `--fp-skin-sunlight` and `--fp-skin-sunshade`.
 
 The card draws in two layers. Walls, doors, furniture and room fills are SVG, scaled from
 the canvas to whatever width the card gets — draw at any size, they always fit. Badges,
-labels, room names and text are HTML on top of that, so they stay upright under
-`rotation` and can take clicks, and by default they are sized in **screen pixels**.
+labels, room names and text are HTML on top of that, so they stay upright under `rotation`
+and can take clicks.
 
-Those two agree while the card renders at roughly its canvas size. Below that they drift
-apart: a `980`-wide plan shown `500` wide draws every wall at half size while a 14px room
-name stays 14px, so names spill past their rooms and collide with the badges under them.
-Nothing in the config can fix that, because a label's px size doesn't know what scale the
-plan ended up at.
+**By default the overlay is sized in canvas units too** (`overlayScale: plan`), so both
+layers shrink together and the card looks the same at every size — a scale drawing rather
+than a drawing with fixed-size furniture on it. Every measure follows: `size` and
+`labelSize` on a device, the reading drawn inside a badge, `size` on text, an area's
+`labelSize`, and `rippleSize`. Hairlines deliberately don't — a badge border and a label's
+drop shadow are about a pixel either way, and scaling them down is how you lose them.
 
-`overlayScale: plan` sizes the overlay in **canvas units** instead, so both layers shrink
-together and the card looks the same at every size — a scale drawing rather than a drawing
-with fixed-size furniture on it. Every measure follows: `size` and `labelSize` on a
-device, the reading drawn inside a badge, `size` on text, an area's `labelSize`, and
-`rippleSize`. Hairlines deliberately don't — a badge border and a label's drop shadow
-are about a pixel either way, and scaling them down is how you lose them.
+Sizes then mean the same thing as everything else in the config: `labelSize: 14` is 14
+units on a `980`-unit-wide canvas, about 1.4 % of the card's width whatever that turns out
+to be.
+
+### `fixed`, and why it isn't the default
+
+`overlayScale: fixed` pins the overlay to **screen pixels** instead:
 
 ```yaml
 type: custom:easy-floorplan-card
 width: 980
 height: 700
-overlayScale: plan
+overlayScale: fixed
 ```
 
-Sizes are read in canvas units under `plan`, so the numbers mean the same thing as
-everything else in the config: `labelSize: 14` is 14 units on a `980`-unit-wide canvas,
-about 1.4 % of the card's width whatever that turns out to be.
+That was the original behaviour, and the original default. It agrees with the drawing only
+while the card renders at roughly its canvas size — which is not something a plan gets to
+decide, because the dashboard hands it whatever width it has. Below that the two come
+apart: a `980`-wide plan shown `500` wide draws every wall at half size while a 14px room
+name stays 14px, so names spill past their rooms and collide with the badges under them.
+Nothing in the config fixes it, because a label's px size doesn't know what scale the plan
+ended up at.
+
+It also loses a **cluster**. A group of badges placed close together — three sensors of the
+same physical device, say — has positions that scale with the plan and sizes that do not,
+so a cluster neatly spaced on a wide card collides on a narrow one: the badges stay 34px
+while the gaps between them shrink. Under `plan` the whole cluster shrinks as one and the
+spacing you set is the spacing you keep. (That is the answer to "my grouped icons drift
+apart when the card resizes" — though the better answer is often to have no cluster at
+all: put the readings on **one** device with [`readings`](#more-readings-per-device) and
+there is no relative position left to preserve.)
+
+Reach for `fixed` when the card renders **larger** than its canvas, or on a wall tablet
+where a px floor under the text is what keeps it readable from across the room.
+
+> **Upgrading?** The default changed, so a plan that never set `overlayScale` now scales
+> its overlay with the drawing. If your card renders at about its canvas width you will
+> barely see it; if it renders much smaller, labels get smaller (which is the point) and if
+> much larger, bigger. Setting `overlayScale: fixed` restores the old behaviour exactly.
 
 ### Where it helps, and where it costs
 
@@ -1037,11 +1069,114 @@ to compensate — a `labelSize` of `20`–`24` on a card at half its canvas widt
 where the default was. That is a real trade, not a free win: sizes are relative, and
 nothing puts a floor under them.
 
-Use it whenever the card renders smaller than its canvas but not drastically so — a
-dashboard tile, a sidebar, a desktop widget. Leave it off for a wall tablet showing the
-plan at full size, where fixed px is what keeps text legible from across the room, and
-for a card so small that scaled text would disappear. The default stays `fixed`, so an
-existing card looks exactly as it did.
+So the escape hatch runs both ways. On a card **much** smaller than its canvas, raise the
+sizes rather than switching to `fixed` — the geometry is still right, only the numbers are
+too small. Switch to `fixed` when the card is rendered **larger** than its canvas, or on a
+wall tablet showing the plan at full size where a px floor is what keeps text legible from
+across the room.
+
+The rule of thumb: `plan` is what a plan wants, and the size numbers are yours to set.
+
+## More readings per device
+
+One device, as many readings as it has. A sensor that reports temperature,
+humidity and pressure needs one badge, not three:
+
+```yaml
+items:
+  - id: study
+    entity: sensor.study_temperature
+    kind: sensor
+    showName: true
+    showState: true
+    readings:
+      - { entity: sensor.study_humidity }
+      - { entity: sensor.study_pressure }
+```
+
+→ `Study · 21.5 °C · 48% · 1013 hPa`, on one line, in the order written.
+
+Each row is `{ entity?, attribute? }`, and between them they say where the number comes
+from:
+
+| `entity` | `attribute` | reads |
+| --- | --- | --- |
+| set | — | that entity's state |
+| set | set | that attribute of that entity |
+| — | set | that attribute of **this device's own** entity |
+| — | — | nothing — a blank row draws no text |
+
+The third row is what lets one climate entity show four of its own attributes without
+naming itself four times. The fourth is why the editor's **+ Add entity** can hand you an
+empty row without a `—` appearing on the plan.
+
+### Readings ignore "Show state"
+
+That is the point of them. A smart plug already says on/off through its badge colour, so
+its label should carry the *other* numbers and not the word "on":
+
+```yaml
+  - id: desk_plug
+    entity: switch.desk_plug
+    kind: switch
+    showName: true
+    showState: false          # the badge colour already says on/off
+    readings:
+      - { entity: sensor.desk_plug_power }
+      - { entity: sensor.desk_plug_lqi }
+      - { attribute: battery }
+```
+
+→ `Desk plug · 1.2 kW · 84 · 84`. `showState` is about the device's **own state**;
+`readings` are their own statement.
+
+### One list, not two mechanisms
+
+There used to be a `secondaryEntity` / `secondaryAttribute` pair — one extra reading, with
+its own pair of dropdowns and its own rule about when it showed. It is now simply the
+**first row of `readings`**: still read, so no existing plan breaks, but with no field of
+its own in the editor, and rewritten into `readings` the first time you touch a device's
+readings. The order on the label is `entity`, then that legacy row, then the rest.
+
+The badge follows the same list. **Badge reads** offers one option per reading rather than
+just "the second one", so a plug reporting power, link quality and battery can badge
+whichever it likes:
+
+```yaml
+    badgeContent: value
+    badgeEntity: 1            # index into readings; "primary" is the device itself
+```
+
+`badgeEntity: secondary` still works and means index `0`.
+
+> **Upgrading?** One behaviour changed with the merge. `secondaryEntity` used to be part of
+> the state line, so it only showed while **Show state** was on — which is off by default
+> for anything that isn't a `sensor`. As a reading it now shows on its own terms. If you
+> have a light or a switch with a second entity and Show state off, a reading will appear
+> under it that wasn't there before; delete that row, or leave it — it is the number you
+> pointed the device at. Sensors, which show state by default, are unaffected.
+
+In the editor these sit **directly under the entity** as **Other entities**, added one at a
+time with **+ Add entity** rather than by putting four entity dropdowns on every device
+that will never use them. Each row's attribute box is HA's own attribute picker, listing
+what that entity actually has.
+
+Every element's panel is grouped under headings, on the same criteria: what it **is**
+first, then what it **reads**, then how it **looks**, then what it **does**. Groups with
+nothing to offer are left out — a sensor gets no Effects group, a device that draws no
+label gets no Label group, and an opening with no shutter gets no Shutter group.
+
+| Element | Groups |
+| --- | --- |
+| Device | Identity · What it reads · Label · Badge · Color · Effects · Behavior |
+| Door / window | Shape · What it reads · Sunlight · Shutter · Badge · Color · Behavior |
+| Furniture | Shape · What it reads · Color |
+| Area | Identity · What it reads · Color · Home Assistant area |
+| Tracker | Zone · Sensors · Marker |
+| Project | Project · Look · Floor image · Display · Sunlight · Night dimming · Devices · Symbols |
+
+Walls and text keep a plain list: a wall is thickness and length, a text is its words, size
+and angle. A heading over one or two fields is chrome rather than structure.
 
 ## Doors on locks
 

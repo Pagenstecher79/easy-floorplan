@@ -323,14 +323,60 @@ export type ItemKind =
   | "vacuum"
   | "generic";
 
+/**
+ * One **extra** reading on a device (issue #180) — the third, fourth, fifth
+ * line of text after `entity` and `secondaryEntity` have had their turn.
+ *
+ * Both fields are optional, and between them they say where the number comes
+ * from:
+ *
+ * | `entity` | `attribute` | reads                                    |
+ * | -------- | ----------- | ---------------------------------------- |
+ * | set      | unset       | that entity's state                      |
+ * | set      | set         | that attribute of that entity            |
+ * | unset    | set         | that attribute of the **device's own** entity |
+ * | unset    | unset       | nothing — a blank row draws no text      |
+ *
+ * The third row is what makes one climate device able to show four of its own
+ * attributes without naming itself four times; the fourth is what keeps a row
+ * the editor has just added from printing "—" before anything is picked.
+ */
+export interface ItemReading {
+  /** Entity to read. Omitted, the device's own {@link FloorItem.entity}. */
+  entity?: string;
+  /** Attribute to read instead of the state. */
+  attribute?: string;
+}
+
+/**
+ * Where a device's label sits relative to its badge (issue #180, and the
+ * discussion behind it). `below` is the historic centre-under-the-icon
+ * position and stays the default.
+ *
+ * `left` / `right` exist because a long reading under a badge grows in both
+ * directions and collides with whatever is beside it, while a label hung off
+ * one side grows only one way — which is what a row of devices along a wall
+ * needs.
+ */
+export type LabelPosition = "below" | "left" | "right";
+
 /** An entity icon placed on the plan. */
 export interface FloorItem {
   id: string;
   entity: string;
   /**
-   * Optional second entity (e.g. a humidity sensor paired with a temperature
-   * entity). When set and the state is shown, both values are displayed in the
-   * same element. The primary `entity` drives on/off state and click actions.
+   * **Legacy spelling of the first {@link readings} row.** A second entity
+   * shown alongside the primary — e.g. a humidity sensor paired with a
+   * temperature one.
+   *
+   * Kept because plans in the wild use it, and still read: `itemReadings`
+   * puts it at the head of the pool, where it always sat. It has no field in
+   * the editor any more, and touching a device's readings rewrites it as a
+   * `readings` entry. New configs should just use `readings`.
+   *
+   * One behaviour did change with issue #180: it used to be part of the state
+   * line and so appeared only while `showState` was on. It is a reading now,
+   * and readings show on their own terms — see {@link readings}.
    */
   secondaryEntity?: string;
   /**
@@ -340,9 +386,11 @@ export interface FloorItem {
    */
   attribute?: string;
   /**
-   * Attribute for the second reading. Applies to `secondaryEntity` when set,
-   * else to `entity` — so one climate device can show
-   * `current_temperature · current_humidity` without a second entity.
+   * Attribute for {@link secondaryEntity}, and legacy in the same way. Applies
+   * to `secondaryEntity` when set, else to `entity` — so one climate device
+   * could show `current_temperature · current_humidity` without a second
+   * entity. A {@link ItemReading} with an attribute and no entity means
+   * exactly that, which is how it translates into the pool.
    */
   secondaryAttribute?: string;
   /**
@@ -387,6 +435,25 @@ export interface FloorItem {
    * "Name · state". Default false.
    */
   showName?: boolean;
+  /**
+   * Everything this device reads **beyond its own state** (issue #180) — a
+   * temperature sensor that also reports humidity and pressure, a plug that
+   * reports power, link quality and battery.
+   *
+   * This is *the* list. {@link secondaryEntity} is a legacy spelling of its
+   * first entry rather than a parallel mechanism, so there is one pool, one
+   * order (`entity`, then any legacy pair, then these) and one rule about when
+   * they show. Resolve with `itemReadings`, never by reading either key
+   * directly.
+   *
+   * **Shown whether or not `showState` is**, which is the point of them. A plug
+   * says on/off through its badge colour, so its owner wants Power · LQI ·
+   * Battery and *not* the word "on" (I-G-1-1's case in discussion #173).
+   * `showState` is about the device's *own state*; these are not it.
+   */
+  readings?: ItemReading[];
+  /** Where the label sits relative to the badge (issue #180). Default `below`. */
+  labelPosition?: LabelPosition;
   /** Label line font size in pixels (issue #59). Default 12. */
   labelSize?: number;
   /**
@@ -411,8 +478,8 @@ export interface FloorItem {
   badgeContent?: BadgeContent;
   /**
    * Which of this device's own entities the badge reads while
-   * `badgeContent: "value"` (issue #136) — the main `entity`, or
-   * {@link secondaryEntity}.
+   * `badgeContent: "value"` (issue #136) — the main `entity`, or one of its
+   * other {@link readings} by index.
    *
    * Absent means "work it out", which is what {@link badgeValue} has always
    * done: the first candidate with a number wins, so a switch that reads "on"
@@ -420,10 +487,11 @@ export interface FloorItem {
    * but it is only a guess, and there was no way to overrule it when the main
    * entity happens to be numeric too.
    *
-   * Set, it is the *only* entity read. No falling back to the other one:
-   * having asked for the power sensor, being shown the switch instead would
-   * be worse than being shown the icon — which is what a device with no
-   * number to display falls back to anyway.
+   * Set, it is the *only* reading read. No falling back to another: having
+   * asked for the power sensor, being shown the switch instead would be worse
+   * than being shown the icon — which is what a device with no number to
+   * display falls back to anyway. An index past the end of the pool behaves
+   * the same way, rather than sliding onto a neighbouring reading.
    */
   badgeEntity?: BadgeEntity;
   /**
@@ -504,11 +572,21 @@ export type ItemDisplay = "badge" | "ripple" | "iconRipple";
 export type BadgeContent = "icon" | "value" | "none";
 
 /**
- * Which of a device's two entities feeds its value badge — see
- * {@link FloorItem.badgeEntity} (issue #136). Named by role rather than by
- * entity id so renaming an entity in Home Assistant cannot orphan the choice.
+ * Which of a device's readings feeds its value badge — see
+ * {@link FloorItem.badgeEntity} (issue #136).
+ *
+ * - `"primary"` — the device's own entity.
+ * - a **number** — that index into the device's other readings (see
+ *   `itemReadings`), so a plug with power, link quality and battery can badge
+ *   whichever of them it likes.
+ * - `"secondary"` — the historic spelling of index `0`, from when a device had
+ *   exactly two entities and the second had a name rather than a position.
+ *   Still read, so no stored config is orphaned; the editor writes indices.
+ *
+ * Addressed by role or position rather than by entity id, so renaming an
+ * entity in Home Assistant cannot strand the choice.
  */
-export type BadgeEntity = "primary" | "secondary";
+export type BadgeEntity = "primary" | "secondary" | number;
 
 /**
  * One colour rule for {@link FloorItem.stateColor} / {@link Furniture.stateColor}.
@@ -1087,16 +1165,25 @@ export interface FloorplanCardConfig extends LovelaceCardConfig {
   /**
    * How the HTML overlay (badges, labels, room names, text) is sized.
    *
-   * - **`fixed`** (default) — screen pixels, whatever size the card renders at.
-   * - **`plan`** — canvas units, so the overlay scales with the drawing exactly
-   *   as the SVG does.
+   * - **`plan`** (default) — canvas units, so the overlay scales with the
+   *   drawing exactly as the SVG does.
+   * - **`fixed`** — screen pixels, whatever size the card renders at.
    *
-   * `fixed` is the historic behaviour and is right when the card renders at
-   * roughly its canvas size. It falls apart below that: a plan drawn at 980
-   * wide and rendered 510 wide draws every wall at half size while a 14px room
-   * name stays 14px, so labels collide with the badges and each other. `plan`
-   * makes the two layers shrink together. Default stays `fixed` so no existing
-   * card changes appearance on upgrade.
+   * `fixed` was the historic behaviour and the historic default, and it is
+   * right only when the card renders at roughly its canvas size — which is not
+   * something a plan gets to decide, since the dashboard hands it whatever
+   * width it has. Below that it comes apart: a plan drawn at 980 wide and
+   * rendered 510 wide draws every wall at half size while a 14px room name
+   * stays 14px, so labels collide with the badges and each other, and a
+   * carefully spaced cluster of badges overlaps (issue #179).
+   *
+   * `plan` makes the two layers shrink together, which is what makes the thing
+   * a drawing rather than a drawing with fixed-size furniture on it. It is now
+   * the default, and that **does** change how an existing card looks: an
+   * overlay that was pinned to px now tracks the plan. The trade runs the other
+   * way at the extremes — see the README's "Where it helps, and where it
+   * costs" — so `fixed` stays a real choice for a card rendered much larger
+   * than its canvas, or a wall tablet that wants a px floor under its text.
    */
   overlayScale?: OverlayScale;
   /** Canvas background color (CSS / hex). Falls back to the skin's paper, then the card background. */
