@@ -149,6 +149,7 @@ import {
   floorImageForm,
   furnitureForm,
   isLiveField,
+  formSlice,
   itemEntityForm,
   itemIdentityForm,
   itemShowStateForm,
@@ -1993,6 +1994,57 @@ export class FloorplanCardEditor extends LitElement {
    * useful configuration — it reads that attribute off the device's own
    * entity, which is how one climate shows four of its own numbers.
    */
+  /**
+   * Which fields each element panel's groups hold, in order.
+   *
+   * Declared as data rather than inline at the render site so the whole shape
+   * of a panel can be read (and tested) in one place — every field a form
+   * produces has to appear in exactly one group, or it silently stops being
+   * editable.
+   *
+   * The criteria are the device panel's, applied to what each element actually
+   * has: what it *is* first, then what it *reads*, then how it *looks*, then
+   * what it *does*. Elements with only a couple of controls — a wall, a text —
+   * are left ungrouped: a heading over a single field is chrome, not structure.
+   */
+  private static readonly OPENING_GROUPS = [
+    // What it is, and how it is drawn.
+    ["Shape", ["type", "motion", "length", "sash", "hinge", "opens", "slide", "style", "angle"]],
+    // Which contacts drive it — the opening's own, before the shutter's.
+    ["What it reads", ["entity", "secondaryEntity", "invert"]],
+    // How it behaves toward the sun (issue #177), which is neither shape nor
+    // state but gets asked about as its own thing.
+    ["Sunlight", ["glazed", "sunlight"]],
+    // The shutter is a layer over the opening with its own entity, style,
+    // side, second contact, badge and colour — so it gets its own group
+    // rather than being scattered through the others.
+    ["Shutter", [
+      "shutterEntity",
+      "shutterStyle",
+      "shutterSide",
+      "shutterSecondaryEntity",
+      "shutterInvert",
+      "showShutterIcon",
+      "shutterIcon",
+    ]],
+    ["Badge", ["showIcon", "icon"]],
+    // No fields of its own — the opening's accent is a colour row, not an
+    // ha-form field. It is listed here so it lands in the same place in the
+    // order as every other panel's Color group, rather than after Behavior.
+    ["Color", []],
+    ["Behavior", ["tapTarget", "tap_action", "hold_action", "double_tap_action"]],
+  ] as const;
+
+  private static readonly FURNITURE_GROUPS = [
+    ["Shape", ["type", "hand", "w", "h", "angle"]],
+    ["What it reads", ["entity"]],
+  ] as const;
+
+  private static readonly TRACKER_GROUPS = [
+    ["Zone", ["w", "h", "x", "y", "angle"]],
+    ["Marker", ["dotSize"]],
+  ] as const;
+
   /**
    * One titled group of the element panel, with a rule above it.
    *
@@ -4167,47 +4219,67 @@ export class FloorplanCardEditor extends LitElement {
     if (sel.kind === "opening") {
       const o = this._floor().openings.find((x) => x.id === sel.id);
       if (!o) return html`${nothing}`;
+      const spec = openingForm(o, (id) => this._supportedFeatures(id));
+      const apply = (patch: Record<string, unknown>, live: boolean): void => {
+        if ("entity" in patch) {
+          // Infer type/motion from the entity's HA device_class (e.g. a
+          // `cover` with device_class `window` → a window; a `garage`
+          // roller → a sliding door). Only when the class is known, so we
+          // never clobber a hand-set type with a guess.
+          const entity = patch.entity as string | undefined;
+          const dc = entity
+            ? (this.hass?.states[entity]?.attributes?.device_class as string | undefined)
+            : undefined;
+          patch = { ...patch, ...(dc ? openingFromDeviceClass(dc) : {}) };
+        }
+        this._applyElementPatch("opening", o.id, patch, live);
+      };
+      /** A group, skipped when this opening has none of its fields. */
+      const group = (title: string, names: readonly string[], ...extra: unknown[]) => {
+        const slice = formSlice(spec, names);
+        if (!slice.fields.length && !extra.some((x) => x && x !== nothing)) return nothing;
+        return this._renderGroup(title, this._renderForm(slice, apply), ...extra);
+      };
       return html`
-        ${this._renderForm(openingForm(o, (id) => this._supportedFeatures(id)), (patch, live) => {
-          if ("entity" in patch) {
-            // Infer type/motion from the entity's HA device_class (e.g. a
-            // `cover` with device_class `window` → a window; a `garage`
-            // roller → a sliding door). Only when the class is known, so we
-            // never clobber a hand-set type with a guess.
-            const entity = patch.entity as string | undefined;
-            const dc = entity
-              ? (this.hass?.states[entity]?.attributes?.device_class as string | undefined)
-              : undefined;
-            patch = { ...patch, ...(dc ? openingFromDeviceClass(dc) : {}) };
-          }
-          this._applyElementPatch("opening", o.id, patch, live);
-        })}
-        ${o.entity
-          ? this._renderColorRow({
-              label: "Active color",
-              value: o.activeColor,
-              swatch: "#03a9f4",
-              placeholder: "(primary)",
-              onLive: (activeColor) => this._updateOpeningLive(o.id, { activeColor }),
-              onCommit: (activeColor) => this._updateOpening(o.id, { activeColor }),
-            })
-          : nothing}
-        ${o.shutterEntity
-          ? // The shutter's own accent, so an open shutter over a shut window
-            // can read as a separate thing from the sash it covers. Falls back
-            // to the opening's active color, hence the placeholder.
-            this._renderColorRow({
-              label: "Shutter color",
-              title: "Shutter color while it is open",
-              value: o.shutterActiveColor,
-              swatch: o.activeColor ?? "#03a9f4",
-              placeholder: o.activeColor ? "(active color)" : "(primary)",
-              onLive: (shutterActiveColor) =>
-                this._updateOpeningLive(o.id, { shutterActiveColor }),
-              onCommit: (shutterActiveColor) =>
-                this._updateOpening(o.id, { shutterActiveColor }),
-            })
-          : nothing}
+        ${FloorplanCardEditor.OPENING_GROUPS.map(([title, names]) =>
+          title === "Color"
+            ? group(
+                title,
+                names,
+                o.entity
+                  ? this._renderColorRow({
+                      label: "Active color",
+                      value: o.activeColor,
+                      swatch: "#03a9f4",
+                      placeholder: "(primary)",
+                      onLive: (activeColor) => this._updateOpeningLive(o.id, { activeColor }),
+                      onCommit: (activeColor) => this._updateOpening(o.id, { activeColor }),
+                    })
+                  : nothing
+              )
+            : title === "Shutter"
+            ? group(
+                title,
+                names,
+                // The shutter's own accent, so an open shutter over a shut
+                // window can read as a separate thing from the sash it
+                // covers. Falls back to the opening's, hence the placeholder.
+                o.shutterEntity
+                  ? this._renderColorRow({
+                      label: "Shutter color",
+                      title: "Shutter color while it is open",
+                      value: o.shutterActiveColor,
+                      swatch: o.activeColor ?? "#03a9f4",
+                      placeholder: o.activeColor ? "(active color)" : "(primary)",
+                      onLive: (shutterActiveColor) =>
+                        this._updateOpeningLive(o.id, { shutterActiveColor }),
+                      onCommit: (shutterActiveColor) =>
+                        this._updateOpening(o.id, { shutterActiveColor }),
+                    })
+                  : nothing
+              )
+            : group(title, names)
+        )}
       `;
     }
 
@@ -4333,34 +4405,41 @@ export class FloorplanCardEditor extends LitElement {
     if (sel.kind === "furniture") {
       const f = this._floor().furniture.find((x) => x.id === sel.id);
       if (!f) return html`${nothing}`;
+      const fSpec = furnitureForm(f, this._areaEntitiesAt(f.x, f.y), this._symbols());
+      const fApply = (patch: Record<string, unknown>, live: boolean) =>
+        this._applyElementPatch("furniture", f.id, patch, live);
       return html`
-        ${this._renderForm(furnitureForm(f, this._areaEntitiesAt(f.x, f.y), this._symbols()), (patch, live) =>
-          this._applyElementPatch("furniture", f.id, patch, live)
+        ${FloorplanCardEditor.FURNITURE_GROUPS.map(([title, names]) =>
+          this._renderGroup(title, this._renderForm(formSlice(fSpec, names), fApply))
         )}
-        ${this._renderColorRow({
+        ${this._renderGroup(
+          "Color",
+          this._renderColorRow({
           label: "Color",
           value: f.color,
           swatch: "#9e9e9e",
           placeholder: "(gray)",
-          onLive: (color) => this._updateFurnitureLive(f.id, { color }),
-          onCommit: (color) => this._updateFurniture(f.id, { color }),
-        })}
-        ${f.entity
-          ? html`
-              ${this._renderColorRow({
-                label: "Active color",
-                title: "Color while the entity is on",
-                value: f.activeColor,
-                swatch: "#03a9f4",
-                placeholder: "(no change)",
-                onLive: (activeColor) => this._updateFurnitureLive(f.id, { activeColor }),
-                onCommit: (activeColor) => this._updateFurniture(f.id, { activeColor }),
-              })}
-              ${this._renderStateColorRules(f.stateColor, (stateColor) =>
-                this._updateFurniture(f.id, { stateColor })
-              )}
-            `
-          : nothing}
+            onLive: (color) => this._updateFurnitureLive(f.id, { color }),
+            onCommit: (color) => this._updateFurniture(f.id, { color }),
+          }),
+          // Without an entity there is nothing to condition a colour on.
+          f.entity
+            ? html`
+                ${this._renderColorRow({
+                  label: "Active color",
+                  title: "Color while the entity is on",
+                  value: f.activeColor,
+                  swatch: "#03a9f4",
+                  placeholder: "(no change)",
+                  onLive: (activeColor) => this._updateFurnitureLive(f.id, { activeColor }),
+                  onCommit: (activeColor) => this._updateFurniture(f.id, { activeColor }),
+                })}
+                ${this._renderStateColorRules(f.stateColor, (stateColor) =>
+                  this._updateFurniture(f.id, { stateColor })
+                )}
+              `
+            : nothing
+        )}
       `;
     }
 
@@ -4369,27 +4448,38 @@ export class FloorplanCardEditor extends LitElement {
       if (!a) return html`${nothing}`;
       const haAreas = haAreasOf(this.hass);
       const pendingEntities = a.haArea ? this._pendingAreaEntities(a) : [];
+      const aSpec = areaForm(a);
+      const aApply = (patch: Record<string, unknown>, live: boolean) =>
+        this._applyElementPatch("area", a.id, patch, live);
       return html`
-        ${this._renderForm(
-          areaNameForm(a, haAreas.map((ha) => ha.name)),
-          (patch, live) =>
-            // The name field doubles as the HA-area link, so a name change also
-            // decides `haArea` (see areaNamePatch).
-            this._applyElementPatch("area", a.id, areaNamePatch(patch, haAreas), live)
+        ${this._renderGroup(
+          // The name doubles as the HA-area link, so the link status line and
+          // the name-related toggles belong with it.
+          "Identity",
+          this._renderForm(
+            areaNameForm(a, haAreas.map((ha) => ha.name)),
+            (patch, live) =>
+              // A name change also decides `haArea` (see areaNamePatch).
+              this._applyElementPatch("area", a.id, areaNamePatch(patch, haAreas), live)
+          ),
+          this._renderAreaLinkRow(a, haAreas),
+          this._renderForm(formSlice(aSpec, ["showName", "labelSize"]), aApply)
         )}
-        ${this._renderAreaLinkRow(a, haAreas)}
-        ${this._renderForm(areaForm(a), (patch, live) =>
-          this._applyElementPatch("area", a.id, patch, live)
+        ${this._renderGroup(
+          "What it reads",
+          this._renderForm(formSlice(aSpec, ["entity"]), aApply)
         )}
-        ${this._renderColorRow({
-          label: "Color",
-          value: a.color,
-          swatch: "#03a9f4",
-          placeholder: "(primary)",
-          onLive: (color) => this._updateAreaLive(a.id, { color }),
-          onCommit: (color) => this._updateArea(a.id, { color }),
-        })}
-        ${
+        ${this._renderGroup(
+          "Color",
+          this._renderForm(formSlice(aSpec, ["highlight", "opacity", "activeOpacity"]), aApply),
+          this._renderColorRow({
+            label: "Color",
+            value: a.color,
+            swatch: "#03a9f4",
+            placeholder: "(primary)",
+            onLive: (color) => this._updateAreaLive(a.id, { color }),
+            onCommit: (color) => this._updateArea(a.id, { color }),
+          }),
           // The colours the bound entity drives. Same shape furniture and
           // devices already use, and gated the same way — without an entity
           // there is nothing to condition on. Until this existed the Entity
@@ -4412,39 +4502,42 @@ export class FloorplanCardEditor extends LitElement {
                 )}
               `
             : nothing
-        }
+        )}
         ${a.haArea
-          ? html`<div class="row wide">
-              <label>Filter entities</label>
-              <input
-                type="checkbox"
-                .checked=${a.filterEntities ?? true}
-                @change=${(e: Event) =>
-                  this._updateArea(a.id, {
-                    filterEntities: (e.target as HTMLInputElement).checked,
-                  })}
-              />
-              <span class="hint"
-                >Scope the entity picker, for devices placed inside this room, to this HA
-                area's entities.</span
-              >
-            </div>`
-          : nothing}
-        ${a.haArea
-          ? html`<div class="row wide">
-              <button
-                ?disabled=${!pendingEntities.length}
-                title=${pendingEntities.length
-                  ? `Add ${pendingEntities.length} device${pendingEntities.length === 1 ? "" : "s"} from this HA area, spread out across the room`
-                  : "Every entity in this HA area is already placed on this floor"}
-                @click=${() => this._addAreaEntities(a)}
-              >
-                <ha-icon icon="mdi:shape-square-plus"></ha-icon>
-                Add all devices in this HA area${pendingEntities.length
-                  ? ` (${pendingEntities.length})`
-                  : ""}
-              </button>
-            </div>`
+          ? this._renderGroup(
+              // Everything that only exists because this room is linked to a
+              // Home Assistant area.
+              "Home Assistant area",
+              html`<div class="row wide">
+                <label>Filter entities</label>
+                <input
+                  type="checkbox"
+                  .checked=${a.filterEntities ?? true}
+                  @change=${(e: Event) =>
+                    this._updateArea(a.id, {
+                      filterEntities: (e.target as HTMLInputElement).checked,
+                    })}
+                />
+                <span class="hint"
+                  >Scope the entity picker, for devices placed inside this room, to this HA
+                  area's entities.</span
+                >
+              </div>`,
+              html`<div class="row wide">
+                <button
+                  ?disabled=${!pendingEntities.length}
+                  title=${pendingEntities.length
+                    ? `Add ${pendingEntities.length} device${pendingEntities.length === 1 ? "" : "s"} from this HA area, spread out across the room`
+                    : "Every entity in this HA area is already placed on this floor"}
+                  @click=${() => this._addAreaEntities(a)}
+                >
+                  <ha-icon icon="mdi:shape-square-plus"></ha-icon>
+                  Add all devices in this HA area${pendingEntities.length
+                    ? ` (${pendingEntities.length})`
+                    : ""}
+                </button>
+              </div>`
+            )
           : nothing}
         <p class="hint">
           Drag inside the fill to move the whole room; drag a vertex handle to reshape it.
@@ -4455,20 +4548,34 @@ export class FloorplanCardEditor extends LitElement {
     if (sel.kind === "tracker") {
       const tr = (this._floor().trackers ?? []).find((x) => x.id === sel.id);
       if (!tr) return html`${nothing}`;
+      const trSpec = trackerForm(tr);
+      const trApply = (patch: Record<string, unknown>, live: boolean) =>
+        this._applyElementPatch("tracker", tr.id, patch, live);
       return html`
-        ${this._renderTrackerSensorRows(tr, "xSensor", "X sensor")}
-        ${this._renderTrackerSensorRows(tr, "ySensor", "Y sensor")}
-        ${this._renderForm(trackerForm(tr), (patch, live) =>
-          this._applyElementPatch("tracker", tr.id, patch, live)
+        ${this._renderGroup(
+          "Zone",
+          this._renderForm(formSlice(trSpec, FloorplanCardEditor.TRACKER_GROUPS[0][1]), trApply)
         )}
-        ${this._renderColorRow({
-          label: "Color",
-          value: tr.color,
-          swatch: "#03a9f4",
-          placeholder: "(primary)",
-          onLive: (color) => this._updateTrackerLive(tr.id, { color }),
-          onCommit: (color) => this._updateTracker(tr.id, { color }),
-        })}
+        ${this._renderGroup(
+          // The two distance sensors that place the marker inside the zone —
+          // the thing a tracker actually is, so it gets its own group rather
+          // than two unlabelled blocks above the box.
+          "Sensors",
+          this._renderTrackerSensorRows(tr, "xSensor", "X sensor"),
+          this._renderTrackerSensorRows(tr, "ySensor", "Y sensor")
+        )}
+        ${this._renderGroup(
+          "Marker",
+          this._renderForm(formSlice(trSpec, FloorplanCardEditor.TRACKER_GROUPS[1][1]), trApply),
+          this._renderColorRow({
+            label: "Color",
+            value: tr.color,
+            swatch: "#03a9f4",
+            placeholder: "(primary)",
+            onLive: (color) => this._updateTrackerLive(tr.id, { color }),
+            onCommit: (color) => this._updateTracker(tr.id, { color }),
+          })
+        )}
       `;
     }
 

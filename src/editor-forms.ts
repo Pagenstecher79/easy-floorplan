@@ -144,6 +144,35 @@ export interface FormSpec {
 
 const identity = (patch: Record<string, unknown>) => patch;
 
+/**
+ * The named fields of `spec`, in the order given, sharing its data and its
+ * `toPatch` — one group of a panel that is otherwise one form.
+ *
+ * The device panel was split into real per-group specs because its groups
+ * interleave with hand-rolled rows and each group's patch logic was separable.
+ * The other elements are not like that: an opening's `toPatch` is one chain of
+ * interdependent clears (drop the shutter, and its style, side, invert, badge
+ * and second contact go with it), and cutting that into six pieces to gain a
+ * heading would be trading a real invariant for a cosmetic one.
+ *
+ * So grouping them is presentation only. Every group renders the same `data`
+ * and the same `toPatch`; only the visible field list differs. `ha-form` reads
+ * just the keys in its own schema, and `diffFormValue` diffs against the slice,
+ * so a group cannot emit a key it does not show.
+ *
+ * A field named here that the spec did not produce is skipped — the forms are
+ * conditional, and a group asking for "shutterStyle" on an opening with no
+ * shutter should render nothing rather than crash. The reverse (a field the
+ * spec produced that no group names) would silently hide a control, which is
+ * why `everyFieldIsGrouped` in the tests exists.
+ */
+export function formSlice(spec: FormSpec, names: readonly string[]): FormSpec {
+  const fields = names
+    .map((n) => spec.fields.find((f) => f.name === n))
+    .filter((f): f is FormField => !!f);
+  return { fields, data: spec.data, toPatch: spec.toPatch };
+}
+
 const angleField = (): FormField => ({
   name: "angle",
   label: "Angle",

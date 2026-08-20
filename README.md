@@ -1155,10 +1155,21 @@ time with **+ Add entity** rather than by putting four entity dropdowns on every
 that will never use them. Each row's attribute box is HA's own attribute picker, listing
 what that entity actually has.
 
-The device panel is grouped: **Identity** (name, show name), **What it reads** (entity,
-attribute, show state, other entities), **Label**, **Badge**, **Color**, **Effects** and
-**Behavior**, each with its own heading. Groups that have nothing to offer are left out —
-a sensor gets no Effects group, and a device that draws no label gets no Label group.
+Every element's panel is grouped under headings, on the same criteria: what it **is**
+first, then what it **reads**, then how it **looks**, then what it **does**. Groups with
+nothing to offer are left out — a sensor gets no Effects group, a device that draws no
+label gets no Label group, and an opening with no shutter gets no Shutter group.
+
+| Element | Groups |
+| --- | --- |
+| Device | Identity · What it reads · Label · Badge · Color · Effects · Behavior |
+| Door / window | Shape · What it reads · Sunlight · Shutter · Badge · Color · Behavior |
+| Furniture | Shape · What it reads · Color |
+| Area | Identity · What it reads · Color · Home Assistant area |
+| Tracker | Zone · Sensors · Marker |
+
+Walls and text keep a plain list: a wall is thickness and length, a text is its words, size
+and angle. A heading over one or two fields is chrome rather than structure.
 
 ## Offline devices
 

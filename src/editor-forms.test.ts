@@ -4,6 +4,7 @@ import {
   diffFormValue,
   normalizeFormPatch,
   openingForm,
+  formSlice,
   itemEntityForm,
   itemIdentityForm,
   itemShowStateForm,
@@ -28,7 +29,7 @@ import {
 } from "./editor-forms";
 import { itemHasLabel } from "./render";
 import type { FormField } from "./editor-forms";
-import type { Area, Opening, FloorItem, Floor, FloorplanCardConfig } from "./types";
+import type { Area, Opening, FloorItem, Floor, Furniture, Tracker, FloorplanCardConfig } from "./types";
 import { DEFAULT_GLOW_RADIUS, DEFAULT_PRESS_EFFECT } from "./types";
 import { DEFAULT_SKIN, SKINS, MAX_SKIN_WALL_WIDTH } from "./skins";
 import { DEFAULT_SUN_BEARING } from "./render";
@@ -1626,5 +1627,99 @@ describe("projectSunForm (issue #113)", () => {
     // Leaving them behind would resurrect stale values on re-enable.
     expect(toPatch({ sunDimming: true }).sunDimming).toBe(true);
     expect(toPatch({ sunBrightnessMin: 0.3 })).toEqual({ sunBrightnessMin: 0.3 });
+  });
+});
+
+// The panels are grouped by lists of field names living in editor.ts. A field
+// the form produces that no group names would silently stop being editable —
+// it would simply never render, with nothing failing. These lists are copied
+// from FloorplanCardEditor's static group tables; the test is that every field
+// each form can produce appears in exactly one of them.
+describe("every field lands in exactly one panel group", () => {
+  const OPENING_GROUPS = [
+    ["type", "motion", "length", "sash", "hinge", "opens", "slide", "style", "angle"],
+    ["entity", "secondaryEntity", "invert"],
+    ["glazed", "sunlight"],
+    [
+      "shutterEntity",
+      "shutterStyle",
+      "shutterSide",
+      "shutterSecondaryEntity",
+      "shutterInvert",
+      "showShutterIcon",
+      "shutterIcon",
+    ],
+    ["showIcon", "icon"],
+    ["tapTarget", "tap_action", "hold_action", "double_tap_action"],
+  ];
+  const FURNITURE_GROUPS = [["type", "hand", "w", "h", "angle"], ["entity"]];
+  const TRACKER_GROUPS = [["w", "h", "x", "y", "angle"], ["dotSize"]];
+  const AREA_GROUPS = [["showName", "labelSize"], ["entity"], ["highlight", "opacity", "activeOpacity"]];
+
+  const check = (fields: { name: string }[], groups: string[][], what: string) => {
+    const grouped = groups.flat();
+    const dupes = grouped.filter((n, i) => grouped.indexOf(n) !== i);
+    expect({ what, dupes }).toEqual({ what, dupes: [] });
+    const ungrouped = fields.map((f) => f.name).filter((n) => !grouped.includes(n));
+    expect({ what, ungrouped }).toEqual({ what, ungrouped: [] });
+  };
+
+  it("covers every opening field, across every shape an opening can take", () => {
+    const base = { id: "o", type: "door", x: 0, y: 0, length: 90, angle: 0 } as Opening;
+    // Walk the variants that reveal conditional fields, so the union of
+    // everything an opening can offer is checked rather than one example.
+    for (const extra of [
+      {},
+      { entity: "binary_sensor.a" },
+      { type: "window", entity: "binary_sensor.a" },
+      { type: "window", sash: "single", entity: "binary_sensor.a" },
+      { motion: "slide", sliderStyle: "biparting", entity: "binary_sensor.a" },
+      { motion: "roll", entity: "cover.g" },
+      { shutterEntity: "binary_sensor.s", shutterStyle: "swing" },
+      { shutterEntity: "cover.s", shutterStyle: "roll", entity: "binary_sensor.a" },
+      { entity: "binary_sensor.a", showIcon: true },
+      { shutterEntity: "binary_sensor.s", showShutterIcon: true },
+    ]) {
+      check(openingForm({ ...base, ...extra } as Opening).fields, OPENING_GROUPS, JSON.stringify(extra));
+    }
+  });
+
+  it("covers every furniture, tracker and area field", () => {
+    const f = { id: "f", type: "sofa", x: 0, y: 0, w: 40, h: 40 } as Furniture;
+    check(furnitureForm(f).fields, FURNITURE_GROUPS, "furniture");
+    check(
+      furnitureForm({ ...f, type: "sectional", entity: "sensor.a" } as Furniture).fields,
+      FURNITURE_GROUPS,
+      "furniture sectional"
+    );
+    const tr = { id: "t", x: 0, y: 0, w: 10, h: 10 } as Tracker;
+    check(trackerForm(tr).fields, TRACKER_GROUPS, "tracker");
+    const a = { id: "a", points: [{ x: 0, y: 0 }] } as Area;
+    check(areaForm(a).fields, AREA_GROUPS, "area");
+    check(areaForm({ ...a, entity: "light.a", haArea: "kitchen" } as Area).fields, AREA_GROUPS, "area linked");
+  });
+});
+
+describe("formSlice", () => {
+  const spec = openingForm({ id: "o", type: "door", x: 0, y: 0, length: 90, angle: 0 } as Opening);
+
+  it("keeps the named fields, in the order named", () => {
+    expect(formSlice(spec, ["length", "type"]).fields.map((f) => f.name)).toEqual([
+      "length",
+      "type",
+    ]);
+  });
+
+  it("shares the whole data and toPatch, so a group cannot diverge", () => {
+    const slice = formSlice(spec, ["type"]);
+    expect(slice.data).toBe(spec.data);
+    expect(slice.toPatch({ motion: "roll" })).toEqual(spec.toPatch({ motion: "roll" }));
+  });
+
+  it("skips a name the form did not produce — the forms are conditional", () => {
+    // No shutter on this opening, so a Shutter group asking for its style
+    // renders nothing rather than throwing.
+    expect(formSlice(spec, ["shutterStyle", "type"]).fields.map((f) => f.name)).toEqual(["type"]);
+    expect(formSlice(spec, []).fields).toEqual([]);
   });
 });
