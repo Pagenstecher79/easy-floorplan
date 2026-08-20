@@ -4,7 +4,14 @@ import {
   diffFormValue,
   normalizeFormPatch,
   openingForm,
-  itemForm,
+  formSlice,
+  itemEntityForm,
+  itemIdentityForm,
+  itemShowStateForm,
+  itemLabelForm,
+  itemBadgeForm,
+  itemEffectsForm,
+  itemBehaviourForm,
   textForm,
   furnitureForm,
   trackerForm,
@@ -20,8 +27,9 @@ import {
   areaForm,
   areaNameForm,
 } from "./editor-forms";
+import { itemHasLabel } from "./render";
 import type { FormField } from "./editor-forms";
-import type { Area, Opening, FloorItem, Floor, FloorplanCardConfig } from "./types";
+import type { Area, Opening, FloorItem, Floor, Furniture, Tracker, FloorplanCardConfig } from "./types";
 import { DEFAULT_GLOW_RADIUS, DEFAULT_PRESS_EFFECT } from "./types";
 import { DEFAULT_SKIN, SKINS, MAX_SKIN_WALL_WIDTH } from "./skins";
 import { DEFAULT_SUN_BEARING } from "./render";
@@ -362,6 +370,79 @@ describe("openingForm — a hinged shutter's second panel (issue #159)", () => {
 describe("itemForm", () => {
   const item = { id: "i", entity: "light.a", kind: "light", x: 0, y: 0 } as FloorItem;
 
+  // The device panel is seven groups now rather than one form, but almost
+  // every question below is about the panel as a whole — "is this control
+  // offered", "what does it open on". These two view it that way, so the tests
+  // keep asking what they always asked and stay indifferent to which group a
+  // control ended up in.
+  const groups = (
+    it: FloorItem,
+    deviceClass?: string,
+    badgeSource?: Parameters<typeof itemBadgeForm>[1]
+  ) =>
+    [
+      itemIdentityForm(it),
+      itemEntityForm(it),
+      itemShowStateForm(it),
+      itemHasLabel(it) ? itemLabelForm(it) : undefined,
+      itemBadgeForm(it, badgeSource),
+      itemEffectsForm(it, deviceClass),
+      itemBehaviourForm(it),
+    ].filter((g): g is NonNullable<typeof g> => !!g);
+  const itemForm = (
+    it: FloorItem,
+    deviceClass?: string,
+    badgeSource?: Parameters<typeof itemBadgeForm>[1]
+  ) => {
+    const gs = groups(it, deviceClass, badgeSource);
+    return {
+      fields: gs.flatMap((g) => g.fields),
+      data: Object.assign({}, ...gs.map((g) => g.data)) as Record<string, unknown>,
+      /** Routed to whichever group owns the key, as the editor routes it. */
+      toPatch: (patch: Record<string, unknown>) => {
+        const owner =
+          gs.find((g) => g.fields.some((f) => f.name in patch)) ?? gs[gs.length - 1];
+        return owner.toPatch(patch);
+      },
+    };
+  };
+
+  it("groups the panel, in the order the questions get asked", () => {
+    // The panel is two dozen controls; this pins the shape of it, because the
+    // order is a design decision and not an accident of what was added when.
+    const sensor = { ...item, entity: "sensor.t", kind: "sensor" } as FloorItem;
+    expect(groups(sensor).map((g) => g.fields.map((f) => f.name))).toEqual([
+      ["name", "showName"], // 1. Identity — what it is
+      ["entity", "attribute"], // 2. What it reads…
+      ["showState"], //         …including whether its own state shows
+      ["labelPosition", "labelSize"], // 3. Label
+      ["badgeMode", "size", "angle"], // 4. Badge
+      // 5. Colour and the readings list are hand-rolled rows, not ha-form
+      //    fields, so they do not appear here — the editor slots them into
+      //    their groups.
+      // 6. Effects is absent: a plain sensor neither rings nor casts light.
+      ["hideWhenInactive", "tap_action", "hold_action", "double_tap_action"], // 7. Behaviour
+    ]);
+  });
+
+  it("leaves out the groups a device has nothing to put in", () => {
+    // A light casts, so Effects appears; a sensor does not.
+    const light = { ...item, glow: true } as FloorItem;
+    expect(itemEffectsForm(light)?.fields.map((f) => f.name)).toEqual([
+      "glow",
+      "glowRadius",
+      "glowColor",
+    ]);
+    expect(itemEffectsForm({ ...item, kind: "sensor", entity: "sensor.t" } as FloorItem)).toBeUndefined();
+    // …and the Label group is skipped entirely while nothing labels the device.
+    expect(groups(item).some((g) => g.fields.some((f) => f.name === "labelPosition"))).toBe(false);
+    expect(
+      groups({ ...item, showName: true } as FloorItem).some((g) =>
+        g.fields.some((f) => f.name === "labelPosition")
+      )
+    ).toBe(true);
+  });
+
   it("offers Cast light on lights only, with its controls behind the toggle (#6)", () => {
     const names = (it: FloorItem) => itemForm(it).fields.map((x) => x.name);
     expect(names(item)).toContain("glow");
@@ -377,7 +458,7 @@ describe("itemForm", () => {
 
   it("offers Ripple on presence devices only, sized behind the toggle (#127)", () => {
     const motion = { ...item, entity: "binary_sensor.hall", kind: "binary_sensor" } as FloorItem;
-    const names = (it: FloorItem, dc?: string) => itemForm(it, undefined, dc).fields.map((x) => x.name);
+    const names = (it: FloorItem, dc?: string) => itemForm(it, dc).fields.map((x) => x.name);
     // A light is not something that detects presence, whatever it can do.
     expect(names(item)).not.toContain("ripple");
     expect(names(item, "motion")).not.toContain("ripple");
@@ -411,6 +492,39 @@ describe("itemForm", () => {
     expect(
       itemForm({ ...item, showName: true, labelSize: 20 } as FloorItem).data.labelSize
     ).toBe(20);
+  });
+
+  it("reveals the label controls for a device labelled by its readings alone (#180)", () => {
+    const names = (it: FloorItem) => itemForm(it).fields.map((x) => x.name);
+    // Both toggles off, so before #180 this device had no label — and now it
+    // has one made of nothing but extra readings.
+    const byReadings = { ...item, readings: [{ entity: "sensor.power" }] } as FloorItem;
+    expect(names(byReadings)).toContain("labelSize");
+    expect(names(byReadings)).toContain("labelPosition");
+    // A row that names nothing is not a label, so the controls stay away.
+    expect(names({ ...item, readings: [{}] } as FloorItem)).not.toContain("labelPosition");
+    expect(names(item)).not.toContain("labelPosition");
+  });
+
+  it("offers the three label positions, keeping the default out of the YAML (#180)", () => {
+    const labelled = { ...item, showName: true } as FloorItem;
+    const form = itemForm(labelled);
+    const field = form.fields.find((x) => x.name === "labelPosition")!;
+    const opts = (field.selector as { select: { options: { value: string }[] } }).select.options.map(
+      (o) => o.value
+    );
+    expect(opts).toEqual(["below", "left", "right"]);
+    expect(form.data.labelPosition).toBe("below");
+    expect(
+      itemForm({ ...labelled, labelPosition: "left" } as FloorItem).data.labelPosition
+    ).toBe("left");
+    // Below is the default, so it is not worth writing down.
+    expect(form.toPatch({ labelPosition: "below" }).labelPosition).toBeUndefined();
+    expect(form.toPatch({ labelPosition: "right" }).labelPosition).toBe("right");
+    // A hand-edited junk value reads back as what it renders as.
+    expect(
+      itemForm({ ...labelled, labelPosition: "above" } as unknown as FloorItem).data.labelPosition
+    ).toBe("below");
   });
 
   it("offers the three action fields with behavior-preserving defaults", () => {
@@ -504,17 +618,16 @@ describe("itemForm", () => {
       display: "badge",
       showIcon: undefined,
     });
-    // The ring toggle alone is still a complete statement about `display`:
-    // the mode comes off the item.
-    expect(f.toPatch({ ripple: true }).display).toBe("iconRipple");
-    expect(
-      itemForm({ ...item, badgeContent: "none" } as FloorItem).toPatch({ ripple: true }).display
-    ).toBe("ripple");
-    expect(
-      itemForm({ ...item, display: "iconRipple" } as FloorItem).toPatch({ ripple: false }).display
-    ).toBe("badge");
-    // Both at once, and unrelated edits, pass through untouched.
-    expect(f.toPatch({ badgeMode: "none", ripple: true }).display).toBe("ripple");
+    // The ring toggle alone is still a complete statement about `display`: the
+    // mode comes off the item. It lives in the Effects group and is offered
+    // only to a presence device, which is the only device that can emit it.
+    const ring = { ...item, entity: "binary_sensor.hall", kind: "binary_sensor" } as FloorItem;
+    const rf = (extra: Partial<FloorItem> = {}) =>
+      itemEffectsForm({ ...ring, ...extra } as FloorItem, "motion")!;
+    expect(rf().toPatch({ ripple: true }).display).toBe("iconRipple");
+    expect(rf({ badgeContent: "none" }).toPatch({ ripple: true }).display).toBe("ripple");
+    expect(rf({ display: "iconRipple" }).toPatch({ ripple: false }).display).toBe("badge");
+    // Unrelated edits pass through untouched, in whichever group owns them.
     expect(f.toPatch({ size: 40 })).toEqual({ size: 40 });
     expect(f.toPatch({ size: 40, badgeMode: "value" }).size).toBe(40);
   });
@@ -527,10 +640,10 @@ describe("itemForm", () => {
       secondaryEntity: "sensor.plug_power",
       badgeContent: "value",
     } as FloorItem;
-    const names = (it: FloorItem, src?: Parameters<typeof itemForm>[3]) =>
-      itemForm(it, undefined, undefined, src).fields.map((x) => x.name);
+    const names = (it: FloorItem, src?: Parameters<typeof itemForm>[2]) =>
+      itemForm(it, undefined, src).fields.map((x) => x.name);
 
-    it("appears only when the badge shows a value AND there is a second entity", () => {
+    it("appears only when the badge shows a value AND there is another reading", () => {
       expect(names(plug)).toContain("badgeEntity");
       // Nothing to choose between with one entity.
       expect(names({ ...plug, secondaryEntity: undefined } as FloorItem)).not.toContain(
@@ -548,27 +661,52 @@ describe("itemForm", () => {
       // fallback, with no badgeEntity stored. A form defaulting to "primary"
       // would name the switch while the badge shows watts — and the next
       // unrelated edit would save that and drop the reading to an icon.
-      const asRead = itemForm(plug, undefined, undefined, { source: "secondary" });
-      expect(asRead.data.badgeEntity).toBe("secondary");
+      const asRead = itemForm(plug, undefined, { source: 0 });
+      expect(asRead.data.badgeEntity).toBe("0");
       // A stored choice always wins over the live reading.
       expect(
-        itemForm({ ...plug, badgeEntity: "primary" } as FloorItem, undefined, undefined, {
-          source: "secondary",
+        itemForm({ ...plug, badgeEntity: "primary" } as FloorItem, undefined, {
+          source: 0,
         }).data.badgeEntity,
       ).toBe("primary");
+      // …including the legacy spelling, which means index 0.
+      expect(
+        itemForm({ ...plug, badgeEntity: "secondary" } as FloorItem, undefined, {
+          source: "primary",
+        }).data.badgeEntity,
+      ).toBe("0");
     });
 
     it("names the entities, with no 'Automatic' among them (#127's precedent)", () => {
-      const field = itemForm(plug, undefined, undefined, {
-        source: "secondary",
+      const field = itemForm(plug, undefined, {
+        source: 0,
         primaryLabel: "Kitchen plug",
-        secondaryLabel: "Kitchen plug power",
+        readingLabels: ["Kitchen plug power"],
       }).fields.find((x) => x.name === "badgeEntity")!;
       const opts = (field.selector as { select: { options: { value: string; label: string }[] } })
         .select.options;
-      expect(opts.map((o) => o.value)).toEqual(["primary", "secondary"]);
+      expect(opts.map((o) => o.value)).toEqual(["primary", "0"]);
       expect(opts.map((o) => o.label)).toEqual(["Kitchen plug", "Kitchen plug power"]);
       expect(opts.map((o) => o.value)).not.toContain("auto");
+    });
+
+    it("offers one option per reading, not just the second (#180)", () => {
+      const many = {
+        ...plug,
+        secondaryEntity: undefined,
+        readings: [
+          { entity: "sensor.plug_power" },
+          { entity: "sensor.plug_lqi" },
+          { attribute: "battery" },
+        ],
+      } as FloorItem;
+      const field = itemForm(many).fields.find((x) => x.name === "badgeEntity")!;
+      const opts = (field.selector as { select: { options: { value: string; label: string }[] } })
+        .select.options;
+      expect(opts.map((o) => o.value)).toEqual(["primary", "0", "1", "2"]);
+      // A reading with no entity of its own is read off this device, and the
+      // label says so rather than leaving the row nameless.
+      expect(opts[3].label).toContain("battery");
     });
 
     it("falls back to entity ids when hass has no friendly names", () => {
@@ -577,8 +715,10 @@ describe("itemForm", () => {
       expect(opts.map((o) => o.label)).toEqual(["switch.plug", "sensor.plug_power"]);
     });
 
-    it("passes the choice straight through as a config key", () => {
-      expect(itemForm(plug).toPatch({ badgeEntity: "secondary" }).badgeEntity).toBe("secondary");
+    it("stores the choice as an index, so the legacy spelling stops spreading", () => {
+      expect(itemForm(plug).toPatch({ badgeEntity: "0" }).badgeEntity).toBe(0);
+      expect(itemForm(plug).toPatch({ badgeEntity: "2" }).badgeEntity).toBe(2);
+      expect(itemForm(plug).toPatch({ badgeEntity: "primary" }).badgeEntity).toBe("primary");
     });
   });
 
@@ -587,32 +727,33 @@ describe("itemForm", () => {
     expect(itemForm(item).data.icon).toBeUndefined();
   });
 
-  it("scopes the entity/secondaryEntity pickers to the area's entities when given", () => {
-    const unscoped = itemForm(item);
+  it("scopes the entity picker to the area's entities when given", () => {
+    const unscoped = itemEntityForm(item);
     expect(unscoped.fields.find((x) => x.name === "entity")!.selector).toEqual({ entity: {} });
-    const scoped = itemForm({ ...item, entity: "light.kitchen" } as FloorItem, {
+    const scoped = itemEntityForm({ ...item, entity: "light.kitchen" } as FloorItem, {
       entities: ["light.kitchen", "switch.kitchen"],
       name: "Kitchen",
     });
     expect(scoped.fields.find((x) => x.name === "entity")!.selector).toEqual({
       entity: { include_entities: ["light.kitchen", "switch.kitchen"] },
     });
-    expect(scoped.fields.find((x) => x.name === "secondaryEntity")!.selector).toEqual({
-      entity: { include_entities: ["light.kitchen", "switch.kitchen"] },
-    });
+    // There is no second entity *field* to scope any more (issue #180) — the
+    // readings rows are hand-rolled, and the editor scopes their pickers off
+    // the same _areaEntitiesAt call.
+    expect(scoped.fields.map((x) => x.name)).toEqual(["entity", "attribute"]);
   });
 
   it("an empty area list does NOT filter — an empty picker would hide everything", () => {
     // Regression: `[]` is truthy, so the old code emitted
     // `include_entities: []` and the picker listed nothing at all — the
     // common case when a linked HA area has no entities assigned.
-    const scoped = itemForm(item, { entities: [], name: "Kitchen" });
+    const scoped = itemEntityForm(item, { entities: [], name: "Kitchen" });
     expect(scoped.fields.find((x) => x.name === "entity")!.selector).toEqual({ entity: {} });
     expect(scoped.fields.find((x) => x.name === "entity")!.helper).toBeUndefined();
   });
 
   it("always keeps the bound entity pickable, even from another area", () => {
-    const scoped = itemForm({ ...item, entity: "light.hallway" } as FloorItem, {
+    const scoped = itemEntityForm({ ...item, entity: "light.hallway" } as FloorItem, {
       entities: ["light.kitchen"],
       name: "Kitchen",
     });
@@ -622,14 +763,10 @@ describe("itemForm", () => {
   });
 
   it("says why the list is short, and how to widen it", () => {
-    const scoped = itemForm(item, { entities: ["light.kitchen"], name: "Kitchen" });
+    const scoped = itemEntityForm(item, { entities: ["light.kitchen"], name: "Kitchen" });
     const helper = scoped.fields.find((x) => x.name === "entity")!.helper!;
     expect(helper).toContain("Kitchen");
     expect(helper).toContain("Filter entities");
-    // The secondary picker keeps its own explanation too.
-    expect(scoped.fields.find((x) => x.name === "secondaryEntity")!.helper).toContain(
-      "Shown next to the primary state"
-    );
   });
 });
 
@@ -935,20 +1072,28 @@ describe("wallForm / projectForm / floorImageForm", () => {
     expect(form.fields[0].helper).toBe(tron.description);
   });
 
-  it("overlay scale shares that form, defaults to fixed, and stays out of the YAML when default", () => {
+  it("overlay scale shares that form, defaults to plan, and stays out of the YAML when default", () => {
     const form = projectDisplayForm({ type: "t", width: 1000, height: 600 } as FloorplanCardConfig);
-    expect(form.data.overlayScale).toBe("fixed");
-    expect(form.toPatch({ overlayScale: "fixed" })).toEqual({ overlayScale: undefined });
-    expect(form.toPatch({ overlayScale: "plan" })).toEqual({ overlayScale: "plan" });
+    expect(form.data.overlayScale).toBe("plan");
+    // Canvas units are the default, so they are what stays unwritten; "fixed"
+    // is the choice that has to be recorded.
+    expect(form.toPatch({ overlayScale: "plan" })).toEqual({ overlayScale: undefined });
+    expect(form.toPatch({ overlayScale: "fixed" })).toEqual({ overlayScale: "fixed" });
     // Patching one field must not invent a value for the other.
     expect(form.toPatch({ rotation: "90" })).toEqual({ rotation: 90 });
-    const scaled = projectDisplayForm({
+    const pinned = projectDisplayForm({
       type: "t",
       width: 1000,
       height: 600,
-      overlayScale: "plan",
+      overlayScale: "fixed",
     } as FloorplanCardConfig);
-    expect(scaled.data.overlayScale).toBe("plan");
+    expect(pinned.data.overlayScale).toBe("fixed");
+    // The default leads the dropdown, so the list opens on what a plan wants.
+    const field = form.fields.find((x) => x.name === "overlayScale")!;
+    const opts = (field.selector as { select: { options: { value: string }[] } }).select.options.map(
+      (o) => o.value
+    );
+    expect(opts).toEqual(["plan", "fixed"]);
   });
 
   it("image opacity appears only when an image is set", () => {
@@ -1335,12 +1480,12 @@ describe("area scoping never traps you (issue reported on #83)", () => {
 
   it("outside every area, and inside an empty one, nothing is filtered", () => {
     // No scope at all — the element sits outside every area.
-    expect(itemForm(item).fields.find((x) => x.name === "entity")!.selector).toEqual({
+    expect(itemEntityForm(item).fields.find((x) => x.name === "entity")!.selector).toEqual({
       entity: {},
     });
     // Inside an area whose HA area has no entities: same, unfiltered.
     expect(
-      itemForm(item, { entities: [], name: "Spare" }).fields.find((x) => x.name === "entity")!
+      itemEntityForm(item, { entities: [], name: "Spare" }).fields.find((x) => x.name === "entity")!
         .selector
     ).toEqual({ entity: {} });
   });
@@ -1482,5 +1627,113 @@ describe("projectSunForm (issue #113)", () => {
     // Leaving them behind would resurrect stale values on re-enable.
     expect(toPatch({ sunDimming: true }).sunDimming).toBe(true);
     expect(toPatch({ sunBrightnessMin: 0.3 })).toEqual({ sunBrightnessMin: 0.3 });
+  });
+});
+
+// The panels are grouped by lists of field names living in editor.ts. A field
+// the form produces that no group names would silently stop being editable —
+// it would simply never render, with nothing failing. These lists are copied
+// from FloorplanCardEditor's static group tables; the test is that every field
+// each form can produce appears in exactly one of them.
+describe("every field lands in exactly one panel group", () => {
+  const OPENING_GROUPS = [
+    ["type", "motion", "length", "sash", "hinge", "opens", "slide", "style", "angle"],
+    ["entity", "secondaryEntity", "invert"],
+    ["glazed", "sunlight"],
+    [
+      "shutterEntity",
+      "shutterStyle",
+      "shutterSide",
+      "shutterSecondaryEntity",
+      "shutterInvert",
+      "showShutterIcon",
+      "shutterIcon",
+    ],
+    ["showIcon", "icon"],
+    ["tapTarget", "tap_action", "hold_action", "double_tap_action"],
+  ];
+  const FURNITURE_GROUPS = [["type", "hand", "w", "h", "angle"], ["entity"]];
+  const TRACKER_GROUPS = [["w", "h", "x", "y", "angle"], ["dotSize"]];
+  const AREA_GROUPS = [["showName", "labelSize"], ["entity"], ["highlight", "opacity", "activeOpacity"]];
+
+  const check = (fields: { name: string }[], groups: string[][], what: string) => {
+    const grouped = groups.flat();
+    const dupes = grouped.filter((n, i) => grouped.indexOf(n) !== i);
+    expect({ what, dupes }).toEqual({ what, dupes: [] });
+    const ungrouped = fields.map((f) => f.name).filter((n) => !grouped.includes(n));
+    expect({ what, ungrouped }).toEqual({ what, ungrouped: [] });
+  };
+
+  it("covers every opening field, across every shape an opening can take", () => {
+    const base = { id: "o", type: "door", x: 0, y: 0, length: 90, angle: 0 } as Opening;
+    // Walk the variants that reveal conditional fields, so the union of
+    // everything an opening can offer is checked rather than one example.
+    for (const extra of [
+      {},
+      { entity: "binary_sensor.a" },
+      { type: "window", entity: "binary_sensor.a" },
+      { type: "window", sash: "single", entity: "binary_sensor.a" },
+      { motion: "slide", sliderStyle: "biparting", entity: "binary_sensor.a" },
+      { motion: "roll", entity: "cover.g" },
+      { shutterEntity: "binary_sensor.s", shutterStyle: "swing" },
+      { shutterEntity: "cover.s", shutterStyle: "roll", entity: "binary_sensor.a" },
+      { entity: "binary_sensor.a", showIcon: true },
+      { shutterEntity: "binary_sensor.s", showShutterIcon: true },
+    ]) {
+      check(openingForm({ ...base, ...extra } as Opening).fields, OPENING_GROUPS, JSON.stringify(extra));
+    }
+  });
+
+  it("covers every project field — offlineStyle is sliced away from its form", () => {
+    // projectDisplayForm still owns rotation / overlayScale / compactHeader /
+    // offlineStyle as one form with one toPatch, but the panel renders the
+    // first three under "Display" and the last under "Devices". Miss it in
+    // both slices and the control silently disappears.
+    const DISPLAY = ["rotation", "overlayScale", "compactHeader"];
+    const DEVICES = ["offlineStyle"];
+    const cfg = { type: "t", width: 1000, height: 600 } as FloorplanCardConfig;
+    check(projectDisplayForm(cfg).fields, [DISPLAY, DEVICES], "project display");
+    // Both slices resolve, and neither can emit the other's key.
+    expect(formSlice(projectDisplayForm(cfg), DISPLAY).fields.map((f) => f.name)).toEqual(DISPLAY);
+    expect(formSlice(projectDisplayForm(cfg), DEVICES).fields.map((f) => f.name)).toEqual(DEVICES);
+  });
+
+  it("covers every furniture, tracker and area field", () => {
+    const f = { id: "f", type: "sofa", x: 0, y: 0, w: 40, h: 40 } as Furniture;
+    check(furnitureForm(f).fields, FURNITURE_GROUPS, "furniture");
+    check(
+      furnitureForm({ ...f, type: "sectional", entity: "sensor.a" } as Furniture).fields,
+      FURNITURE_GROUPS,
+      "furniture sectional"
+    );
+    const tr = { id: "t", x: 0, y: 0, w: 10, h: 10 } as Tracker;
+    check(trackerForm(tr).fields, TRACKER_GROUPS, "tracker");
+    const a = { id: "a", points: [{ x: 0, y: 0 }] } as Area;
+    check(areaForm(a).fields, AREA_GROUPS, "area");
+    check(areaForm({ ...a, entity: "light.a", haArea: "kitchen" } as Area).fields, AREA_GROUPS, "area linked");
+  });
+});
+
+describe("formSlice", () => {
+  const spec = openingForm({ id: "o", type: "door", x: 0, y: 0, length: 90, angle: 0 } as Opening);
+
+  it("keeps the named fields, in the order named", () => {
+    expect(formSlice(spec, ["length", "type"]).fields.map((f) => f.name)).toEqual([
+      "length",
+      "type",
+    ]);
+  });
+
+  it("shares the whole data and toPatch, so a group cannot diverge", () => {
+    const slice = formSlice(spec, ["type"]);
+    expect(slice.data).toBe(spec.data);
+    expect(slice.toPatch({ motion: "roll" })).toEqual(spec.toPatch({ motion: "roll" }));
+  });
+
+  it("skips a name the form did not produce — the forms are conditional", () => {
+    // No shutter on this opening, so a Shutter group asking for its style
+    // renders nothing rather than throwing.
+    expect(formSlice(spec, ["shutterStyle", "type"]).fields.map((f) => f.name)).toEqual(["type"]);
+    expect(formSlice(spec, []).fields).toEqual([]);
   });
 });

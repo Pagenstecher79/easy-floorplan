@@ -7,7 +7,6 @@
  */
 import type {
   Area,
-  BadgeEntity,
   Floor,
   FloorItem,
   FloorText,
@@ -52,6 +51,9 @@ import {
   openingHasTwoLeaves,
   sliderStyleHasTwoLeaves,
   pressEffectOf,
+  labelPositionOf,
+  itemReadings,
+  badgeEntityIndex,
   offlineStyleOf,
   sliderStyleOf,
   shutterStyleOf,
@@ -141,6 +143,35 @@ export interface FormSpec {
 }
 
 const identity = (patch: Record<string, unknown>) => patch;
+
+/**
+ * The named fields of `spec`, in the order given, sharing its data and its
+ * `toPatch` — one group of a panel that is otherwise one form.
+ *
+ * The device panel was split into real per-group specs because its groups
+ * interleave with hand-rolled rows and each group's patch logic was separable.
+ * The other elements are not like that: an opening's `toPatch` is one chain of
+ * interdependent clears (drop the shutter, and its style, side, invert, badge
+ * and second contact go with it), and cutting that into six pieces to gain a
+ * heading would be trading a real invariant for a cosmetic one.
+ *
+ * So grouping them is presentation only. Every group renders the same `data`
+ * and the same `toPatch`; only the visible field list differs. `ha-form` reads
+ * just the keys in its own schema, and `diffFormValue` diffs against the slice,
+ * so a group cannot emit a key it does not show.
+ *
+ * A field named here that the spec did not produce is skipped — the forms are
+ * conditional, and a group asking for "shutterStyle" on an opening with no
+ * shutter should render nothing rather than crash. The reverse (a field the
+ * spec produced that no group names) would silently hide a control, which is
+ * why `everyFieldIsGrouped` in the tests exists.
+ */
+export function formSlice(spec: FormSpec, names: readonly string[]): FormSpec {
+  const fields = names
+    .map((n) => spec.fields.find((f) => f.name === n))
+    .filter((f): f is FormField => !!f);
+  return { fields, data: spec.data, toPatch: spec.toPatch };
+}
 
 const angleField = (): FormField => ({
   name: "angle",
@@ -686,7 +717,7 @@ function badgeModePatch(mode: BadgeMode, ripple: boolean): Record<string, unknow
 
 /**
  * What the badge is reading *right now*, for the "Badge reads" row (issue
- * #136). Resolved off `hass` at the call site, like {@link itemForm}'s
+ * #136). Resolved off `hass` at the call site, like {@link itemEffectsForm}'s
  * `deviceClass`, because this file stays pure.
  *
  * `source` is load-bearing rather than cosmetic. A plug whose badge shows its
@@ -696,60 +727,151 @@ function badgeModePatch(mode: BadgeMode, ripple: boolean): Record<string, unknow
  * and drop the reading to an icon.
  */
 export interface BadgeSourceInfo {
-  source: BadgeEntity;
+  /** Where the badge's number is coming from right now. */
+  source: "primary" | number;
   /** Friendly names, falling back to the entity ids when hass has none. */
   primaryLabel?: string;
-  secondaryLabel?: string;
+  /** One per reading, positionally, so the dropdown can name each. */
+  readingLabels?: (string | undefined)[];
 }
 
 /**
- * `deviceClass` is the entity's HA device class, the one hass-derived fact the
- * device form needs: it is what separates a motion sensor from a door contact,
- * and so decides whether the ripple ring is offered at all (issue #127). The
- * editor reads it off `hass` at the call site, as it already does for openings.
- * `badgeSource` is the second such fact — see {@link BadgeSourceInfo}.
+ * The device's own entity and attribute — the first reading, and the one
+ * `showState` governs.
+ *
+ * Its own group so the editor can slot the repeatable "Other entities" rows
+ * *directly beneath it* (issue #180), which is where the old "Second entity" /
+ * "2nd attribute" pair used to sit. Everything a device reads is then in one
+ * place and in the order it appears on the label, rather than the second
+ * reading being a form field and the third onwards being a list further down.
  */
-export function itemForm(
-  it: FloorItem,
-  areaScope?: AreaEntityScope,
-  deviceClass?: string,
-  badgeSource?: BadgeSourceInfo
-): FormSpec {
-  const ripple = itemHasRipple(it);
-  const presence = isPresenceEntity(it.entity, deviceClass);
+export function itemEntityForm(it: FloorItem, areaScope?: AreaEntityScope): FormSpec {
+  return {
+    fields: [
+      {
+        name: "entity",
+        label: "Entity",
+        required: true,
+        helper: areaScopeHelper(areaScope),
+        selector: areaScopedEntity(areaScope, it.entity),
+      },
+      {
+        name: "attribute",
+        label: "Attribute",
+        helper: "Show this attribute instead of the state (e.g. current_temperature)",
+        selector: { attribute: { entity_id: it.entity } },
+      },
+    ],
+    data: { entity: it.entity ?? "", attribute: it.attribute ?? "" },
+    toPatch: identity,
+  };
+}
+
+// ---- the device panel, in groups (issue #180 follow-up) --------------------
+//
+// A section header rather than a doc comment: it describes the seven functions
+// below rather than any one of them, and the repo spells that with a banner.
+//
+// It had grown to two dozen controls in one flat run — Name between Attribute
+// and Badge shows, Show state eleven rows below the entity it describes — and
+// the order was the order things had been added in rather than any order you
+// would look for them in. So the panel is now seven groups, each rendered with
+// its own heading and rule by the editor, and each of these functions is one
+// of them.
+//
+// They are separate `FormSpec`s rather than one form with dividers because the
+// hand-rolled rows (the readings list, the icon, the colour pickers) have to
+// interleave with the `ha-form` fields, and `ha-form` renders one flat block.
+// Same reason {@link areaNameForm} and {@link areaForm} are two.
+//
+// Group order, and the reasoning:
+//
+// 1. **Identity** — Name, Show name. What the thing *is*, and it is the first
+//    question anyone answers.
+// 2. **What it reads** — Entity, Attribute, Show state, then the other
+//    entities. Show state sits with the entity whose state it shows.
+// 3. **Label** — position and size, offered only while a label renders.
+// 4. **Badge** — the circle: what it holds, which reading, its glyph and size.
+// 5. **Colour** — the active colour and the state rules that supersede it.
+// 6. **Effects** — ripple and cast light, each offered only where it means
+//    something.
+// 7. **Behaviour** — when it is drawn at all, and what a press does.
+//
+
+/** Group 1: what this device is called. */
+export function itemIdentityForm(it: FloorItem): FormSpec {
+  return {
+    fields: [
+      { name: "name", label: "Name", selector: { text: {} } },
+      {
+        name: "showName",
+        label: "Show name",
+        helper: "Adds the name to the label line",
+        selector: { boolean: {} },
+      },
+    ],
+    data: { name: it.name ?? "", showName: it.showName ?? false },
+    toPatch: identity,
+  };
+}
+
+/**
+ * Group 2, second half: whether the device's own state joins the label.
+ *
+ * Its own one-field spec so the editor can put it directly under the entity
+ * and attribute it describes, with the readings list below it — the whole of
+ * "what this device reads", in the order the label prints it.
+ */
+export function itemShowStateForm(it: FloorItem): FormSpec {
+  return {
+    fields: [
+      {
+        name: "showState",
+        label: "Show state",
+        helper: "Adds this entity's own state to the label line",
+        selector: { boolean: {} },
+      },
+    ],
+    data: { showState: it.showState ?? it.kind === "sensor" },
+    toPatch: identity,
+  };
+}
+
+/** Group 3: where the label sits and how big it is. */
+export function itemLabelForm(it: FloorItem): FormSpec {
+  return {
+    fields: [
+      {
+        name: "labelPosition",
+        label: "Label position",
+        helper: "Beside the badge instead of under it — a long reading then grows one way only",
+        selector: dropdown(opt("below", "Below"), opt("left", "Left"), opt("right", "Right")),
+      },
+      {
+        name: "labelSize",
+        label: "Label size",
+        selector: { number: { min: 8, max: 40, step: 1, mode: "slider", unit_of_measurement: "px" } },
+      },
+    ],
+    data: {
+      labelPosition: labelPositionOf(it),
+      labelSize: it.labelSize ?? DEFAULT_LABEL_SIZE,
+    },
+    // Below is the default, so it stays out of the YAML.
+    toPatch: (p) =>
+      "labelPosition" in p && p.labelPosition === "below" ? { ...p, labelPosition: undefined } : p,
+  };
+}
+
+/**
+ * Group 4: the badge — what it holds, which reading, and how big it is.
+ *
+ * `badgeSource` is a hass-derived fact resolved at the call site rather than
+ * here: what the badge is reading *right now*, so "Badge reads" can open on it
+ * instead of on a guess. See {@link BadgeSourceInfo}.
+ */
+export function itemBadgeForm(it: FloorItem, badgeSource?: BadgeSourceInfo): FormSpec {
   const fields: FormField[] = [
-    {
-      name: "entity",
-      label: "Entity",
-      required: true,
-      helper: areaScopeHelper(areaScope),
-      selector: areaScopedEntity(areaScope, it.entity),
-    },
-    {
-      name: "attribute",
-      label: "Attribute",
-      helper: "Show this attribute instead of the state (e.g. current_temperature)",
-      selector: { attribute: { entity_id: it.entity } },
-    },
-    {
-      name: "secondaryEntity",
-      label: "Second entity",
-      helper: areaScopeHelper(areaScope, "Shown next to the primary state"),
-      selector: areaScopedEntity(areaScope, it.secondaryEntity),
-    },
-    {
-      name: "secondaryAttribute",
-      label: "2nd attribute",
-      helper: "From the second entity, or this entity if none",
-      selector: { attribute: { entity_id: it.secondaryEntity || it.entity } },
-    },
-    { name: "name", label: "Name", selector: { text: {} } },
-    {
-      name: "size",
-      label: "Size",
-      selector: { number: { min: 16, max: 160, step: 2, mode: "slider", unit_of_measurement: "px" } },
-    },
-    angleField(),
     {
       name: "badgeMode",
       label: "Badge shows",
@@ -769,10 +891,17 @@ export function itemForm(
     fields.push({
       name: "badgeEntity",
       label: "Badge reads",
-      helper: "Which of this device's entities the badge shows",
+      helper: "Which of this device's readings the badge shows",
       selector: dropdown(
         opt("primary", badgeSource?.primaryLabel || it.entity || "Main entity"),
-        opt("secondary", badgeSource?.secondaryLabel || it.secondaryEntity)
+        ...readings.map((r, i) =>
+          opt(
+            String(i),
+            badgeSource?.readingLabels?.[i] ||
+              r.entity ||
+              (r.attribute ? `${it.entity || "this device"} · ${r.attribute}` : `Reading ${i + 1}`)
+          )
+        )
       ),
     });
   }
@@ -928,6 +1057,40 @@ export function itemForm(
       glow: it.glow ?? false,
       glowRadius: it.glowRadius ?? DEFAULT_GLOW_RADIUS,
       glowColor: it.glowColor ?? "",
+    },
+    // "Ripple" is the other half of #127's three-key spelling — same expansion
+    // as the badge group's, with the badge mode read off the item.
+    toPatch: (p) => {
+      if (!("ripple" in p)) return p;
+      const { ripple: ring, ...rest } = p;
+      return { ...rest, ...badgeModePatch(badgeModeOf(it), !!ring) };
+    },
+  };
+}
+
+/** Group 7: when the device is drawn at all, and what a press does. */
+export function itemBehaviourForm(it: FloorItem): FormSpec {
+  return {
+    fields: [
+      {
+        name: "hideWhenInactive",
+        label: "Only when active",
+        helper: "Hide on the card while the entity is off/idle (still editable here)",
+        selector: { boolean: {} },
+      },
+      {
+        name: "tap_action",
+        label: "Tap action",
+        selector: { ui_action: { default_action: defaultItemAction(it.entity).action } },
+      },
+      { name: "hold_action", label: "Hold action", selector: { ui_action: { default_action: "none" } } },
+      {
+        name: "double_tap_action",
+        label: "Double-tap action",
+        selector: { ui_action: { default_action: "none" } },
+      },
+    ],
+    data: {
       hideWhenInactive: it.hideWhenInactive ?? false,
       
       // New data keys
@@ -960,6 +1123,7 @@ export function itemForm(
   };
 }
 
+
 export function textForm(t: FloorText): FormSpec {
   return {
     fields: [
@@ -978,7 +1142,7 @@ export function textForm(t: FloorText): FormSpec {
 
 /**
  * `areaEntities` scopes the entity picker to a linked HA area, exactly as in
- * {@link itemForm} — a plant drawn inside the Living Room offers the Living
+ * {@link itemEntityForm} — a plant drawn inside the Living Room offers the Living
  * Room's sensors first.
  */
 export function furnitureForm(
@@ -1299,8 +1463,11 @@ export function projectDisplayForm(c: FloorplanCardConfig): FormSpec {
       {
         name: "overlayScale",
         label: "Badge & label size",
-        helper: `Canvas units scale badges and labels with the drawing — use it when the card renders smaller than its ${c.width}-wide canvas`,
-        selector: dropdown(opt("fixed", "Fixed pixels"), opt("plan", "Canvas units")),
+        // The default first, and the helper describes the *exception* now:
+        // canvas units are what a plan wants unless it is being shown bigger
+        // than it was drawn.
+        helper: `Canvas units scale badges and labels with the drawing. Fixed pixels suit a card rendered larger than its ${c.width}-wide canvas, or a wall tablet`,
+        selector: dropdown(opt("plan", "Canvas units"), opt("fixed", "Fixed pixels")),
       },
       {
         name: "compactHeader",
@@ -1333,8 +1500,9 @@ export function projectDisplayForm(c: FloorplanCardConfig): FormSpec {
       if ("rotation" in out)
         // Stored as a number; 0 means "not rotated", so keep it out of the YAML.
         out = { ...out, rotation: out.rotation === "0" ? undefined : Number(out.rotation) };
-      // "fixed" is the default, so keep it out of the YAML too.
-      if ("overlayScale" in out && out.overlayScale === "fixed")
+      // Canvas units are the default now, so they are what stays out of the
+      // YAML — and "fixed" is what has to be written down.
+      if ("overlayScale" in out && out.overlayScale === "plan")
         out = { ...out, overlayScale: undefined };
       // As are the ordinary header and the dimmed offline device — every
       // default here stays out of the YAML, so a config only ever records the
