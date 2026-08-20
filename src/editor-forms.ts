@@ -717,7 +717,7 @@ function badgeModePatch(mode: BadgeMode, ripple: boolean): Record<string, unknow
 
 /**
  * What the badge is reading *right now*, for the "Badge reads" row (issue
- * #136). Resolved off `hass` at the call site, like {@link itemForm}'s
+ * #136). Resolved off `hass` at the call site, like {@link itemEffectsForm}'s
  * `deviceClass`, because this file stays pure.
  *
  * `source` is load-bearing rather than cosmetic. A plug whose badge shows its
@@ -736,28 +736,14 @@ export interface BadgeSourceInfo {
 }
 
 /**
- * The device's remaining fields — everything except its entity and attribute,
- * which are {@link itemEntityForm} so the readings list can sit between them
- * (issue #180). Takes no `areaScope`: the only pickers that were scoped were
- * the entity ones, and they have moved.
- *
- * `deviceClass` is the entity's HA device class, the one hass-derived fact this
- * form needs: it is what separates a motion sensor from a door contact, and so
- * decides whether the ripple ring is offered at all (issue #127). The editor
- * reads it off `hass` at the call site, as it already does for openings.
- * `badgeSource` is the second such fact — see {@link BadgeSourceInfo}.
- */
-/**
  * The device's own entity and attribute — the first reading, and the one
  * `showState` governs.
  *
- * Split from {@link itemForm} so the editor can slot the repeatable "More
- * readings" rows *directly beneath it* (issue #180), which is where the old
- * "Second entity" / "2nd attribute" pair used to sit. Everything a device
- * reads is then in one place and in the order it appears on the label, rather
- * than the second reading being a form field and the third onwards being a
- * list further down. Both halves still render through `ha-form`, exactly as
- * {@link areaNameForm} and {@link areaForm} do.
+ * Its own group so the editor can slot the repeatable "Other entities" rows
+ * *directly beneath it* (issue #180), which is where the old "Second entity" /
+ * "2nd attribute" pair used to sit. Everything a device reads is then in one
+ * place and in the order it appears on the label, rather than the second
+ * reading being a form field and the third onwards being a list further down.
  */
 export function itemEntityForm(it: FloorItem, areaScope?: AreaEntityScope): FormSpec {
   return {
@@ -781,34 +767,36 @@ export function itemEntityForm(it: FloorItem, areaScope?: AreaEntityScope): Form
   };
 }
 
-/**
- * The device panel, in groups (issue #180 follow-up).
- *
- * It had grown to two dozen controls in one flat run — Name between Attribute
- * and Badge shows, Show state eleven rows below the entity it describes — and
- * the order was the order things had been added in rather than any order you
- * would look for them in. So the panel is now seven groups, each rendered with
- * its own heading and rule by the editor, and each of these functions is one
- * of them.
- *
- * They are separate `FormSpec`s rather than one form with dividers because the
- * hand-rolled rows (the readings list, the icon, the colour pickers) have to
- * interleave with the `ha-form` fields, and `ha-form` renders one flat block.
- * Same reason {@link areaNameForm} and {@link areaForm} are two.
- *
- * Group order, and the reasoning:
- *
- * 1. **Identity** — Name, Show name. What the thing *is*, and it is the first
- *    question anyone answers.
- * 2. **What it reads** — Entity, Attribute, Show state, then the other
- *    entities. Show state sits with the entity whose state it shows.
- * 3. **Label** — position and size, offered only while a label renders.
- * 4. **Badge** — the circle: what it holds, which reading, its glyph and size.
- * 5. **Colour** — the active colour and the state rules that supersede it.
- * 6. **Effects** — ripple and cast light, each offered only where it means
- *    something.
- * 7. **Behaviour** — when it is drawn at all, and what a press does.
- */
+// ---- the device panel, in groups (issue #180 follow-up) --------------------
+//
+// A section header rather than a doc comment: it describes the seven functions
+// below rather than any one of them, and the repo spells that with a banner.
+//
+// It had grown to two dozen controls in one flat run — Name between Attribute
+// and Badge shows, Show state eleven rows below the entity it describes — and
+// the order was the order things had been added in rather than any order you
+// would look for them in. So the panel is now seven groups, each rendered with
+// its own heading and rule by the editor, and each of these functions is one
+// of them.
+//
+// They are separate `FormSpec`s rather than one form with dividers because the
+// hand-rolled rows (the readings list, the icon, the colour pickers) have to
+// interleave with the `ha-form` fields, and `ha-form` renders one flat block.
+// Same reason {@link areaNameForm} and {@link areaForm} are two.
+//
+// Group order, and the reasoning:
+//
+// 1. **Identity** — Name, Show name. What the thing *is*, and it is the first
+//    question anyone answers.
+// 2. **What it reads** — Entity, Attribute, Show state, then the other
+//    entities. Show state sits with the entity whose state it shows.
+// 3. **Label** — position and size, offered only while a label renders.
+// 4. **Badge** — the circle: what it holds, which reading, its glyph and size.
+// 5. **Colour** — the active colour and the state rules that supersede it.
+// 6. **Effects** — ripple and cast light, each offered only where it means
+//    something.
+// 7. **Behaviour** — when it is drawn at all, and what a press does.
+//
 
 /** Group 1: what this device is called. */
 export function itemIdentityForm(it: FloorItem): FormSpec {
@@ -875,7 +863,13 @@ export function itemLabelForm(it: FloorItem): FormSpec {
   };
 }
 
-/** Group 4: the badge — what it holds, which reading, and how big it is. */
+/**
+ * Group 4: the badge — what it holds, which reading, and how big it is.
+ *
+ * `badgeSource` is a hass-derived fact resolved at the call site rather than
+ * here: what the badge is reading *right now*, so "Badge reads" can open on it
+ * instead of on a guess. See {@link BadgeSourceInfo}.
+ */
 export function itemBadgeForm(it: FloorItem, badgeSource?: BadgeSourceInfo): FormSpec {
   const fields: FormField[] = [
     {
@@ -967,6 +961,11 @@ export function itemBadgeForm(it: FloorItem, badgeSource?: BadgeSourceInfo): For
  *
  * Returns `undefined` when this device qualifies for neither, so the editor
  * can leave the whole group out rather than print an empty heading.
+ *
+ * `deviceClass` is the entity's HA device class, resolved off `hass` at the
+ * call site as the openings already do theirs: it is what separates a motion
+ * sensor from a door contact, and so decides whether the ring is offered at
+ * all (issue #127).
  */
 export function itemEffectsForm(it: FloorItem, deviceClass?: string): FormSpec | undefined {
   const ripple = itemHasRipple(it);
@@ -1086,7 +1085,7 @@ export function textForm(t: FloorText): FormSpec {
 
 /**
  * `areaEntities` scopes the entity picker to a linked HA area, exactly as in
- * {@link itemForm} — a plant drawn inside the Living Room offers the Living
+ * {@link itemEntityForm} — a plant drawn inside the Living Room offers the Living
  * Room's sensors first.
  */
 export function furnitureForm(

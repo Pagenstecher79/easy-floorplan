@@ -1981,20 +1981,6 @@ export class FloorplanCardEditor extends LitElement {
   }
 
   /**
-   * Extra readings on a device (issue #180): the third, fourth, fifth line of
-   * text, added one at a time with a "+" rather than by putting four entity
-   * dropdowns on every device that will never use them — which is what the
-   * issue asked for and what the panel could not afford.
-   *
-   * Plain rows for the same reason the state rules below are: the list is
-   * repeatable and `ha-form` has no selector for that.
-   *
-   * The attribute box is offered on every row, not only once an entity is
-   * picked, because a row with an attribute and *no* entity is a real and
-   * useful configuration — it reads that attribute off the device's own
-   * entity, which is how one climate shows four of its own numbers.
-   */
-  /**
    * Which fields each element panel's groups hold, in order.
    *
    * Declared as data rather than inline at the render site so the whole shape
@@ -2066,6 +2052,20 @@ export class FloorplanCardEditor extends LitElement {
     `;
   }
 
+  /**
+   * A device's other entities (issue #180): every reading beyond its own
+   * state, added one at a time with "+ Add entity" rather than by putting four
+   * entity dropdowns on every device that will never use them.
+   *
+   * Plain rows rather than `ha-form` fields for the same reason the state
+   * rules are: the list is repeatable and `ha-form` has no selector for that.
+   *
+   * The attribute box is offered on every row, not only once an entity is
+   * picked, because a row with an attribute and *no* entity is a real and
+   * useful configuration — it reads that attribute off the device's own
+   * entity, which is how one climate shows four of its own numbers. It is HA's
+   * own attribute picker, so it lists what that entity actually has.
+   */
   private _renderItemReadings(it: FloorItem): TemplateResult {
     // The pool as the card sees it, legacy pair included — so a device
     // configured before #180 shows its second entity here as the first row
