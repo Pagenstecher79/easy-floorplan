@@ -4,8 +4,13 @@ import {
   diffFormValue,
   normalizeFormPatch,
   openingForm,
-  itemForm,
   itemEntityForm,
+  itemIdentityForm,
+  itemShowStateForm,
+  itemLabelForm,
+  itemBadgeForm,
+  itemEffectsForm,
+  itemBehaviourForm,
   textForm,
   furnitureForm,
   trackerForm,
@@ -21,6 +26,7 @@ import {
   areaForm,
   areaNameForm,
 } from "./editor-forms";
+import { itemHasLabel } from "./render";
 import type { FormField } from "./editor-forms";
 import type { Area, Opening, FloorItem, Floor, FloorplanCardConfig } from "./types";
 import { DEFAULT_GLOW_RADIUS, DEFAULT_PRESS_EFFECT } from "./types";
@@ -363,6 +369,79 @@ describe("openingForm — a hinged shutter's second panel (issue #159)", () => {
 describe("itemForm", () => {
   const item = { id: "i", entity: "light.a", kind: "light", x: 0, y: 0 } as FloorItem;
 
+  // The device panel is seven groups now rather than one form, but almost
+  // every question below is about the panel as a whole — "is this control
+  // offered", "what does it open on". These two view it that way, so the tests
+  // keep asking what they always asked and stay indifferent to which group a
+  // control ended up in.
+  const groups = (
+    it: FloorItem,
+    deviceClass?: string,
+    badgeSource?: Parameters<typeof itemBadgeForm>[1]
+  ) =>
+    [
+      itemIdentityForm(it),
+      itemEntityForm(it),
+      itemShowStateForm(it),
+      itemHasLabel(it) ? itemLabelForm(it) : undefined,
+      itemBadgeForm(it, badgeSource),
+      itemEffectsForm(it, deviceClass),
+      itemBehaviourForm(it),
+    ].filter((g): g is NonNullable<typeof g> => !!g);
+  const itemForm = (
+    it: FloorItem,
+    deviceClass?: string,
+    badgeSource?: Parameters<typeof itemBadgeForm>[1]
+  ) => {
+    const gs = groups(it, deviceClass, badgeSource);
+    return {
+      fields: gs.flatMap((g) => g.fields),
+      data: Object.assign({}, ...gs.map((g) => g.data)) as Record<string, unknown>,
+      /** Routed to whichever group owns the key, as the editor routes it. */
+      toPatch: (patch: Record<string, unknown>) => {
+        const owner =
+          gs.find((g) => g.fields.some((f) => f.name in patch)) ?? gs[gs.length - 1];
+        return owner.toPatch(patch);
+      },
+    };
+  };
+
+  it("groups the panel, in the order the questions get asked", () => {
+    // The panel is two dozen controls; this pins the shape of it, because the
+    // order is a design decision and not an accident of what was added when.
+    const sensor = { ...item, entity: "sensor.t", kind: "sensor" } as FloorItem;
+    expect(groups(sensor).map((g) => g.fields.map((f) => f.name))).toEqual([
+      ["name", "showName"], // 1. Identity — what it is
+      ["entity", "attribute"], // 2. What it reads…
+      ["showState"], //         …including whether its own state shows
+      ["labelPosition", "labelSize"], // 3. Label
+      ["badgeMode", "size", "angle"], // 4. Badge
+      // 5. Colour and the readings list are hand-rolled rows, not ha-form
+      //    fields, so they do not appear here — the editor slots them into
+      //    their groups.
+      // 6. Effects is absent: a plain sensor neither rings nor casts light.
+      ["hideWhenInactive", "tap_action", "hold_action", "double_tap_action"], // 7. Behaviour
+    ]);
+  });
+
+  it("leaves out the groups a device has nothing to put in", () => {
+    // A light casts, so Effects appears; a sensor does not.
+    const light = { ...item, glow: true } as FloorItem;
+    expect(itemEffectsForm(light)?.fields.map((f) => f.name)).toEqual([
+      "glow",
+      "glowRadius",
+      "glowColor",
+    ]);
+    expect(itemEffectsForm({ ...item, kind: "sensor", entity: "sensor.t" } as FloorItem)).toBeUndefined();
+    // …and the Label group is skipped entirely while nothing labels the device.
+    expect(groups(item).some((g) => g.fields.some((f) => f.name === "labelPosition"))).toBe(false);
+    expect(
+      groups({ ...item, showName: true } as FloorItem).some((g) =>
+        g.fields.some((f) => f.name === "labelPosition")
+      )
+    ).toBe(true);
+  });
+
   it("offers Cast light on lights only, with its controls behind the toggle (#6)", () => {
     const names = (it: FloorItem) => itemForm(it).fields.map((x) => x.name);
     expect(names(item)).toContain("glow");
@@ -538,17 +617,16 @@ describe("itemForm", () => {
       display: "badge",
       showIcon: undefined,
     });
-    // The ring toggle alone is still a complete statement about `display`:
-    // the mode comes off the item.
-    expect(f.toPatch({ ripple: true }).display).toBe("iconRipple");
-    expect(
-      itemForm({ ...item, badgeContent: "none" } as FloorItem).toPatch({ ripple: true }).display
-    ).toBe("ripple");
-    expect(
-      itemForm({ ...item, display: "iconRipple" } as FloorItem).toPatch({ ripple: false }).display
-    ).toBe("badge");
-    // Both at once, and unrelated edits, pass through untouched.
-    expect(f.toPatch({ badgeMode: "none", ripple: true }).display).toBe("ripple");
+    // The ring toggle alone is still a complete statement about `display`: the
+    // mode comes off the item. It lives in the Effects group and is offered
+    // only to a presence device, which is the only device that can emit it.
+    const ring = { ...item, entity: "binary_sensor.hall", kind: "binary_sensor" } as FloorItem;
+    const rf = (extra: Partial<FloorItem> = {}) =>
+      itemEffectsForm({ ...ring, ...extra } as FloorItem, "motion")!;
+    expect(rf().toPatch({ ripple: true }).display).toBe("iconRipple");
+    expect(rf({ badgeContent: "none" }).toPatch({ ripple: true }).display).toBe("ripple");
+    expect(rf({ display: "iconRipple" }).toPatch({ ripple: false }).display).toBe("badge");
+    // Unrelated edits pass through untouched, in whichever group owns them.
     expect(f.toPatch({ size: 40 })).toEqual({ size: 40 });
     expect(f.toPatch({ size: 40, badgeMode: "value" }).size).toBe(40);
   });

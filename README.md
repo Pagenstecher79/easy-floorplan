@@ -32,7 +32,7 @@ screen size.
 <img width="195" height="278" alt="light blend" src="https://github.com/user-attachments/assets/23104587-687b-4c9a-83e8-e83c3d5eb6eb" />
 <img width="240" height="358" alt="conditionals" src="https://github.com/user-attachments/assets/11d359b6-de8c-483c-8763-105ddf7d915b" />
 
-- (${\color{red}NEW!}$) **Many readings, one device** — a sensor that reports temperature, humidity and pressure needs one badge, not three. Add readings one at a time; they show whether or not the device's own state does, so a smart plug can label itself `1.2 kW · 84 · 5 min ago` while the badge colour carries the on/off. The label can sit below, left or right of the badge.
+- (${\color{red}NEW!}$) **Many readings, one device** — a sensor that reports temperature, humidity and pressure needs one badge, not three. Add entities one at a time; they show whether or not the device's own state does, so a smart plug can label itself `1.2 kW · 84 · 5 min ago` while the badge colour carries the on/off. The label can sit below, left or right of the badge.
 - **Animated doors & windows** — bind a contact `binary_sensor` or `cover` and openings swing, slide or roll with their real state, partial positions included.
   - (${\color{red}NEW!}$) **A sensor per leaf** — anything with two leaves takes a second contact and draws them independently: a casement window with one sash open and one shut, a double door ajar on one side, a pair of shutters with one folded back.
 - (${\color{red}NEW!}$) **Offline devices read as offline** — an entity that is unavailable, unknown, or gone from Home Assistant is dimmed (or crossed out), instead of looking exactly like a device someone switched off.
@@ -103,7 +103,7 @@ then pick the entity in the **Element** section below the canvas.
   both read `Name · state`. **Label size** sets the font size. The editor canvas draws
   the same line the card will, so turning one on is visible straight away; a device
   showing neither still gets a dimmed editor-only label so you can tell it apart.
-- **More readings** — **+ Add reading**, right under the entity, appends as many as the
+- **Other entities** — **+ Add entity**, right under the first one, appends as many as the
   device has: `21.5 °C · 45% · 1013 hPa`. Each row picks an entity, an attribute, or both
   — leave the entity empty and it reads that attribute off this device, so one climate
   entity can show four of its own numbers. See
@@ -1101,7 +1101,7 @@ from:
 | — | — | nothing — a blank row draws no text |
 
 The third row is what lets one climate entity show four of its own attributes without
-naming itself four times. The fourth is why the editor's **+ Add reading** can hand you an
+naming itself four times. The fourth is why the editor's **+ Add entity** can hand you an
 empty row without a `—` appearing on the plan.
 
 ### Readings ignore "Show state"
@@ -1150,10 +1150,15 @@ whichever it likes:
 > under it that wasn't there before; delete that row, or leave it — it is the number you
 > pointed the device at. Sensors, which show state by default, are unaffected.
 
-In the editor the readings sit **directly under the entity**, added one at a time with
-**+ Add reading** rather than by putting four entity dropdowns on every device that will
-never use them. Each row's attribute box is HA's own attribute picker, listing what that
-entity actually has.
+In the editor these sit **directly under the entity** as **Other entities**, added one at a
+time with **+ Add entity** rather than by putting four entity dropdowns on every device
+that will never use them. Each row's attribute box is HA's own attribute picker, listing
+what that entity actually has.
+
+The device panel is grouped: **Identity** (name, show name), **What it reads** (entity,
+attribute, show state, other entities), **Label**, **Badge**, **Color**, **Effects** and
+**Behavior**, each with its own heading. Groups that have nothing to offer are left out —
+a sensor gets no Effects group, and a device that draws no label gets no Label group.
 
 ## Offline devices
 

@@ -112,6 +112,7 @@ import {
   itemLabelSize,
   labelPositionOf,
   itemReadings,
+  itemHasLabel,
   snapToWall,
   collectWatchedEntities,
   hassRenderInputsChanged,
@@ -148,8 +149,13 @@ import {
   floorImageForm,
   furnitureForm,
   isLiveField,
-  itemForm,
   itemEntityForm,
+  itemIdentityForm,
+  itemShowStateForm,
+  itemLabelForm,
+  itemBadgeForm,
+  itemEffectsForm,
+  itemBehaviourForm,
   itemHasRipple,
   normalizeFormPatch,
   openingForm,
@@ -1987,6 +1993,27 @@ export class FloorplanCardEditor extends LitElement {
    * useful configuration — it reads that attribute off the device's own
    * entity, which is how one climate shows four of its own numbers.
    */
+  /**
+   * One titled group of the element panel, with a rule above it.
+   *
+   * The device panel had grown to two dozen controls in one flat run, in the
+   * order they had been added rather than any order you would look for them
+   * in. Grouping them costs a heading and a hairline each; what it buys is
+   * that "where do I set the label position" has an answer you can guess.
+   *
+   * Takes the content rather than a field list because a group is rarely all
+   * `ha-form` — the readings list, the icon row and the colour pickers are
+   * hand-rolled, and they belong *inside* the group whose subject they share.
+   */
+  private _renderGroup(title: string, ...content: unknown[]): TemplateResult {
+    return html`
+      <div class="cfg-group">
+        <p class="cfg-group-title">${title}</p>
+        ${content}
+      </div>
+    `;
+  }
+
   private _renderItemReadings(it: FloorItem): TemplateResult {
     // The pool as the card sees it, legacy pair included — so a device
     // configured before #180 shows its second entity here as the first row
@@ -2011,7 +2038,7 @@ export class FloorplanCardEditor extends LitElement {
     return html`
       <div class="row wide">
         <label title="Further entities and attributes whose readings join this device's label line"
-          >More readings</label
+          >Other entities</label
         >
       </div>
       ${list.map(
@@ -2034,8 +2061,8 @@ export class FloorplanCardEditor extends LitElement {
             )}
             <button
               class="rule-remove"
-              aria-label="Remove reading"
-              title="Remove this reading"
+              aria-label="Remove entity"
+              title="Remove this entity"
               @click=${() => commit(list.filter((_, j) => j !== i))}
             >
               <ha-icon icon="mdi:close"></ha-icon>
@@ -2045,7 +2072,7 @@ export class FloorplanCardEditor extends LitElement {
       )}
       <div class="row wide state-color-add">
         <button @click=${() => commit([...list, {}])}>
-          <ha-icon icon="mdi:plus"></ha-icon>Add reading
+          <ha-icon icon="mdi:plus"></ha-icon>Add entity
         </button>
       </div>
       ${list.length
@@ -4207,62 +4234,81 @@ export class FloorplanCardEditor extends LitElement {
         // off this device, so that is the name to show for it (issue #180).
         readingLabels: itemReadings(it).map((r) => friendly(r.entity || it.entity)),
       } as const;
+      // One handler for every group: they all patch the same item, and only
+      // the entity field needs anything extra.
+      const apply = (patch: Record<string, unknown>, live: boolean): void => {
+        if ("entity" in patch && typeof patch.entity === "string") {
+          // Any entity change re-derives the item kind (icon defaults etc.) —
+          // including clearing it, which resets kind to "generic".
+          patch = { ...patch, kind: kindFromEntity(patch.entity) };
+        }
+        this._applyElementPatch("item", it.id, patch, live);
+      };
+      const effects = itemEffectsForm(it, deviceClass);
       return html`
-        <!-- Entity, Attribute, then every other reading, then the rest: the
-             device's readings all sit together and in the order the label
-             prints them (issue #180). -->
-        ${this._renderForm(itemEntityForm(it, areaEntities), (patch, live) => {
-          // Any entity change re-derives the item kind (icon defaults etc.) —
-          // including clearing it, which resets kind to "generic".
-          if ("entity" in patch && typeof patch.entity === "string") {
-            patch = { ...patch, kind: kindFromEntity(patch.entity) };
-          }
-          this._applyElementPatch("item", it.id, patch, live);
-        })}
-        ${this._renderItemReadings(it)}
-        ${this._renderForm(itemForm(it, deviceClass, badgeSource), (patch, live) => {
-          // Any entity change re-derives the item kind (icon defaults etc.) —
-          // including clearing it, which resets kind to "generic".
-          if ("entity" in patch && typeof patch.entity === "string") {
-            patch = { ...patch, kind: kindFromEntity(patch.entity) };
-          }
-          this._applyElementPatch("item", it.id, patch, live);
-        })}
-        ${it.stateColor?.length
-          ? // Colour by state supersedes the fixed active colour, so showing
-            // both invites setting one and seeing the other. Say which one is
-            // in charge instead of leaving a dead control on screen.
-            html`<p class="hint rule-note">
-              Colored by the state rules below — they replace the active color.
-            </p>`
-          : this._renderColorRow({
-              label: "Active color",
-              title: "Badge color while this device is on (issue #79)",
-              value: it.activeColor,
-              swatch: "#fdd835",
-              placeholder: "(theme)",
-              onLive: (activeColor) => this._updateItemLive(it.id, { activeColor }),
-              onCommit: (activeColor) => this._updateItem(it.id, { activeColor }),
-            })}
-        ${isPresenceEntity(it.entity, deviceClass) && itemHasRipple(it)
-          ? this._renderColorRow({
-              label: "Ripple color",
-              value: it.rippleColor,
-              swatch: it.activeColor ?? "#03a9f4",
-              placeholder: it.activeColor ? "(active color)" : "(primary)",
-              onLive: (rippleColor) => this._updateItemLive(it.id, { rippleColor }),
-              onCommit: (rippleColor) => this._updateItem(it.id, { rippleColor }),
-            })
-          : nothing}
-        ${this._renderItemIconRow(it)}
-        ${this._renderStateColorRules(
-          it.stateColor,
-          (stateColor) => this._updateItem(it.id, { stateColor }),
-          // Only a device draws a glyph, so only a device's rules offer an
-          // icon — furniture and areas share this rule shape but paint
-          // polygons (issue #106).
-          { icons: true, iconPlaceholder: this._itemDefaultIcon(it) }
+        ${this._renderGroup("Identity", this._renderForm(itemIdentityForm(it), apply))}
+        ${this._renderGroup(
+          "What it reads",
+          // Entity, its attribute, whether its own state shows, then every
+          // other entity — the order the label prints them in (issue #180).
+          this._renderForm(itemEntityForm(it, areaEntities), apply),
+          this._renderForm(itemShowStateForm(it), apply),
+          this._renderItemReadings(it)
         )}
+        ${itemHasLabel(it)
+          ? // Nothing to place or size while the device draws no label at all.
+            this._renderGroup("Label", this._renderForm(itemLabelForm(it), apply))
+          : nothing}
+        ${this._renderGroup(
+          "Badge",
+          this._renderForm(itemBadgeForm(it, badgeSource), apply),
+          this._renderItemIconRow(it)
+        )}
+        ${this._renderGroup(
+          "Color",
+          it.stateColor?.length
+            ? // Colour by state supersedes the fixed active colour, so showing
+              // both invites setting one and seeing the other. Say which one is
+              // in charge instead of leaving a dead control on screen.
+              html`<p class="hint rule-note">
+                Colored by the state rules below — they replace the active color.
+              </p>`
+            : this._renderColorRow({
+                label: "Active color",
+                title: "Badge color while this device is on (issue #79)",
+                value: it.activeColor,
+                swatch: "#fdd835",
+                placeholder: "(theme)",
+                onLive: (activeColor) => this._updateItemLive(it.id, { activeColor }),
+                onCommit: (activeColor) => this._updateItem(it.id, { activeColor }),
+              }),
+          this._renderStateColorRules(
+            it.stateColor,
+            (stateColor) => this._updateItem(it.id, { stateColor }),
+            // Only a device draws a glyph, so only a device's rules offer an
+            // icon — furniture and areas share this rule shape but paint
+            // polygons (issue #106).
+            { icons: true, iconPlaceholder: this._itemDefaultIcon(it) }
+          )
+        )}
+        ${effects
+          ? this._renderGroup(
+              "Effects",
+              this._renderForm(effects, apply),
+              // The ring's colour belongs with the ring, not with the badge's.
+              isPresenceEntity(it.entity, deviceClass) && itemHasRipple(it)
+                ? this._renderColorRow({
+                    label: "Ripple color",
+                    value: it.rippleColor,
+                    swatch: it.activeColor ?? "#03a9f4",
+                    placeholder: it.activeColor ? "(active color)" : "(primary)",
+                    onLive: (rippleColor) => this._updateItemLive(it.id, { rippleColor }),
+                    onCommit: (rippleColor) => this._updateItem(it.id, { rippleColor }),
+                  })
+                : nothing
+            )
+          : nothing}
+        ${this._renderGroup("Behavior", this._renderForm(itemBehaviourForm(it), apply))}
       `;
     }
 
@@ -5742,6 +5788,40 @@ export class FloorplanCardEditor extends LitElement {
     .rows > .hint,
     .rows > p {
       grid-column: 1 / -1;
+    }
+    /* ---- Element panel groups --------------------------------------------
+       The device panel is two dozen controls; ungrouped, finding one meant
+       reading all of them. Each group is a heading and a hairline above it,
+       with real space between groups so the eye can skip a whole section it
+       does not want.
+
+       The rule is on the group rather than between them, and the first group
+       drops it: a line above the very first heading would read as a border
+       around the panel rather than as a separator inside it. */
+    .cfg-group {
+      border-top: 1px solid var(--divider-color, #e0e0e0);
+      padding-top: 14px;
+      margin-top: 18px;
+    }
+    .cfg-group:first-of-type {
+      border-top: none;
+      padding-top: 0;
+      margin-top: 0;
+    }
+    /* The heading names the group without competing with the field labels
+       beneath it: same size, but the primary ink and a little letter-spacing,
+       so it reads as a heading rather than as one more row label. */
+    .cfg-group-title {
+      margin: 0 0 10px;
+      font-size: 13px;
+      font-weight: 500;
+      letter-spacing: 0.02em;
+      color: var(--primary-text-color);
+    }
+    /* ha-form packs its own fields tightly; the last one in a group should not
+       sit flush against the next group's rule. */
+    .cfg-group > *:last-child {
+      margin-bottom: 0;
     }
     .row {
       display: flex;
