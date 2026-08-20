@@ -81,6 +81,11 @@ import {
   entityStateText,
   itemStateText,
   itemBadgeLabel,
+  itemReadingText,
+  itemReadings,
+  badgeEntityIndex,
+  itemHasLabel,
+  labelPositionOf,
   editorItemLabel,
   itemHiddenWhenInactive,
   resolveStateColor,
@@ -736,20 +741,60 @@ describe("entityStateText", () => {
 });
 
 describe("itemStateText", () => {
-  it("renders the primary entity alone when no secondary is paired", () => {
+  it("renders the device's own state", () => {
     expect(itemStateText(livingArea(), { entity: TEMP })).toBe("17.9 °C");
   });
 
-  it("pairs a temperature entity with its humidity entity", () => {
-    expect(itemStateText(livingArea(), { entity: TEMP, secondaryEntity: HUMIDITY })).toBe(
+  it("renders an attribute of it when one is named (issue #70)", () => {
+    const h = livingArea();
+    (h.states[TEMP]!.attributes as Record<string, unknown>).battery = 84;
+    expect(itemStateText(h, { entity: TEMP, attribute: "battery" })).toBe("84");
+  });
+});
+
+// The legacy pair is a *spelling* of the first extra reading now (issue #180),
+// not a mechanism of its own — so what matters is that a config written before
+// that change still draws the same line.
+describe("the legacy secondaryEntity pair, through the pool", () => {
+  const sensor = (extra: Record<string, unknown> = {}) =>
+    ({ entity: TEMP, kind: "sensor", ...extra }) as Parameters<typeof itemBadgeLabel>[1];
+
+  it("still pairs a temperature entity with its humidity entity", () => {
+    expect(itemBadgeLabel(livingArea(), sensor({ secondaryEntity: HUMIDITY }))).toBe(
       "17.9 °C · 49.3%",
     );
   });
 
-  it("still renders the primary when the secondary entity is missing", () => {
-    expect(itemStateText(livingArea(), { entity: TEMP, secondaryEntity: "sensor.gone" })).toBe(
+  it("still renders the primary when the second entity is missing", () => {
+    expect(itemBadgeLabel(livingArea(), sensor({ secondaryEntity: "sensor.gone" }))).toBe(
       "17.9 °C · —",
     );
+  });
+
+  it("is the first entry of the pool, ahead of any readings", () => {
+    expect(
+      itemReadings({ secondaryEntity: HUMIDITY, readings: [{ entity: TEMP }] }),
+    ).toEqual([{ entity: HUMIDITY, attribute: undefined }, { entity: TEMP }]);
+    expect(itemReadings({})).toEqual([]);
+    expect(itemReadings({ readings: [{ entity: TEMP }] })).toEqual([{ entity: TEMP }]);
+  });
+
+  it("a lone secondaryAttribute still reads the device's own entity", () => {
+    const h = livingArea();
+    (h.states[TEMP]!.attributes as Record<string, unknown>).battery = 84;
+    expect(itemBadgeLabel(h, sensor({ secondaryAttribute: "battery" }))).toBe("17.9 °C · 84");
+    expect(itemReadings({ secondaryAttribute: "battery" })).toEqual([
+      { entity: undefined, attribute: "battery" },
+    ]);
+  });
+
+  it("mixes with readings, in written order", () => {
+    expect(
+      itemBadgeLabel(
+        livingArea(),
+        sensor({ secondaryEntity: HUMIDITY, readings: [{ entity: TEMP }] }),
+      ),
+    ).toBe("17.9 °C · 49.3% · 17.9 °C");
   });
 });
 
@@ -802,6 +847,142 @@ describe("itemBadgeLabel (issues #61, #59)", () => {
     expect(
       itemBadgeLabel(named(), { entity: "", kind: "sensor", showName: true, name: "Detector" }),
     ).toBe("Detector");
+  });
+});
+
+describe("more readings per device (issue #180)", () => {
+  const named = () => {
+    const h = livingArea();
+    (h.states[TEMP]!.attributes as Record<string, unknown>).friendly_name = "Living Temp";
+    return h;
+  };
+
+  it("appends each reading to the label line", () => {
+    expect(
+      itemBadgeLabel(named(), {
+        entity: TEMP,
+        kind: "sensor",
+        readings: [{ entity: HUMIDITY }],
+      }),
+    ).toBe("17.9 °C · 49.3%");
+  });
+
+  it("takes as many as are configured, in order", () => {
+    const h = named();
+    expect(
+      itemBadgeLabel(h, {
+        entity: TEMP,
+        kind: "sensor",
+        showName: true,
+        readings: [{ entity: HUMIDITY }, { entity: TEMP }],
+      }),
+    ).toBe("Living Temp · 17.9 °C · 49.3% · 17.9 °C");
+  });
+
+  it("shows readings even with the device's own state hidden", () => {
+    // I-G-1-1's plug in discussion #173: on/off is already in the badge
+    // colour, so the label is to carry the *other* numbers and not "on".
+    expect(
+      itemBadgeLabel(named(), {
+        entity: TEMP,
+        kind: "sensor",
+        showState: false,
+        readings: [{ entity: HUMIDITY }],
+      }),
+    ).toBe("49.3%");
+    // …and with the name back on, the state is still the only thing missing.
+    expect(
+      itemBadgeLabel(named(), {
+        entity: TEMP,
+        kind: "sensor",
+        showState: false,
+        showName: true,
+        readings: [{ entity: HUMIDITY }],
+      }),
+    ).toBe("Living Temp · 49.3%");
+  });
+
+  it("reads an attribute of the device's own entity when the row names none", () => {
+    const h = named();
+    (h.states[TEMP]!.attributes as Record<string, unknown>).battery = 84;
+    expect(
+      itemBadgeLabel(h, { entity: TEMP, kind: "sensor", readings: [{ attribute: "battery" }] }),
+    ).toBe("17.9 °C · 84");
+  });
+
+  it("draws nothing for a row that names nothing — the editor's fresh row", () => {
+    // "+" adds {} and the picker is filled in afterwards; a dash appearing on
+    // the plan the moment you click it would be its own bug report.
+    expect(itemBadgeLabel(named(), { entity: TEMP, kind: "sensor", readings: [{}] })).toBe(
+      "17.9 °C",
+    );
+    expect(itemReadingText(named(), { entity: TEMP }, {})).toBe("");
+  });
+
+  it("a device with no entity of its own still shows a reading that names one", () => {
+    expect(
+      itemBadgeLabel(named(), { entity: "", kind: "light", readings: [{ entity: HUMIDITY }] }),
+    ).toBe("49.3%");
+    // …but an attribute row with nothing to read it off stays silent.
+    expect(
+      itemBadgeLabel(named(), { entity: "", kind: "light", readings: [{ attribute: "battery" }] }),
+    ).toBe("");
+  });
+
+  it("leaves a device with no readings exactly as it was", () => {
+    for (const readings of [undefined, []]) {
+      expect(itemBadgeLabel(named(), { entity: TEMP, kind: "sensor", readings })).toBe("17.9 °C");
+    }
+  });
+
+  it("still watches every reading's entity, or the line goes intermittent", () => {
+    const got = collectWatchedEntities({
+      items: [
+        {
+          id: "i",
+          kind: "sensor",
+          x: 0,
+          y: 0,
+          entity: TEMP,
+          readings: [{ entity: HUMIDITY }, { attribute: "battery" }, {}],
+        },
+      ],
+    } as unknown as FloorplanCardConfig);
+    expect([...got].sort()).toEqual([TEMP, HUMIDITY].sort());
+  });
+});
+
+describe("itemHasLabel / labelPositionOf (issue #180)", () => {
+  it("knows a device labels itself from its readings alone", () => {
+    // Both toggles off, so the historic test would have said "no label" and
+    // hidden the size and position controls for a label that is on screen.
+    expect(itemHasLabel({ kind: "light", readings: [{ entity: HUMIDITY }] })).toBe(true);
+    expect(itemHasLabel({ kind: "light", showState: false, readings: [{ attribute: "b" }] })).toBe(
+      true,
+    );
+    // A row that names nothing is not a label.
+    expect(itemHasLabel({ kind: "light", readings: [{}] })).toBe(false);
+    expect(itemHasLabel({ kind: "light" })).toBe(false);
+  });
+
+  it("keeps the historic answers for everything else", () => {
+    expect(itemHasLabel({ kind: "sensor" })).toBe(true); // sensors show state
+    expect(itemHasLabel({ kind: "sensor", showState: false })).toBe(false);
+    expect(itemHasLabel({ kind: "light", showName: true })).toBe(true);
+    expect(itemHasLabel({ kind: "light", showState: true })).toBe(true);
+  });
+
+  it("resolves the label position, defaulting to below", () => {
+    expect(labelPositionOf({})).toBe("below");
+    expect(labelPositionOf({ labelPosition: "below" })).toBe("below");
+    expect(labelPositionOf({ labelPosition: "left" })).toBe("left");
+    expect(labelPositionOf({ labelPosition: "right" })).toBe("right");
+  });
+
+  it("falls back to below on a junk value — it becomes a class name", () => {
+    expect(labelPositionOf({ labelPosition: "above" as never })).toBe("below");
+    expect(labelPositionOf({ labelPosition: "" as never })).toBe("below");
+    expect(labelPositionOf({ labelPosition: 3 as never })).toBe("below");
   });
 });
 
@@ -867,12 +1048,16 @@ describe("editorItemLabel (#135)", () => {
 });
 
 describe("overlay scaling", () => {
-  it("normalizes the mode, defaulting anything unrecognized to fixed", () => {
-    expect(normalizeOverlayScale("plan")).toBe("plan");
-    expect(normalizeOverlayScale(undefined)).toBe("fixed");
+  it("normalizes the mode, defaulting anything unrecognized to plan", () => {
+    // The default is canvas units: a plan is shown at whatever width the
+    // dashboard has, so pinning the overlay to px only agrees with the drawing
+    // by luck. `fixed` is now the value you have to ask for by name.
     expect(normalizeOverlayScale("fixed")).toBe("fixed");
-    expect(normalizeOverlayScale("PLAN")).toBe("fixed");
-    expect(normalizeOverlayScale(1)).toBe("fixed");
+    expect(normalizeOverlayScale("plan")).toBe("plan");
+    expect(normalizeOverlayScale(undefined)).toBe("plan");
+    expect(normalizeOverlayScale("FIXED")).toBe("plan");
+    expect(normalizeOverlayScale(1)).toBe("plan");
+    expect(normalizeOverlayScale("")).toBe("plan");
   });
 
   it("emits screen pixels under fixed and canvas units under plan", () => {
@@ -1690,21 +1875,23 @@ describe("itemStateText with attributes (issue #70)", () => {
 
   it("secondaryAttribute without a second entity reads the same entity", () => {
     expect(
-      itemStateText(climate(), {
+      itemBadgeLabel(climate(), {
         entity: "climate.home",
+        kind: "sensor",
         attribute: "current_temperature",
         secondaryAttribute: "current_humidity",
-      }),
+      } as Parameters<typeof itemBadgeLabel>[1]),
     ).toBe("21.5 · 45");
   });
 
   it("secondaryAttribute applies to secondaryEntity when both are set", () => {
     expect(
-      itemStateText(climate(), {
+      itemBadgeLabel(climate(), {
         entity: "climate.home",
+        kind: "sensor",
         secondaryEntity: TEMP,
         secondaryAttribute: "unit_of_measurement",
-      }),
+      } as Parameters<typeof itemBadgeLabel>[1]),
     ).toBe("heat · °C");
   });
 
@@ -2048,10 +2235,46 @@ describe("badgeValue (#106)", () => {
     it("reports which entity the reading came from", () => {
       // The plug's switch says "on" — not a number — so the badge is showing
       // the power sensor. The form has to be able to say so.
+      // `source` is the reading's *index* in the pool since issue #180 — the
+      // legacy pair is index 0, which is where it always sat.
       expect(badgeReading(plug(), { entity: "switch.plug", secondaryEntity: "sensor.plug_power" }))
-        .toEqual({ text: "1.2kW", source: "secondary" });
+        .toEqual({ text: "1.2kW", source: 0 });
       expect(badgeReading(twoSensors(), { entity: "sensor.a", secondaryEntity: "sensor.b" }))
         .toEqual({ text: "21°", source: "primary" });
+      // …and a reading further down the pool reports its own index.
+      expect(
+        badgeReading(plug(), {
+          entity: "switch.plug",
+          readings: [{ entity: "sensor.nothing" }, { entity: "sensor.plug_power" }],
+        }),
+      ).toEqual({ text: "1.2kW", source: 1 });
+    });
+
+    it("takes the legacy 'secondary' and a modern index to the same place (#180)", () => {
+      const item = { entity: "sensor.a", secondaryEntity: "sensor.b" } as const;
+      expect(badgeReading(twoSensors(), { ...item, badgeEntity: "secondary" })).toEqual(
+        badgeReading(twoSensors(), { ...item, badgeEntity: 0 }),
+      );
+      expect(badgeEntityIndex("secondary")).toBe(0);
+      expect(badgeEntityIndex("primary")).toBe("primary");
+      expect(badgeEntityIndex(2)).toBe(2);
+      // Nothing chosen, and nonsense, both mean "work it out".
+      expect(badgeEntityIndex(undefined)).toBeUndefined();
+      expect(badgeEntityIndex(-1 as never)).toBeUndefined();
+      expect(badgeEntityIndex(1.5 as never)).toBeUndefined();
+      expect(badgeEntityIndex("third" as never)).toBeUndefined();
+    });
+
+    it("an index past the end shows the icon rather than another reading", () => {
+      // Naming a reading that no longer exists must not slide quietly onto a
+      // different sensor — the badge falls back to its glyph instead.
+      expect(
+        badgeReading(plug(), {
+          entity: "switch.plug",
+          readings: [{ entity: "sensor.plug_power" }],
+          badgeEntity: 7,
+        }),
+      ).toBeUndefined();
     });
 
     it("badgeValue is exactly badgeReading's text, across the whole chain", () => {

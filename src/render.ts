@@ -17,6 +17,8 @@ import type {
   StateColorRule,
   BadgeContent,
   BadgeEntity,
+  ItemReading,
+  LabelPosition,
   PressEffect,
   OfflineStyle,
   Furniture,
@@ -134,7 +136,12 @@ export function collectWatchedEntities(c: FloorplanCardConfig): Set<string> {
     }
     for (const it of f.items) {
       if (it.entity) ids.add(it.entity);
-      if (it.secondaryEntity) ids.add(it.secondaryEntity);
+      // Every reading beyond the device's own state (issue #180), legacy
+      // second entity included — one pool, so one loop. Same trap as the
+      // opening's second leaf above: miss one and that line of the label is
+      // not frozen but *intermittent*, catching up only when some other
+      // watched entity happens to move.
+      for (const r of itemReadings(it)) if (r.entity) ids.add(r.entity);
     }
     // Entity-bound furniture (issue #82) — without this the card never
     // re-renders when the soil sensor moves, and the plant stays its
@@ -179,29 +186,77 @@ export function entityAttributeText(
 }
 
 /**
- * State text for an item: primary reading (state, or `attribute` of the
- * entity — issue #70), plus a secondary one when configured. The secondary
- * reading comes from `secondaryEntity` when set, else from the same entity —
- * so one climate device can show `21.5 °C · 45%` from two attributes.
+ * One {@link ItemReading}'s text (issue #180), or `""` when the row says
+ * nothing yet.
+ *
+ * The empty answer is load-bearing: the editor adds a reading as a blank row
+ * for you to fill in, and a blank row that rendered `entityStateText`'s "—"
+ * would put a dash on the plan the moment you clicked "+". So a row with
+ * neither an entity nor an attribute draws nothing at all, and only a row that
+ * names *something* gets to fail visibly.
+ */
+export function itemReadingText(
+  hass: RenderHass | undefined,
+  item: { entity?: string },
+  reading: ItemReading,
+): string {
+  // An attribute with no entity of its own means "this device's own entity",
+  // which is what lets one climate show four of its attributes (issue #70's
+  // trick, generalised).
+  const entity = reading.entity || (reading.attribute ? item.entity : undefined);
+  if (!entity) return "";
+  return reading.attribute
+    ? entityAttributeText(hass, entity, reading.attribute)
+    : entityStateText(hass, entity);
+}
+
+/**
+ * Every reading a device carries **beyond its own state**, as one list
+ * (issue #180).
+ *
+ * There used to be two mechanisms with two different rules: `secondaryEntity`
+ * / `secondaryAttribute` — one extra reading, joined to the state line and
+ * shown only while `showState` was on — and then `readings`, any number of
+ * them, shown always. Two ways to say the same thing, one of them capped at
+ * one, is a distinction nothing outside the config format cared about.
+ *
+ * So there is one pool, and this builds it: the legacy pair first (it was
+ * always the *second* reading, so it keeps that place), then `readings` in
+ * order. Everything downstream — the label, the badge, the watched-entity set,
+ * the editor — reads this rather than either key, which is what makes the
+ * legacy pair a spelling rather than a special case.
+ *
+ * `secondaryAttribute` with no `secondaryEntity` meant "that attribute of this
+ * device's own entity"; an {@link ItemReading} with an attribute and no entity
+ * means exactly the same thing, so it survives the translation unchanged.
+ */
+export function itemReadings(item: {
+  secondaryEntity?: string;
+  secondaryAttribute?: string;
+  readings?: ItemReading[];
+}): ItemReading[] {
+  const legacy: ItemReading[] =
+    item.secondaryEntity || item.secondaryAttribute
+      ? [{ entity: item.secondaryEntity, attribute: item.secondaryAttribute }]
+      : [];
+  return [...legacy, ...(item.readings ?? [])];
+}
+
+/**
+ * A device's own state as text: its `state`, or its `attribute` when one is
+ * named (issue #70).
+ *
+ * The *primary* reading only. Everything else the device shows comes from
+ * {@link itemReadings} and is appended by {@link itemBadgeLabel} — this is the
+ * one `showState` gates, because it is the one that is the device's own state.
  */
 export function itemStateText(
   hass: RenderHass | undefined,
-  item: {
-    entity: string;
-    attribute?: string;
-    secondaryEntity?: string;
-    secondaryAttribute?: string;
-  },
+  item: { entity: string; attribute?: string },
 ): string {
-  const primary = item.attribute
+  return item.attribute
     ? entityAttributeText(hass, item.entity, item.attribute)
     : entityStateText(hass, item.entity);
-  const secondaryEntity = item.secondaryEntity ?? (item.secondaryAttribute ? item.entity : undefined);
-  if (!secondaryEntity) return primary;
-  const secondary = item.secondaryAttribute
-    ? entityAttributeText(hass, secondaryEntity, item.secondaryAttribute)
-    : entityStateText(hass, secondaryEntity);
-  return `${primary} · ${secondary}`;
 }
 
 /**
@@ -963,6 +1018,8 @@ export function itemBadgeLabel(
     kind: ItemKind;
     showName?: boolean;
     showState?: boolean;
+    secondaryAttribute?: string;
+    readings?: ItemReading[];
   },
 ): string {
   const parts: string[] = [];
@@ -973,7 +1030,58 @@ export function itemBadgeLabel(
   }
   if (!!item.entity && (item.showState ?? item.kind === "sensor"))
     parts.push(itemStateText(hass, item));
+  // Every other reading (issue #180), deliberately *not* gated on `showState`:
+  // the case they were asked for is a plug that says on/off through its badge
+  // colour and wants "1.2 kW · 84 · 5 min ago" without the word "on" in front
+  // of it. `showState` is about the device's own state, and these are not it.
+  //
+  // Each is added only if it resolves to something, so the blank row the
+  // editor's "+" creates stays invisible until it is filled in.
+  for (const reading of itemReadings(item)) {
+    const text = itemReadingText(hass, item, reading);
+    if (text) parts.push(text);
+  }
   return parts.join(" · ");
+}
+
+/**
+ * Whether a device draws a label line at all.
+ *
+ * Was `showName || (showState ?? kind === "sensor")` written out at each call
+ * site, which stopped being the whole truth with issue #180: a device can now
+ * have a label from its extra readings alone, both toggles off. The editor
+ * offers the label's size and position off this, so getting it wrong hides the
+ * controls for a label that is on screen.
+ *
+ * Deliberately *not* "would `itemBadgeLabel` return something": that depends
+ * on live state, and a control that vanishes when a sensor drops out is worse
+ * than one that is occasionally offered for an empty line.
+ */
+export function itemHasLabel(item: {
+  kind: ItemKind;
+  showName?: boolean;
+  showState?: boolean;
+  secondaryEntity?: string;
+  secondaryAttribute?: string;
+  readings?: ItemReading[];
+}): boolean {
+  if (item.showName) return true;
+  if (item.showState ?? item.kind === "sensor") return true;
+  return itemReadings(item).some((r) => r.entity || r.attribute);
+}
+
+/**
+ * Where a device's label sits (issue #180), resolving anything unrecognised to
+ * the historic `below`.
+ *
+ * Checked rather than trusted for the same reason {@link pressEffectOf} is: the
+ * value becomes a class name, so a hand-edited typo would otherwise land as
+ * `label-blow`, match no rule, and leave the label in whatever position the
+ * base stylesheet happens to give it.
+ */
+export function labelPositionOf(item: { labelPosition?: LabelPosition }): LabelPosition {
+  const v = item.labelPosition;
+  return v === "left" || v === "right" ? v : "below";
 }
 
 /**
@@ -1062,9 +1170,25 @@ export function wallStrokeStyle(thickness: unknown): string {
 // inside it, see the card's stylesheet) is one canvas unit as a length, so
 // `calc(14 * var(--fp-u))` is 14 canvas units however large the card ends up.
 
-/** Coerce a config `overlayScale`; anything unrecognised means the default. */
+/**
+ * Coerce a config `overlayScale`; anything unrecognised means the default,
+ * which is `plan`.
+ *
+ * The default flipped here, and it is the one change in this file that every
+ * existing plan sees. `fixed` was the historic behaviour and the wrong default:
+ * it only agrees with the drawing when the card renders at roughly its canvas
+ * size, and a plan is shown at whatever width the dashboard gives it. Sizing
+ * the overlay in canvas units is what makes a plan a *drawing* — it looks the
+ * same at every width, and a cluster of badges keeps the spacing it was given
+ * (issue #179).
+ *
+ * `fixed` remains a real choice, and the one to make for a card rendered much
+ * *larger* than its canvas, or a wall tablet where a fixed px floor is what
+ * keeps text readable from across the room. See the README's "Where it helps,
+ * and where it costs".
+ */
 export function normalizeOverlayScale(v: unknown): OverlayScale {
-  return v === "plan" ? "plan" : "fixed";
+  return v === "fixed" ? "fixed" : "plan";
 }
 
 /**
@@ -1588,13 +1712,33 @@ export interface BadgeReadingItem {
   attribute?: string;
   secondaryEntity?: string;
   secondaryAttribute?: string;
+  readings?: ItemReading[];
   badgeEntity?: BadgeEntity;
 }
 
-/** What a badge is showing, and which of the device's entities it came from. */
+/** What a badge is showing, and which of the device's readings it came from. */
 export interface BadgeReading {
   text: string;
-  source: BadgeEntity;
+  /** `"primary"`, or the index into {@link itemReadings} that supplied it. */
+  source: "primary" | number;
+}
+
+/**
+ * Which reading {@link FloorItem.badgeEntity} points at, as an index into
+ * {@link itemReadings} — or `"primary"` for the device's own entity, or
+ * `undefined` for "work it out".
+ *
+ * One place translates the stored value, so the historic `"secondary"` (index
+ * 0, from when a device had exactly two entities) and a modern index arrive at
+ * the same answer and the card and the editor cannot disagree about it. An
+ * index past the end of the pool resolves to nothing rather than silently
+ * sliding to another reading — a config that names a reading which no longer
+ * exists should show its icon, not a number off some other sensor.
+ */
+export function badgeEntityIndex(v: BadgeEntity | undefined): "primary" | number | undefined {
+  if (v === "primary") return "primary";
+  if (v === "secondary") return 0;
+  return typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : undefined;
 }
 
 /**
@@ -1617,9 +1761,10 @@ export function badgeReading(
 ): BadgeReading | undefined {
   if (!hass || !item.entity) return undefined;
 
-  // The secondary, resolved as the label line resolves it ({@link itemStateText}),
-  // so the two never disagree about which entity the second reading comes from.
-  const secondaryEntity = item.secondaryEntity ?? (item.secondaryAttribute ? item.entity : undefined);
+  // The other readings, resolved from the same pool the label line uses
+  // ({@link itemReadings}), so the badge and the label can never disagree
+  // about which entity a reading comes from.
+  const readings = itemReadings(item);
 
   const primary = (): string | undefined => {
     const st = hass.states[item.entity as string];
@@ -1641,34 +1786,45 @@ export function badgeReading(
     return own === undefined ? undefined : formatReading(own, attrs?.unit_of_measurement);
   };
 
-  const secondary = (): string | undefined => {
-    if (!secondaryEntity) return undefined;
-    const sec = hass.states[secondaryEntity];
-    const secAttrs = sec?.attributes as Record<string, unknown> | undefined;
-    if (item.secondaryAttribute) {
-      const n = numericReading(secAttrs?.[item.secondaryAttribute]);
+  /** The numeric value of one reading in the pool, or undefined. */
+  const readingAt = (i: number): string | undefined => {
+    const r = readings[i];
+    if (!r) return undefined;
+    const entity = r.entity || (r.attribute ? item.entity : undefined);
+    if (!entity) return undefined;
+    const st = hass.states[entity];
+    const attrs = st?.attributes as Record<string, unknown> | undefined;
+    if (r.attribute) {
+      const n = numericReading(attrs?.[r.attribute]);
       return n === undefined ? undefined : compactNumber(n);
     }
-    const n = numericReading(sec?.state);
-    return n === undefined ? undefined : formatReading(n, secAttrs?.unit_of_measurement);
+    const n = numericReading(st?.state);
+    return n === undefined ? undefined : formatReading(n, attrs?.unit_of_measurement);
   };
 
-  // An explicit choice reads that entity and stops. Falling through to the
-  // other one would quietly show a different device than the one asked for;
-  // no number at all is honest, and the badge draws its icon instead.
-  if (item.badgeEntity === "secondary") {
-    const text = secondary();
-    return text === undefined ? undefined : { text, source: "secondary" };
-  }
-  if (item.badgeEntity === "primary") {
+  // An explicit choice reads that entity and stops. Falling through to another
+  // would quietly show a different device than the one asked for; no number at
+  // all is honest, and the badge draws its icon instead.
+  const chosen = badgeEntityIndex(item.badgeEntity);
+  if (chosen === "primary") {
     const text = primary();
     return text === undefined ? undefined : { text, source: "primary" };
   }
+  if (typeof chosen === "number") {
+    const text = readingAt(chosen);
+    return text === undefined ? undefined : { text, source: chosen };
+  }
 
+  // Nothing chosen: the first candidate with a number wins, the device's own
+  // entity first. A plug that reads "on" falls through to its power sensor
+  // without anything being configured.
   const own = primary();
   if (own !== undefined) return { text: own, source: "primary" };
-  const other = secondary();
-  return other === undefined ? undefined : { text: other, source: "secondary" };
+  for (let i = 0; i < readings.length; i++) {
+    const text = readingAt(i);
+    if (text !== undefined) return { text, source: i };
+  }
+  return undefined;
 }
 
 /**
