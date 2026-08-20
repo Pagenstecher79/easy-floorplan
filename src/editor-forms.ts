@@ -999,21 +999,7 @@ export function itemBadgeForm(it: FloorItem, badgeSource?: BadgeSourceInfo): For
       label: "Label size",
       selector: { number: { min: 8, max: 40, step: 1, mode: "slider", unit_of_measurement: "px" } },
     });
-  }
-
-  fields.push(
-    {
-      name: "tap_action",
-      label: "Tap action",
-      selector: { ui_action: { default_action: defaultItemAction(it.entity).action } },
-    },
-    { name: "hold_action", label: "Hold action", selector: { ui_action: { default_action: "none" } } },
-    {
-      name: "double_tap_action",
-      label: "Double-tap action",
-      selector: { ui_action: { default_action: "none" } },
-    }
-  );
+  };
 
   return {
     fields,
@@ -1127,12 +1113,6 @@ export function itemEffectsForm(it: FloorItem, deviceClass?: string): FormSpec |
 export function itemBehaviourForm(it: FloorItem): FormSpec {
   return {
     fields: [
-      {
-        name: "hideWhenInactive",
-        label: "Only when active",
-        helper: "Hide on the card while the entity is off/idle (still editable here)",
-        selector: { boolean: {} },
-      },
       {
         name: "tap_action",
         label: "Tap action",
