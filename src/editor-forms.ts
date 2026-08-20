@@ -888,6 +888,7 @@ export function itemLabelForm(it: FloorItem): FormSpec {
  * instead of on a guess. See {@link BadgeSourceInfo}.
  */
 export function itemBadgeForm(it: FloorItem, badgeSource?: BadgeSourceInfo): FormSpec {
+  const readings = itemReadings(it);
   const fields: FormField[] = [
     {
       name: "badgeMode",
@@ -904,7 +905,7 @@ export function itemBadgeForm(it: FloorItem, badgeSource?: BadgeSourceInfo): For
     },
   ];
 
-  if (badgeModeOf(it) === "value" && it.secondaryEntity) {
+  if (badgeModeOf(it) === "value" && (it.secondaryEntity || readings.length > 0)) {
     fields.push({
       name: "badgeEntity",
       label: "Badge reads",
@@ -923,48 +924,6 @@ export function itemBadgeForm(it: FloorItem, badgeSource?: BadgeSourceInfo): For
     });
   }
 
-  if (presence) {
-    fields.push({
-      name: "ripple",
-      label: "Ripple",
-      helper: "Draws a pulsing ring while presence is detected here",
-      selector: { boolean: {} },
-    });
-    if (ripple) {
-      fields.push({
-        name: "rippleSize",
-        label: "Ripple size",
-        selector: {
-          number: { min: 40, max: 400, step: 4, mode: "slider", unit_of_measurement: "px" },
-        },
-      });
-    }
-  }
-
-  if (it.kind === "light" || it.entity?.startsWith("light.")) {
-    fields.push({
-      name: "glow",
-      label: "Cast light",
-      helper: "Pools the light's own color onto the plan; overlapping lights mix",
-      selector: { boolean: {} },
-    });
-    if (it.glow) {
-      fields.push(
-        {
-          name: "glowRadius",
-          label: "Light radius",
-          selector: { number: { min: 20, max: 600, step: 10, mode: "slider" } },
-        },
-        {
-          name: "glowColor",
-          label: "Light color",
-          helper: "Only for bulbs that can't report a color; others use their own",
-          selector: { text: {} },
-        }
-      );
-    }
-  }
-
   fields.push(
     {
       name: "hideWhenInactive",
@@ -979,7 +938,6 @@ export function itemBadgeForm(it: FloorItem, badgeSource?: BadgeSourceInfo): For
     }
   );
 
-  // New logic for conditional hiding
   if (it.enableHideByEntity) {
     fields.push(
       {
@@ -1069,28 +1027,37 @@ export function itemBadgeForm(it: FloorItem, badgeSource?: BadgeSourceInfo): For
       angle: it.angle ?? 0,
       badgeMode: badgeModeOf(it),
       badgeEntity: it.badgeEntity ?? badgeSource?.source ?? "primary",
-      ripple,
-      rippleSize: it.rippleSize ?? DEFAULT_RIPPLE_SIZE,
-      glow: it.glow ?? false,
-      glowRadius: it.glowRadius ?? DEFAULT_GLOW_RADIUS,
-      glowColor: it.glowColor ?? "",
     },
-    // "Ripple" is the other half of #127's three-key spelling — same expansion
-    // as the badge group's, with the badge mode read off the item.
-    toPatch: (p) => {
-      if (!("ripple" in p)) return p;
-      const { ripple: ring, ...rest } = p;
-      return { ...rest, ...badgeModePatch(badgeModeOf(it), !!ring) };
-    },
+    toPatch: identity,
   };
 }
+/** Group 6: ripple and cast light effects. */
 /** Group 6: ripple and cast light effects. */
 export function itemEffectsForm(it: FloorItem, deviceClass?: string): FormSpec | null {
   const presence = isPresenceEntity(it.entity, deviceClass);
   const isLight = it.kind === "light" || it.entity?.startsWith("light.");
+  const ripple = itemHasRipple(it);
   if (!presence && !isLight) return null;
 
   const fields: FormField[] = [];
+
+  if (presence) {
+    fields.push({
+      name: "ripple",
+      label: "Ripple",
+      helper: "Draws a pulsing ring while presence is detected here",
+      selector: { boolean: {} },
+    });
+    if (ripple) {
+      fields.push({
+        name: "rippleSize",
+        label: "Ripple size",
+        selector: {
+          number: { min: 40, max: 400, step: 4, mode: "slider", unit_of_measurement: "px" },
+        },
+      });
+    }
+  }
 
   if (isLight) {
     fields.push({
@@ -1119,7 +1086,7 @@ export function itemEffectsForm(it: FloorItem, deviceClass?: string): FormSpec |
   return {
     fields,
     data: {
-      ripple: it.ripple ?? false,
+      ripple,
       rippleSize: it.rippleSize ?? DEFAULT_RIPPLE_SIZE,
       glow: it.glow ?? false,
       glowRadius: it.glowRadius ?? DEFAULT_GLOW_RADIUS,
