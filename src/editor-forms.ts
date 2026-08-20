@@ -1018,17 +1018,34 @@ export function itemBadgeForm(it: FloorItem, badgeSource?: BadgeSourceInfo): For
   return {
     fields,
     data: {
-      entity: it.entity,
-      secondaryEntity: it.secondaryEntity ?? "",
-      attribute: it.attribute ?? "",
-      secondaryAttribute: it.secondaryAttribute ?? "",
-      name: it.name ?? "",
-      size: it.size ?? DEFAULT_ITEM_SIZE,
-      angle: it.angle ?? 0,
       badgeMode: badgeModeOf(it),
       badgeEntity: it.badgeEntity ?? badgeSource?.source ?? "primary",
+      hideWhenInactive: it.hideWhenInactive ?? false,
+      enableHideByEntity: it.enableHideByEntity ?? false,
+      hideEntity: it.hideEntity ?? "",
+      hideMode: it.hideMode ?? "state",
+      hideState: it.hideState ?? "",
+      hideOperator: it.hideOperator ?? ">",
+      hideThreshold: it.hideThreshold ?? 0,
+      hideInvert: it.hideInvert ?? false,
+      showState: it.showState ?? (it.kind === "sensor"),
+      showName: it.showName ?? false,
+      labelSize: it.labelSize ?? DEFAULT_LABEL_SIZE,
+      tap_action: it.tap_action,
+      hold_action: it.hold_action,
+      double_tap_action: it.double_tap_action,
     },
-    toPatch: identity,
+    toPatch: (p) => {
+      if (!("badgeMode" in p)) return p;
+      const { badgeMode, ...rest } = p;
+      return {
+        ...rest,
+        ...badgeModePatch(
+          (badgeMode as BadgeMode | undefined) ?? badgeModeOf(it),
+          itemHasRipple(it)
+        ),
+      };
+    },
   };
 }
 /** Group 6: ripple and cast light effects. */
