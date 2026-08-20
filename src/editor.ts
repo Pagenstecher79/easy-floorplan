@@ -4041,76 +4041,113 @@ export class FloorplanCardEditor extends LitElement {
     `;
   }
 
+  /**
+   * The Project panel, grouped on the same criteria as the element panels:
+   * what the plan *is*, then how it *looks*, then what it *does*.
+   *
+   * It had the same problem the device panel had — nineteen controls in one
+   * run, with the sun's five aiming fields separated from the two brightness
+   * sliders by a press-effect dropdown, and "Offline devices" filed under
+   * display next to the card's rotation.
+   *
+   * `offlineStyle` moves out of the display slice and joins the press effect:
+   * both are statements about how *devices* look and answer, not about how the
+   * card is framed. It stays in `projectDisplayForm` as a field — one form, one
+   * `toPatch` — and is sliced into the group it belongs to (see `formSlice`).
+   */
   private _renderPanelBody(): TemplateResult {
+    const c = this._config;
+    const patch = (p: Record<string, unknown>) =>
+      this._patchConfig(p as Partial<FloorplanCardConfig>);
+    const display = projectDisplayForm(c);
     return html`
       <div class="rows panel-body">
-        ${this._renderForm(projectForm(this._config), (patch, live) => {
-          if ("grid" in patch && typeof patch.grid === "number") {
-            // The grid change rescales a custom snap step. ha-form's number
-            // box fires per keystroke — respect the burst path so typing
-            // "24" isn't two history commits (grid=2, then grid=24).
-            patch = { ...patch, ...this._gridPatch(patch.grid) };
-          }
-          if (live) this._patchConfigLive(patch as Partial<FloorplanCardConfig>);
-          else this._patchConfig(patch as Partial<FloorplanCardConfig>);
-        })}
-        ${this._renderForm(projectSkinForm(this._config), (patch) =>
-          this._patchConfig(patch as Partial<FloorplanCardConfig>)
+        ${this._renderGroup(
+          "Project",
+          this._renderForm(projectForm(c), (p, live) => {
+            if ("grid" in p && typeof p.grid === "number") {
+              // The grid change rescales a custom snap step. ha-form's number
+              // box fires per keystroke — respect the burst path so typing
+              // "24" isn't two history commits (grid=2, then grid=24).
+              p = { ...p, ...this._gridPatch(p.grid) };
+            }
+            if (live) this._patchConfigLive(p as Partial<FloorplanCardConfig>);
+            else this._patchConfig(p as Partial<FloorplanCardConfig>);
+          })
         )}
-        ${this._renderColorRow({
-          label: "Background",
-          value: this._config.background,
-          swatch: "#ffffff",
-          placeholder: "#ffffff or empty",
-          onLive: (background) => this._patchConfigLive({ background }),
-          onCommit: (background) => this._patchConfig({ background }),
-        })}
-        ${this._renderForm(floorImageForm(this._floor()), (patch, live) => {
-          if (live) this._patchFloorLive(patch as Partial<Floor>);
-          else this._commitFloor(patch as Partial<Floor>);
-        })}
-        ${this._renderForm(projectDisplayForm(this._config), (patch) =>
-          this._patchConfig(patch as Partial<FloorplanCardConfig>)
+        ${this._renderGroup(
+          // The plan's own look: its palette, its paper, and the one drawing
+          // convention that is a plan-wide choice rather than an element's.
+          "Look",
+          this._renderForm(projectSkinForm(c), patch),
+          this._renderColorRow({
+            label: "Background",
+            value: c.background,
+            swatch: "#ffffff",
+            placeholder: "#ffffff or empty",
+            onLive: (background) => this._patchConfigLive({ background }),
+            onCommit: (background) => this._patchConfig({ background }),
+          }),
+          this._renderForm(projectDeadSpaceForm(c), patch)
         )}
-        ${this._renderForm(projectSunForm(this._config), (patch) =>
-          this._patchConfig(patch as Partial<FloorplanCardConfig>)
+        ${this._renderGroup(
+          // Per floor, not per project — but it is the floor's paper, so it
+          // belongs beside the plan's own.
+          "Floor image",
+          this._renderForm(floorImageForm(this._floor()), (p, live) => {
+            if (live) this._patchFloorLive(p as Partial<Floor>);
+            else this._commitFloor(p as Partial<Floor>);
+          })
         )}
-        ${this._renderForm(projectReliefForm(this._config), (patch) =>
-          this._patchConfig(patch as Partial<FloorplanCardConfig>)
+        ${this._renderGroup(
+          // How the card is framed on the dashboard, as opposed to what is
+          // drawn inside it. Set once for a surface and rarely touched again.
+          "Display",
+          this._renderForm(formSlice(display, ["rotation", "overlayScale", "compactHeader"]), patch)
         )}
-        ${this._config.sunlight
-          ? // Beside the sliders that aim the light, since they are the same
-            // decision: what the light looks like where it lands, and where it
-            // does not. Colour rows rather than form fields, like every other
-            // colour in this editor.
-            html`${this._renderColorRow({
-              label: "Sun color",
-              title: "Color of the light the openings let in",
-              value: this._config.sunlightColor,
-              swatch: "#ffd9a0",
-              placeholder: "(warm white)",
-              onLive: (sunlightColor) => this._patchConfigLive({ sunlightColor }),
-              onCommit: (sunlightColor) => this._patchConfig({ sunlightColor }),
-            })}
-            ${this._config.sunShade === false
-              ? nothing
-              : this._renderColorRow({
-              label: "Shade color",
-              title: "Color of everywhere the light does not reach",
-              value: this._config.sunShadeColor,
-              swatch: "#000000",
-              placeholder: "(black)",
-              onLive: (sunShadeColor) => this._patchConfigLive({ sunShadeColor }),
-              onCommit: (sunShadeColor) => this._patchConfig({ sunShadeColor }),
-            })}`
-          : nothing}
-        ${this._renderForm(projectPressForm(this._config), (patch) =>
-          this._patchConfig(patch as Partial<FloorplanCardConfig>)
+        ${this._renderGroup(
+          // Light through the openings (issue #177) — where it comes from and
+          // what it looks like where it lands.
+          "Sunlight",
+          this._renderForm(projectReliefForm(c), patch),
+          c.sunlight
+            ? html`${this._renderColorRow({
+                label: "Sun color",
+                title: "Color of the light the openings let in",
+                value: c.sunlightColor,
+                swatch: "#ffd9a0",
+                placeholder: "(warm white)",
+                onLive: (sunlightColor) => this._patchConfigLive({ sunlightColor }),
+                onCommit: (sunlightColor) => this._patchConfig({ sunlightColor }),
+              })}
+              ${c.sunShade === false
+                ? nothing
+                : this._renderColorRow({
+                    label: "Shade color",
+                    title: "Color of everywhere the light does not reach",
+                    value: c.sunShadeColor,
+                    swatch: "#000000",
+                    placeholder: "(black)",
+                    onLive: (sunShadeColor) => this._patchConfigLive({ sunShadeColor }),
+                    onCommit: (sunShadeColor) => this._patchConfig({ sunShadeColor }),
+                  })}`
+            : nothing
         )}
-        ${this._renderForm(projectDeadSpaceForm(this._config), (patch) =>
-          this._patchConfig(patch as Partial<FloorplanCardConfig>)
+        ${this._renderGroup(
+          // The other half of following the sun, and a separate switch: this
+          // one dims the whole plan after dark rather than casting anything.
+          "Night dimming",
+          this._renderForm(projectSunForm(c), patch)
         )}
-        ${this._renderSymbolsPanel()}
+        ${this._renderGroup(
+          // How devices look and answer, plan-wide. "Offline devices" lived
+          // under display, beside the card's rotation, which is not what it is
+          // about.
+          "Devices",
+          this._renderForm(formSlice(display, ["offlineStyle"]), patch),
+          this._renderForm(projectPressForm(c), patch)
+        )}
+        ${this._renderGroup("Symbols", this._renderSymbolsPanel())}
       </div>
     `;
   }
@@ -4133,7 +4170,6 @@ export class FloorplanCardEditor extends LitElement {
     const own = Object.keys(this._config.symbols ?? {});
     return html`
       <div class="row col symbols-panel">
-        <label>Custom symbols</label>
         ${own.length
           ? html`<div class="symbol-list">
               ${own.map(

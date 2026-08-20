@@ -1684,6 +1684,20 @@ describe("every field lands in exactly one panel group", () => {
     }
   });
 
+  it("covers every project field — offlineStyle is sliced away from its form", () => {
+    // projectDisplayForm still owns rotation / overlayScale / compactHeader /
+    // offlineStyle as one form with one toPatch, but the panel renders the
+    // first three under "Display" and the last under "Devices". Miss it in
+    // both slices and the control silently disappears.
+    const DISPLAY = ["rotation", "overlayScale", "compactHeader"];
+    const DEVICES = ["offlineStyle"];
+    const cfg = { type: "t", width: 1000, height: 600 } as FloorplanCardConfig;
+    check(projectDisplayForm(cfg).fields, [DISPLAY, DEVICES], "project display");
+    // Both slices resolve, and neither can emit the other's key.
+    expect(formSlice(projectDisplayForm(cfg), DISPLAY).fields.map((f) => f.name)).toEqual(DISPLAY);
+    expect(formSlice(projectDisplayForm(cfg), DEVICES).fields.map((f) => f.name)).toEqual(DEVICES);
+  });
+
   it("covers every furniture, tracker and area field", () => {
     const f = { id: "f", type: "sofa", x: 0, y: 0, w: 40, h: 40 } as Furniture;
     check(furnitureForm(f).fields, FURNITURE_GROUPS, "furniture");
