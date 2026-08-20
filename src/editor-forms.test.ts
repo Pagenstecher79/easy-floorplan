@@ -32,7 +32,7 @@ import type { FormField } from "./editor-forms";
 import type { Area, Opening, FloorItem, Floor, Furniture, Tracker, FloorplanCardConfig } from "./types";
 import { DEFAULT_GLOW_RADIUS, DEFAULT_PRESS_EFFECT } from "./types";
 import { DEFAULT_SKIN, SKINS, MAX_SKIN_WALL_WIDTH } from "./skins";
-import { DEFAULT_SUN_BEARING } from "./render";
+import { DEFAULT_SUN_BEARING, SUN_REACH } from "./render";
 
 const fields: FormField[] = [
   { name: "name", label: "Name", selector: { text: {} } },
@@ -1529,6 +1529,7 @@ describe("projectReliefForm", () => {
       "sunlight",
       "north",
       "sunShade",
+      "sunReach",
       "sunFollows",
     ]);
     // The angle itself only appears once the light is pinned — while it
@@ -1546,6 +1547,17 @@ describe("projectReliefForm", () => {
     expect(projectReliefForm(cfg({ sunlight: true })).toPatch({ sunFollows: false })).toEqual({
       sunBearing: DEFAULT_SUN_BEARING,
     });
+  });
+
+  it("offers the reach as a slider, and keeps its default out of the YAML", () => {
+    // The whole point of #185 is that the right distance is a matter of taste,
+    // so it has to be reachable without hand-editing YAML.
+    const f = projectReliefForm(cfg({ sunlight: true }));
+    expect(f.data.sunReach).toBe(SUN_REACH);
+    expect(f.toPatch({ sunReach: SUN_REACH })).toStrictEqual({ sunReach: undefined });
+    expect(f.toPatch({ sunReach: 0.6 })).toStrictEqual({ sunReach: 0.6 });
+    // Nothing to reach with the light off.
+    expect(projectReliefForm(cfg({})).fields.map((x) => x.name)).not.toContain("sunReach");
   });
 
   it("shutting the sun out takes everything it aimed and painted with it", () => {
@@ -1572,6 +1584,7 @@ describe("projectReliefForm", () => {
       sunlight: undefined,
       north: undefined,
       sunBearing: undefined,
+      sunReach: undefined,
       sunShade: undefined,
       sunlightColor: undefined,
       sunShadeColor: undefined,
