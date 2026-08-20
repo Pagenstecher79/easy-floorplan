@@ -1052,16 +1052,18 @@ describe("editorItemLabel (#135)", () => {
 });
 
 describe("overlay scaling", () => {
-  it("normalizes the mode, defaulting anything unrecognized to plan", () => {
-    // The default is canvas units: a plan is shown at whatever width the
-    // dashboard has, so pinning the overlay to px only agrees with the drawing
-    // by luck. `fixed` is now the value you have to ask for by name.
-    expect(normalizeOverlayScale("fixed")).toBe("fixed");
+  it("reads a missing mode as the pixels every older plan was laid out in", () => {
+    // Canvas units are the better answer and new plans are *created* with them
+    // (getStubConfig writes the key). Inferring them from silence is a
+    // different thing entirely: it restyles every plan already in the field on
+    // upgrade, which is what 1.5.0 did (issue #192). Silence means what it has
+    // always meant.
     expect(normalizeOverlayScale("plan")).toBe("plan");
-    expect(normalizeOverlayScale(undefined)).toBe("plan");
-    expect(normalizeOverlayScale("FIXED")).toBe("plan");
-    expect(normalizeOverlayScale(1)).toBe("plan");
-    expect(normalizeOverlayScale("")).toBe("plan");
+    expect(normalizeOverlayScale("fixed")).toBe("fixed");
+    expect(normalizeOverlayScale(undefined)).toBe("fixed");
+    expect(normalizeOverlayScale("PLAN")).toBe("fixed");
+    expect(normalizeOverlayScale(1)).toBe("fixed");
+    expect(normalizeOverlayScale("")).toBe("fixed");
   });
 
   it("emits screen pixels under fixed and canvas units under plan", () => {

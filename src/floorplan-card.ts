@@ -27,6 +27,7 @@ import {
   PRESS_OUT_MS,
   getFloors,
   trackerPresenceDetected,
+  newPlanConfig,
 } from "./types";
 import {
   WALL_THICKNESS,
@@ -238,7 +239,12 @@ export class FloorplanCard extends LitElement {
   public static getStubConfig(): Partial<FloorplanCardConfig> {
     // Minimal on purpose: the editor migrates to the floors model on first
     // edit, and defaults (width/height/grid) backfill in setConfig.
-    return {};
+    //
+    // …except what a *new* plan is deliberately made with, which is
+    // {@link newPlanConfig}'s to state: written into the config rather than
+    // inferred from a missing key, so it reaches new plans and only new plans
+    // (issue #192).
+    return newPlanConfig();
   }
 
   /**

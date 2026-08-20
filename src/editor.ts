@@ -20,6 +20,7 @@ import type {
   AreaPoint,
   HaAreaInfo,
   StateColorRule,
+  OverlayScale,
 } from "./types";
 import {
   normalizeSymbol,
@@ -84,6 +85,7 @@ import {
   hasOpeningMark,
   SHUTTER_MARK_PIXEL_OFFSET,
   SHUTTER_MARK_SIZE,
+  SHUTTER_MARK_ICON_SIZE,
   hasShutterMark,
   openingFromDeviceClass,
   renderRipple,
@@ -117,6 +119,8 @@ import {
   collectWatchedEntities,
   hassRenderInputsChanged,
   wallStrokeStyle,
+  normalizeOverlayScale,
+  overlayLength,
 } from "./render";
 import { deadSpacesCached } from "./dead-space";
 import { cssColor, cssColorOr, cssNumber, contrastText } from "./css-safe";
@@ -2723,6 +2727,11 @@ export class FloorplanCardEditor extends LitElement {
     const c = this._config;
     const floor = this._floor();
     const floors = c.floors ?? [];
+    // How the card will size this plan's badges and labels. The canvas honours
+    // it so the editor previews the drawing rather than a version of it with
+    // fixed-size furniture on top (issue #192): set a badge to 34 on a plan
+    // 1200 wide and the number you see here is the one the card renders.
+    const overlay = normalizeOverlayScale(c.overlayScale);
     // Which room, if any, is currently narrowing the selected element's
     // entity picker — animated on the canvas so the scoping is never a
     // mystery (see _scopingAreaId).
@@ -3017,8 +3026,15 @@ export class FloorplanCardEditor extends LitElement {
             : `aspect-ratio:${cssNumber(c.width, DEFAULT_WIDTH)} / ${cssNumber(c.height, DEFAULT_HEIGHT)};`}
           @wheel=${this._onCanvasWheel}
         >
-          <div class="stage" style="aspect-ratio: ${cssNumber(c.width, DEFAULT_WIDTH)} / ${cssNumber(
-            c.height, DEFAULT_HEIGHT)}; width:${this._zoom * 100}%;${skinStyle(c.skin)}">
+          <!-- The stage doubles as the card's .plan box for overlay sizing: same
+               container query, same --fp-u, so a badge measured in canvas units
+               previews here at the size a card of this width would draw it
+               (issue #192). The editor never rotates the plan, so the canvas
+               width is what 100cqw measures against. -->
+          <div class="stage ${overlay === "plan" ? "scale-plan" : ""}"
+               style="aspect-ratio: ${cssNumber(c.width, DEFAULT_WIDTH)} / ${cssNumber(
+            c.height, DEFAULT_HEIGHT)}; width:${this._zoom * 100}%;
+                   --fp-plan-w: ${cssNumber(c.width, DEFAULT_WIDTH)};${skinStyle(c.skin)}">
             <!-- Keyed on the skin, for the repaint reason documented on the
                  card's SVG (issue #122): a var() inside a presentation
                  attribute does not repaint when the custom property changes,
@@ -3159,14 +3175,14 @@ export class FloorplanCardEditor extends LitElement {
             </svg>`
             )}
             <div class="items">
-              ${floor.texts.map((t) => this._renderTextOverlay(t, c))}
+              ${floor.texts.map((t) => this._renderTextOverlay(t, c, overlay))}
               ${floor.openings
                 .filter((o) => hasShutterMark(o))
-                .map((o) => this._renderShutterMarkOverlay(o, c))}
+                .map((o) => this._renderShutterMarkOverlay(o, c, overlay))}
               ${floor.openings
                 .filter((o) => hasOpeningMark(o))
-                .map((o) => this._renderOpeningMarkOverlay(o, c))}
-              ${floor.items.map((it) => this._renderItemOverlay(it, c))}
+                .map((o) => this._renderOpeningMarkOverlay(o, c, overlay))}
+              ${floor.items.map((it) => this._renderItemOverlay(it, c, overlay))}
             </div>
           </div>
         </div>
@@ -3842,7 +3858,11 @@ export class FloorplanCardEditor extends LitElement {
    * badge that swallowed those clicks would make the opening under it awkward
    * to grab. On the card it is a control; here it is a picture of one.
    */
-  private _renderShutterMarkOverlay(o: Opening, c: FloorplanCardConfig): TemplateResult {
+  private _renderShutterMarkOverlay(
+    o: Opening,
+    c: FloorplanCardConfig,
+    scale: OverlayScale
+  ): TemplateResult {
     const id = o.shutterEntity!;
     const st = this.hass?.states[id];
     const open = shutterAmount(st, o.shutterInvert) > 0;
@@ -3852,20 +3872,24 @@ export class FloorplanCardEditor extends LitElement {
     // Same two-part offset as the card (canvas units + screen pixels), so the
     // preview shows where the badge will actually sit. The editor never
     // rotates the plan, hence no rotation argument.
-    // Always the fixed-pixel form here: the editor canvas is zoomed by the
-    // user rather than sized by the card, so `overlayScale: plan` has no
-    // meaning on it — the badges it draws for devices are fixed too.
+    // In the plan's own units when that is how the card measures them, so the
+    // badge previews at the size it will actually be drawn (issue #192).
     const n = shutterMarkNormal(o);
+    const box = overlayLength(SHUTTER_MARK_SIZE, scale);
+    const step = overlayLength(SHUTTER_MARK_PIXEL_OFFSET, scale);
     return html`<div
       class="shutter-mark ${shutterActive(st, o.shutterInvert) ? "on" : "off"}"
       style="left:${(at.x / c.width) * 100}%; top:${(at.y / c.height) * 100}%;
-             width:${SHUTTER_MARK_SIZE}px;height:${SHUTTER_MARK_SIZE}px;
-             transform:translate(-50%,-50%) translate(${n.x * SHUTTER_MARK_PIXEL_OFFSET}px, ${
-               n.y * SHUTTER_MARK_PIXEL_OFFSET
-             }px);--fp-active:${accent};"
+             width:${box};height:${box};
+             transform:translate(-50%,-50%)
+                       translate(calc(${n.x} * ${step}), calc(${n.y} * ${step}));
+             --fp-active:${accent};"
       title=${`${(st?.attributes?.friendly_name as string | undefined) ?? id} — shown on the card, tap it there to open the shutter`}
     >
-      <ha-icon icon=${icon}></ha-icon>
+      <ha-icon icon=${icon} style="--mdc-icon-size:${overlayLength(
+        SHUTTER_MARK_ICON_SIZE,
+        scale
+      )};"></ha-icon>
     </div>`;
   }
 
@@ -3874,7 +3898,11 @@ export class FloorplanCardEditor extends LitElement {
    * the shutter's preview above: turning **Show icon** on and finding out where
    * the badge lands is the whole point of having a canvas. Inert here too.
    */
-  private _renderOpeningMarkOverlay(o: Opening, c: FloorplanCardConfig): TemplateResult {
+  private _renderOpeningMarkOverlay(
+    o: Opening,
+    c: FloorplanCardConfig,
+    scale: OverlayScale
+  ): TemplateResult {
     const id = o.entity!;
     const st = this.hass?.states[id];
     const open = resolveOpeningAmount(o, st) > 0;
@@ -3882,20 +3910,29 @@ export class FloorplanCardEditor extends LitElement {
     const accent = cssColor(o.activeColor) ?? SKIN_ACCENT;
     const at = openingMarkPoint(o);
     const n = openingMarkNormal(o);
+    const box = overlayLength(SHUTTER_MARK_SIZE, scale);
+    const step = overlayLength(SHUTTER_MARK_PIXEL_OFFSET, scale);
     return html`<div
       class="shutter-mark ${openingIsActive(o, st) ? "on" : "off"}"
       style="left:${(at.x / c.width) * 100}%; top:${(at.y / c.height) * 100}%;
-             width:${SHUTTER_MARK_SIZE}px;height:${SHUTTER_MARK_SIZE}px;
-             transform:translate(-50%,-50%) translate(${n.x * SHUTTER_MARK_PIXEL_OFFSET}px, ${
-               n.y * SHUTTER_MARK_PIXEL_OFFSET
-             }px);--fp-active:${accent};"
+             width:${box};height:${box};
+             transform:translate(-50%,-50%)
+                       translate(calc(${n.x} * ${step}), calc(${n.y} * ${step}));
+             --fp-active:${accent};"
       title=${`${(st?.attributes?.friendly_name as string | undefined) ?? id} — shown on the card, tap it there to open its dialog`}
     >
-      <ha-icon icon=${icon}></ha-icon>
+      <ha-icon icon=${icon} style="--mdc-icon-size:${overlayLength(
+        SHUTTER_MARK_ICON_SIZE,
+        scale
+      )};"></ha-icon>
     </div>`;
   }
 
-  private _renderItemOverlay(it: FloorItem, c: FloorplanCardConfig): TemplateResult {
+  private _renderItemOverlay(
+    it: FloorItem,
+    c: FloorplanCardConfig,
+    scale: OverlayScale
+  ): TemplateResult {
     const selected = this._isSel("item", it.id);
     const st = it.entity ? this.hass?.states[it.entity] : undefined;
     // Pass the registry icon here too, so the editor preview matches the card.
@@ -3929,36 +3966,42 @@ export class FloorplanCardEditor extends LitElement {
     // (entity currently active), so the "Badge shows" dropdown shows its
     // effect without leaving the editor.
     const anim = resolveIconAnimation(it, st?.state);
+    // Every measure the card expresses in canvas units, expressed the same way
+    // here (issue #192) — the badge box, the value inside it, the glyph, the
+    // ripple and the label below.
+    const box = overlayLength(size, scale);
     const badge = html`<div
       class="badge ${showIcon ? "" : "ghost"} ${stateColor
         ? "state-colored"
         : active
           ? "active-colored"
           : ""}"
-      style="width:${size}px;height:${size}px;transform:rotate(${cssNumber(it.angle, 0)}deg);${
+      style="width:${box};height:${box};transform:rotate(${cssNumber(it.angle, 0)}deg);${
         stateColor ? `--fp-state:${stateColor};` : ""
       }${activeColor ? `--fp-active:${activeColor};` : ""}${
         badgeInk ? `--fp-ink:${badgeInk};` : ""
       }"
     >
       ${value
-        ? html`<span class="badge-value" style="font-size:${badgeValueSize(size, value)}px;"
+        ? html`<span
+            class="badge-value"
+            style="font-size:${overlayLength(badgeValueSize(size, value), scale)};"
             >${value}</span
           >`
         : html`<ha-icon
             class=${anim ? `anim-${anim}` : ""}
             icon=${icon}
-            style="--mdc-icon-size:${itemIconSize(size)}px;"
+            style="--mdc-icon-size:${overlayLength(itemIconSize(size), scale)};"
           ></ha-icon>`}
     </div>`;
 
     // Editor always previews the ripple animated so its effect is visible.
     let visual: TemplateResult;
     if (display === "ripple") {
-      visual = renderRipple(true, rippleColor, rippleSize);
+      visual = renderRipple(true, rippleColor, rippleSize, 3, scale);
     } else if (display === "iconRipple") {
       visual = html`<div class="stack">
-        ${renderRipple(true, rippleColor, rippleSize)}
+        ${renderRipple(true, rippleColor, rippleSize, 3, scale)}
         <div class="stack-icon">${badge}</div>
       </div>`;
     } else {
@@ -3988,22 +4031,27 @@ export class FloorplanCardEditor extends LitElement {
           ? nothing
           : html`<span
               class="ilabel ${cardLabel ? "live" : ""} ilabel-${labelPositionOf(it)}"
-              style="font-size:${cardLabel || it.labelSize != null
-                ? itemLabelSize(it.labelSize)
-                : 11}px;${cardLabel && stateColor ? `color:${stateColor};` : ""}"
+              style="font-size:${overlayLength(
+                cardLabel || it.labelSize != null ? itemLabelSize(it.labelSize) : 11,
+                scale
+              )};${cardLabel && stateColor ? `color:${stateColor};` : ""}"
               >${label}</span
             >`}
       </div>
     `;
   }
 
-  private _renderTextOverlay(t: FloorText, c: FloorplanCardConfig): TemplateResult {
+  private _renderTextOverlay(
+    t: FloorText,
+    c: FloorplanCardConfig,
+    scale: OverlayScale
+  ): TemplateResult {
     const selected = this._isSel("text", t.id);
     return html`
       <div
         class="edit-text ${selected ? "selected" : ""}"
         style="left:${(t.x / c.width) * 100}%; top:${(t.y / c.height) * 100}%;
-               font-size:${cssNumber(t.size, DEFAULT_TEXT_SIZE)}px;
+               font-size:${overlayLength(cssNumber(t.size, DEFAULT_TEXT_SIZE), scale)};
                color:${cssColorOr(t.color, SKIN_TEXT)};
                transform:translate(-50%,-50%) rotate(${cssNumber(t.angle, 0)}deg);"
         @pointerdown=${(e: PointerEvent) => this._onOverlayDown(e, { kind: "text", id: t.id })}
@@ -5355,6 +5403,45 @@ export class FloorplanCardEditor extends LitElement {
       position: absolute;
       inset: 0;
       pointer-events: none;
+    }
+    /*
+     * overlayScale: plan, previewed (issue #192). The same two lines the card
+     * uses, on the box that plays the same part: the stage carries the canvas
+     * ratio, so 100cqw is the plan's own width on screen and --fp-u is one
+     * canvas unit. Declared on .items rather than .stage for the reason the
+     * card documents — an unregistered custom property substitutes as a token
+     * stream, so the cqw resolves where it is used, which stays correct if
+     * --fp-u is ever registered with @property.
+     *
+     * Zoom falls out of it rather than needing a term of its own: the stage's
+     * width is a percentage of the zoom, so zooming in widens the container and
+     * every canvas-unit measure grows with the drawing — which is the mode.
+     */
+    .stage.scale-plan {
+      container-type: inline-size;
+    }
+    .stage.scale-plan .items {
+      --fp-u: calc(100cqw / var(--fp-plan-w));
+    }
+    /* Label padding and offsets go to em so they track the text with the plan,
+       exactly as the card's own scale-plan rules do. Hairlines stay px on
+       purpose there and here: below a pixel they disappear on the small cards
+       this mode is for. */
+    .stage.scale-plan .ilabel {
+      padding: 0.08em 0.33em;
+      border-radius: 0.33em;
+      top: calc(100% + 0.17em);
+      max-width: none;
+    }
+    .stage.scale-plan .ilabel-left,
+    .stage.scale-plan .ilabel-right {
+      top: 50%;
+    }
+    .stage.scale-plan .ilabel-left {
+      right: calc(100% + 0.33em);
+    }
+    .stage.scale-plan .ilabel-right {
+      left: calc(100% + 0.33em);
     }
     /* Preview of the card's shutter badge. Inherits .items' pointer-events:
        none — the opening underneath stays clickable for selection and drag. */

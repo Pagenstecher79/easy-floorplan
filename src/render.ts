@@ -1171,24 +1171,28 @@ export function wallStrokeStyle(thickness: unknown): string {
 // `calc(14 * var(--fp-u))` is 14 canvas units however large the card ends up.
 
 /**
- * Coerce a config `overlayScale`; anything unrecognised means the default,
- * which is `plan`.
+ * Coerce a config `overlayScale`. An **absent** value means `fixed`, which is
+ * how every plan drawn before the option existed was laid out.
  *
- * The default flipped here, and it is the one change in this file that every
- * existing plan sees. `fixed` was the historic behaviour and the wrong default:
- * it only agrees with the drawing when the card renders at roughly its canvas
- * size, and a plan is shown at whatever width the dashboard gives it. Sizing
- * the overlay in canvas units is what makes a plan a *drawing* — it looks the
- * same at every width, and a cluster of badges keeps the spacing it was given
- * (issue #179).
+ * Canvas units are the better default and new plans get them — but they get
+ * them *written down* ({@link FloorplanCard.getStubConfig}), not inferred from
+ * silence. 1.5.0 changed this function's answer for the missing key instead,
+ * and that is not a default for new plans: it is a restyle of every plan in
+ * the field, applied on upgrade with nothing on screen to say so. It landed
+ * hardest where nobody could have opted out — the editor wrote no key at all
+ * for `fixed`, being the default at the time, so *choosing* the old behaviour
+ * and never touching the setting left identical YAML, and both flipped
+ * together. Badges came out at a third of their size on a card narrower than
+ * its canvas, and the number in the editor no longer matched the drawing
+ * (issue #192).
  *
- * `fixed` remains a real choice, and the one to make for a card rendered much
- * *larger* than its canvas, or a wall tablet where a fixed px floor is what
- * keeps text readable from across the room. See the README's "Where it helps,
- * and where it costs".
+ * The rule that follows, and the reason {@link projectDisplayForm} now records
+ * whichever value is chosen rather than omitting the default: **a config says
+ * what it renders as.** A stored `overlayScale` is immune to whatever this
+ * function is ever made to answer for silence.
  */
 export function normalizeOverlayScale(v: unknown): OverlayScale {
-  return v === "fixed" ? "fixed" : "plan";
+  return v === "plan" ? "plan" : "fixed";
 }
 
 /**

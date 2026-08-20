@@ -1533,6 +1533,27 @@ export function emptyConfig(type: string): FloorplanCardConfig {
   };
 }
 
+/**
+ * What a **newly created** card starts as — the config HA's card picker gets
+ * back from `getStubConfig`.
+ *
+ * Deliberately not the same thing as {@link emptyConfig}, which backfills
+ * missing keys on *any* config the editor is handed, existing plans included.
+ * Anything stated here is stated about new plans only; putting it in
+ * `emptyConfig` would apply it to every plan ever drawn, the moment its author
+ * next opened the editor.
+ *
+ * That distinction is the whole point of this function. `overlayScale: plan`
+ * is the better way to lay a plan out (issue #179) and so it is what a new
+ * plan is made with — but it is written into the config rather than inferred
+ * from a missing key, because inference reaches backwards: 1.5.0 changed what
+ * an absent `overlayScale` meant and resized the overlay of every plan in the
+ * field (issue #192). A new default belongs in new configs.
+ */
+export function newPlanConfig(): Partial<FloorplanCardConfig> {
+  return { overlayScale: "plan" };
+}
+
 export function uid(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
 }

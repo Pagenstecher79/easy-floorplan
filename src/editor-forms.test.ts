@@ -1078,12 +1078,14 @@ describe("wallForm / projectForm / floorImageForm", () => {
     expect(form.fields[0].helper).toBe(tron.description);
   });
 
-  it("overlay scale shares that form, defaults to plan, and stays out of the YAML when default", () => {
+  it("overlay scale shares that form, and records whichever value is chosen", () => {
     const form = projectDisplayForm({ type: "t", width: 1000, height: 600 } as FloorplanCardConfig);
-    expect(form.data.overlayScale).toBe("plan");
-    // Canvas units are the default, so they are what stays unwritten; "fixed"
-    // is the choice that has to be recorded.
-    expect(form.toPatch({ overlayScale: "plan" })).toEqual({ overlayScale: undefined });
+    // A config with no key is an older plan, and shows the pixels it is drawn in.
+    expect(form.data.overlayScale).toBe("fixed");
+    // Neither value is omitted as "the default" — that habit is what let a
+    // changed default restyle every plan in the field (issue #192). A plan says
+    // how it renders, so opening this panel pins whatever it is already doing.
+    expect(form.toPatch({ overlayScale: "plan" })).toEqual({ overlayScale: "plan" });
     expect(form.toPatch({ overlayScale: "fixed" })).toEqual({ overlayScale: "fixed" });
     // Patching one field must not invent a value for the other.
     expect(form.toPatch({ rotation: "90" })).toEqual({ rotation: 90 });
@@ -1091,10 +1093,11 @@ describe("wallForm / projectForm / floorImageForm", () => {
       type: "t",
       width: 1000,
       height: 600,
-      overlayScale: "fixed",
+      overlayScale: "plan",
     } as FloorplanCardConfig);
-    expect(pinned.data.overlayScale).toBe("fixed");
-    // The default leads the dropdown, so the list opens on what a plan wants.
+    expect(pinned.data.overlayScale).toBe("plan");
+    // Canvas units still lead the dropdown: they are what a new plan is made
+    // with and what a plan generally wants.
     const field = form.fields.find((x) => x.name === "overlayScale")!;
     const opts = (field.selector as { select: { options: { value: string }[] } }).select.options.map(
       (o) => o.value
