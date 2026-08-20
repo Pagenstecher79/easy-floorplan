@@ -1018,6 +1018,13 @@ export function itemBadgeForm(it: FloorItem, badgeSource?: BadgeSourceInfo): For
   return {
     fields,
     data: {
+      entity: it.entity,
+      secondaryEntity: it.secondaryEntity ?? "",
+      attribute: it.attribute ?? "",
+      secondaryAttribute: it.secondaryAttribute ?? "",
+      name: it.name ?? "",
+      size: it.size ?? DEFAULT_ITEM_SIZE,
+      angle: it.angle ?? 0,
       badgeMode: badgeModeOf(it),
       badgeEntity: it.badgeEntity ?? badgeSource?.source ?? "primary",
       hideWhenInactive: it.hideWhenInactive ?? false,
