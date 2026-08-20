@@ -7,7 +7,6 @@
  */
 import type {
   Area,
-  BadgeEntity,
   Floor,
   FloorItem,
   FloorText,
@@ -54,6 +53,8 @@ import {
   pressEffectOf,
   labelPositionOf,
   itemHasLabel,
+  itemReadings,
+  badgeEntityIndex,
   offlineStyleOf,
   sliderStyleOf,
   shutterStyleOf,
@@ -698,55 +699,72 @@ function badgeModePatch(mode: BadgeMode, ripple: boolean): Record<string, unknow
  * and drop the reading to an icon.
  */
 export interface BadgeSourceInfo {
-  source: BadgeEntity;
+  /** Where the badge's number is coming from right now. */
+  source: "primary" | number;
   /** Friendly names, falling back to the entity ids when hass has none. */
   primaryLabel?: string;
-  secondaryLabel?: string;
+  /** One per reading, positionally, so the dropdown can name each. */
+  readingLabels?: (string | undefined)[];
 }
 
 /**
- * `deviceClass` is the entity's HA device class, the one hass-derived fact the
- * device form needs: it is what separates a motion sensor from a door contact,
- * and so decides whether the ripple ring is offered at all (issue #127). The
- * editor reads it off `hass` at the call site, as it already does for openings.
+ * The device's remaining fields — everything except its entity and attribute,
+ * which are {@link itemEntityForm} so the readings list can sit between them
+ * (issue #180). Takes no `areaScope`: the only pickers that were scoped were
+ * the entity ones, and they have moved.
+ *
+ * `deviceClass` is the entity's HA device class, the one hass-derived fact this
+ * form needs: it is what separates a motion sensor from a door contact, and so
+ * decides whether the ripple ring is offered at all (issue #127). The editor
+ * reads it off `hass` at the call site, as it already does for openings.
  * `badgeSource` is the second such fact — see {@link BadgeSourceInfo}.
  */
+/**
+ * The device's own entity and attribute — the first reading, and the one
+ * `showState` governs.
+ *
+ * Split from {@link itemForm} so the editor can slot the repeatable "More
+ * readings" rows *directly beneath it* (issue #180), which is where the old
+ * "Second entity" / "2nd attribute" pair used to sit. Everything a device
+ * reads is then in one place and in the order it appears on the label, rather
+ * than the second reading being a form field and the third onwards being a
+ * list further down. Both halves still render through `ha-form`, exactly as
+ * {@link areaNameForm} and {@link areaForm} do.
+ */
+export function itemEntityForm(it: FloorItem, areaScope?: AreaEntityScope): FormSpec {
+  return {
+    fields: [
+      {
+        name: "entity",
+        label: "Entity",
+        required: true,
+        helper: areaScopeHelper(areaScope),
+        selector: areaScopedEntity(areaScope, it.entity),
+      },
+      {
+        name: "attribute",
+        label: "Attribute",
+        helper: "Show this attribute instead of the state (e.g. current_temperature)",
+        selector: { attribute: { entity_id: it.entity } },
+      },
+    ],
+    data: { entity: it.entity ?? "", attribute: it.attribute ?? "" },
+    toPatch: identity,
+  };
+}
+
 export function itemForm(
   it: FloorItem,
-  areaScope?: AreaEntityScope,
   deviceClass?: string,
   badgeSource?: BadgeSourceInfo
 ): FormSpec {
   const ripple = itemHasRipple(it);
   const presence = isPresenceEntity(it.entity, deviceClass);
   const fields: FormField[] = [
-    {
-      name: "entity",
-      label: "Entity",
-      required: true,
-      helper: areaScopeHelper(areaScope),
-      selector: areaScopedEntity(areaScope, it.entity),
-    },
-    {
-      name: "attribute",
-      label: "Attribute",
-      helper: "Show this attribute instead of the state (e.g. current_temperature)",
-      selector: { attribute: { entity_id: it.entity } },
-    },
-    {
-      name: "secondaryEntity",
-      label: "Second entity",
-      helper: areaScopeHelper(areaScope, "Shown next to the primary state"),
-      selector: areaScopedEntity(areaScope, it.secondaryEntity),
-    },
-    {
-      name: "secondaryAttribute",
-      label: "2nd attribute",
-      helper: "From the second entity, or this entity if none",
-      selector: { attribute: { entity_id: it.secondaryEntity || it.entity } },
-    },
-    // The icon is *not* here: it sits by the state rules that can override it
-    // (issue #127), rendered by the editor next to them.
+    // Entity and Attribute are not here: they are {@link itemEntityForm}, so
+    // the readings list can sit between them and the rest (issue #180). Nor is
+    // the icon — it sits by the state rules that can override it (issue #127),
+    // rendered by the editor next to them.
     { name: "name", label: "Name", selector: { text: {} } },
     {
       name: "size",
@@ -768,21 +786,32 @@ export function itemForm(
       ),
     },
   ];
-  // Which entity the value comes from (issue #136) — offered only where it is
-  // a real question: the badge has to be showing a value, and the device has
-  // to have a second entity to choose between. Most devices never see this.
+  // Which reading the value comes from (issue #136) — offered only where it is
+  // a real question: the badge has to be showing a value, and the device has to
+  // have more than one reading to choose between. Most devices never see this.
   //
   // The options name the entities rather than offering an "Automatic", the
   // precedent from #127's dropdown above: "auto" is a fact about the config
   // format, not about what the user is looking at.
-  if (badgeModeOf(it) === "value" && it.secondaryEntity) {
+  //
+  // One option per reading now, not just "the second one" — a plug showing
+  // power, link quality and battery can badge whichever it likes (issue #180).
+  const readings = itemReadings(it);
+  if (badgeModeOf(it) === "value" && readings.length) {
     fields.push({
       name: "badgeEntity",
       label: "Badge reads",
-      helper: "Which of this device's entities the badge shows",
+      helper: "Which of this device's readings the badge shows",
       selector: dropdown(
         opt("primary", badgeSource?.primaryLabel || it.entity || "Main entity"),
-        opt("secondary", badgeSource?.secondaryLabel || it.secondaryEntity)
+        ...readings.map((r, i) =>
+          opt(
+            String(i),
+            badgeSource?.readingLabels?.[i] ||
+              r.entity ||
+              (r.attribute ? `${it.entity || "this device"} · ${r.attribute}` : `Reading ${i + 1}`)
+          )
+        )
       ),
     });
   }
@@ -883,10 +912,8 @@ export function itemForm(
   return {
     fields,
     data: {
-      entity: it.entity,
-      secondaryEntity: it.secondaryEntity ?? "",
-      attribute: it.attribute ?? "",
-      secondaryAttribute: it.secondaryAttribute ?? "",
+      // entity / attribute live in itemEntityForm; the legacy secondary pair
+      // has no field at all now (issue #180) — the readings list owns it.
       name: it.name ?? "",
       size: it.size ?? DEFAULT_ITEM_SIZE,
       angle: it.angle ?? 0,
@@ -894,7 +921,11 @@ export function itemForm(
       // The stored choice, else the entity the badge is *actually* reading —
       // never a bare "primary" default, which would contradict the canvas for
       // every device relying on the fallback. See {@link BadgeSourceInfo}.
-      badgeEntity: it.badgeEntity ?? badgeSource?.source ?? "primary",
+      // The dropdown's values are strings, so the stored index (or the legacy
+      // "secondary") is spelled the same way here; toPatch turns it back into
+      // a number. Opens on what the badge is *actually* reading when nothing
+      // is chosen, which is the whole point of badgeSource (issue #136).
+      badgeEntity: String(badgeEntityIndex(it.badgeEntity) ?? badgeSource?.source ?? "primary"),
       ripple,
       rippleSize: it.rippleSize ?? DEFAULT_RIPPLE_SIZE,
       glow: it.glow ?? false,
@@ -917,6 +948,11 @@ export function itemForm(
       // Below is the default, so it stays out of the YAML.
       if ("labelPosition" in out && out.labelPosition === "below")
         out = { ...out, labelPosition: undefined };
+      // The dropdown speaks strings; the config stores "primary" or an index.
+      // Written as a number so the legacy "secondary" spelling stops spreading
+      // to configs that never had it.
+      if ("badgeEntity" in out && typeof out.badgeEntity === "string" && out.badgeEntity !== "primary")
+        out = { ...out, badgeEntity: Number(out.badgeEntity) };
       if (!("badgeMode" in out) && !("ripple" in out)) return out;
       const { badgeMode, ripple: ring, ...rest } = out;
       return {

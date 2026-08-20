@@ -365,9 +365,18 @@ export interface FloorItem {
   id: string;
   entity: string;
   /**
-   * Optional second entity (e.g. a humidity sensor paired with a temperature
-   * entity). When set and the state is shown, both values are displayed in the
-   * same element. The primary `entity` drives on/off state and click actions.
+   * **Legacy spelling of the first {@link readings} row.** A second entity
+   * shown alongside the primary — e.g. a humidity sensor paired with a
+   * temperature one.
+   *
+   * Kept because plans in the wild use it, and still read: `itemReadings`
+   * puts it at the head of the pool, where it always sat. It has no field in
+   * the editor any more, and touching a device's readings rewrites it as a
+   * `readings` entry. New configs should just use `readings`.
+   *
+   * One behaviour did change with issue #180: it used to be part of the state
+   * line and so appeared only while `showState` was on. It is a reading now,
+   * and readings show on their own terms — see {@link readings}.
    */
   secondaryEntity?: string;
   /**
@@ -377,9 +386,11 @@ export interface FloorItem {
    */
   attribute?: string;
   /**
-   * Attribute for the second reading. Applies to `secondaryEntity` when set,
-   * else to `entity` — so one climate device can show
-   * `current_temperature · current_humidity` without a second entity.
+   * Attribute for {@link secondaryEntity}, and legacy in the same way. Applies
+   * to `secondaryEntity` when set, else to `entity` — so one climate device
+   * could show `current_temperature · current_humidity` without a second
+   * entity. A {@link ItemReading} with an attribute and no entity means
+   * exactly that, which is how it translates into the pool.
    */
   secondaryAttribute?: string;
   /**
@@ -425,22 +436,20 @@ export interface FloorItem {
    */
   showName?: boolean;
   /**
-   * Further readings appended to the label (issue #180) — a temperature
-   * sensor that also reports humidity and pressure, or a plug that reports
-   * power, link quality and last-seen.
+   * Everything this device reads **beyond its own state** (issue #180) — a
+   * temperature sensor that also reports humidity and pressure, a plug that
+   * reports power, link quality and battery.
    *
-   * Additive rather than a replacement for {@link secondaryEntity}: that key
-   * is the *paired* reading, joined to the primary with the same separator and
-   * offered to the badge itself through `badgeEntity`, and rewriting it as
-   * `readings[0]` would have broken both. So `entity`, then `secondaryEntity`,
-   * then these, in order.
+   * This is *the* list. {@link secondaryEntity} is a legacy spelling of its
+   * first entry rather than a parallel mechanism, so there is one pool, one
+   * order (`entity`, then any legacy pair, then these) and one rule about when
+   * they show. Resolve with `itemReadings`, never by reading either key
+   * directly.
    *
-   * **Shown whether or not `showState` is** — which is the point of them. A
-   * plug says on/off through its badge colour, so its owner wants Power · LQI
-   * · Last seen and *not* the word "on" (I-G-1-1's case in discussion #173).
-   * `showState` therefore governs the device's own state line only, and these
-   * are their own statement. An existing plan gains nothing it did not ask
-   * for, because a plan with no `readings` has no extra rows to show.
+   * **Shown whether or not `showState` is**, which is the point of them. A plug
+   * says on/off through its badge colour, so its owner wants Power · LQI ·
+   * Battery and *not* the word "on" (I-G-1-1's case in discussion #173).
+   * `showState` is about the device's *own state*; these are not it.
    */
   readings?: ItemReading[];
   /** Where the label sits relative to the badge (issue #180). Default `below`. */
@@ -469,8 +478,8 @@ export interface FloorItem {
   badgeContent?: BadgeContent;
   /**
    * Which of this device's own entities the badge reads while
-   * `badgeContent: "value"` (issue #136) — the main `entity`, or
-   * {@link secondaryEntity}.
+   * `badgeContent: "value"` (issue #136) — the main `entity`, or one of its
+   * other {@link readings} by index.
    *
    * Absent means "work it out", which is what {@link badgeValue} has always
    * done: the first candidate with a number wins, so a switch that reads "on"
@@ -478,10 +487,11 @@ export interface FloorItem {
    * but it is only a guess, and there was no way to overrule it when the main
    * entity happens to be numeric too.
    *
-   * Set, it is the *only* entity read. No falling back to the other one:
-   * having asked for the power sensor, being shown the switch instead would
-   * be worse than being shown the icon — which is what a device with no
-   * number to display falls back to anyway.
+   * Set, it is the *only* reading read. No falling back to another: having
+   * asked for the power sensor, being shown the switch instead would be worse
+   * than being shown the icon — which is what a device with no number to
+   * display falls back to anyway. An index past the end of the pool behaves
+   * the same way, rather than sliding onto a neighbouring reading.
    */
   badgeEntity?: BadgeEntity;
   /**
@@ -562,11 +572,21 @@ export type ItemDisplay = "badge" | "ripple" | "iconRipple";
 export type BadgeContent = "icon" | "value" | "none";
 
 /**
- * Which of a device's two entities feeds its value badge — see
- * {@link FloorItem.badgeEntity} (issue #136). Named by role rather than by
- * entity id so renaming an entity in Home Assistant cannot orphan the choice.
+ * Which of a device's readings feeds its value badge — see
+ * {@link FloorItem.badgeEntity} (issue #136).
+ *
+ * - `"primary"` — the device's own entity.
+ * - a **number** — that index into the device's other readings (see
+ *   `itemReadings`), so a plug with power, link quality and battery can badge
+ *   whichever of them it likes.
+ * - `"secondary"` — the historic spelling of index `0`, from when a device had
+ *   exactly two entities and the second had a name rather than a position.
+ *   Still read, so no stored config is orphaned; the editor writes indices.
+ *
+ * Addressed by role or position rather than by entity id, so renaming an
+ * entity in Home Assistant cannot strand the choice.
  */
-export type BadgeEntity = "primary" | "secondary";
+export type BadgeEntity = "primary" | "secondary" | number;
 
 /**
  * One colour rule for {@link FloorItem.stateColor} / {@link Furniture.stateColor}.

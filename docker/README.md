@@ -137,7 +137,10 @@ there is no other way to see a sash open beside a sash that is shut.
 Two devices carry the multi-reading work (issue #180). The sensor in the middle
 of the plan shows three numbers from one badge — its own temperature, the paired
 humidity, and a third `readings` row — which is the ordering worth checking:
-`entity`, then `secondaryEntity`, then `readings`, in that order. The fan stands
+`entity`, then the legacy `secondaryEntity`, then `readings`. That device is
+deliberately left on the old spelling, so the plan exercises the compatibility
+path too: the card reads both as one pool, and opening the device in the editor
+rewrites the pair into `readings` in front of you. The fan stands
 in for the smart plug from discussion #173: `showState: false`, one reading off
 its own `percentage` attribute, and its label hung to the **left** of the badge,
 so a device that labels itself *without* its own state and a label that is not

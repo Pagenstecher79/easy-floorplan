@@ -111,6 +111,7 @@ import {
   itemIconSize,
   itemLabelSize,
   labelPositionOf,
+  itemReadings,
   snapToWall,
   collectWatchedEntities,
   hassRenderInputsChanged,
@@ -148,6 +149,7 @@ import {
   furnitureForm,
   isLiveField,
   itemForm,
+  itemEntityForm,
   itemHasRipple,
   normalizeFormPatch,
   openingForm,
@@ -478,7 +480,13 @@ export class FloorplanCardEditor extends LitElement {
     void this._ensureHaComponents();
     // Upgrade the plain-input fallbacks in place whenever a component gets
     // defined later (by us or by another editor the user opened).
-    for (const tag of ["ha-form", "ha-entity-picker", "ha-icon-picker", "ha-combo-box"]) {
+    for (const tag of [
+      "ha-form",
+      "ha-entity-picker",
+      "ha-entity-attribute-picker",
+      "ha-icon-picker",
+      "ha-combo-box",
+    ]) {
       if (!customElements.get(tag)) {
         void customElements.whenDefined(tag).then(() => this.requestUpdate());
       }
@@ -1980,14 +1988,29 @@ export class FloorplanCardEditor extends LitElement {
    * entity, which is how one climate shows four of its own numbers.
    */
   private _renderItemReadings(it: FloorItem): TemplateResult {
-    const list = it.readings ?? [];
+    // The pool as the card sees it, legacy pair included — so a device
+    // configured before #180 shows its second entity here as the first row
+    // rather than as an invisible extra the editor cannot reach.
+    const list = itemReadings(it);
+    // Writing the list writes the *whole* pool into `readings` and clears the
+    // legacy keys, which is the migration: touch a device once and its config
+    // stops using the old spelling. Done here rather than as a config-wide
+    // upgrade so nothing rewrites a plan the user has not edited.
     const commit = (next: ItemReading[]): void =>
-      this._updateItem(it.id, { readings: next.length ? next : undefined });
+      this._updateItem(it.id, {
+        readings: next.length ? next : undefined,
+        secondaryEntity: undefined,
+        secondaryAttribute: undefined,
+        // `badgeEntity: "secondary"` meant index 0, which is where the legacy
+        // pair still is — restate it as the index so the old spelling does not
+        // outlive the keys it referred to.
+        ...(it.badgeEntity === "secondary" ? { badgeEntity: 0 } : {}),
+      });
     const patch = (i: number, part: Partial<ItemReading>): void =>
       commit(list.map((r, j) => (j === i ? { ...r, ...part } : r)));
     return html`
       <div class="row wide">
-        <label title="Extra entities whose readings join this device's label line"
+        <label title="Further entities and attributes whose readings join this device's label line"
           >More readings</label
         >
       </div>
@@ -2003,15 +2026,12 @@ export class FloorplanCardEditor extends LitElement {
               // the same room as the first one.
               this._areaEntitiesAt(it.x, it.y)?.entities
             )}
-            <input
-              type="text"
-              class="reading-attr"
-              placeholder="attribute"
-              title="Read this attribute instead of the state — with no entity above, from this device's own entity"
-              .value=${reading.attribute ?? ""}
-              @change=${(e: Event) =>
-                patch(i, { attribute: (e.target as HTMLInputElement).value || undefined })}
-            />
+            ${this._renderAttributePicker(
+              reading.entity || it.entity,
+              reading.attribute ?? "",
+              (attribute) => patch(i, { attribute: attribute || undefined }),
+              "Read this attribute instead of the state — with no entity beside it, from this device's own entity"
+            )}
             <button
               class="rule-remove"
               aria-label="Remove reading"
@@ -2030,8 +2050,8 @@ export class FloorplanCardEditor extends LitElement {
       </div>
       ${list.length
         ? html`<p class="hint rule-note">
-            Shown whether or not "Show state" is on, so a device can label itself
-            with these alone.
+            Shown whether or not "Show state" is on — that toggle is about this
+            device's own state, so a device can label itself with these alone.
           </p>`
         : nothing}
     `;
@@ -3315,6 +3335,49 @@ export class FloorplanCardEditor extends LitElement {
   }
 
   /**
+   * Attribute field for the hand-rolled rows, mirroring
+   * {@link _renderEntityPicker}: HA's own attribute dropdown when the frontend
+   * has registered it, a plain text input otherwise.
+   *
+   * The dropdown is the whole point — it lists the attributes the entity
+   * *actually has*, which is what `ha-form`'s `attribute` selector gives the
+   * device's own Attribute field. A repeatable row cannot go through `ha-form`,
+   * but that is no reason for it to be a worse control: typing `curent_temp`
+   * into a free-text box fails silently at render time, which is exactly the
+   * bug a picker cannot have.
+   *
+   * `entityId` is what the attributes are listed from — the row's own entity
+   * when it names one, else the device's, which is the same fallback the
+   * reading itself resolves through.
+   */
+  private _renderAttributePicker(
+    entityId: string | undefined,
+    value: string,
+    onChange: (attribute: string) => void,
+    title?: string
+  ): TemplateResult {
+    if (customElements.get("ha-entity-attribute-picker") && entityId) {
+      return html`<ha-entity-attribute-picker
+        class="reading-attr"
+        .hass=${this.hass}
+        .entityId=${entityId}
+        .value=${value}
+        allow-custom-value
+        title=${title ?? nothing}
+        @value-changed=${(e: CustomEvent) => onChange((e.detail.value as string) ?? "")}
+      ></ha-entity-attribute-picker>`;
+    }
+    return html`<input
+      type="text"
+      class="reading-attr"
+      placeholder="attribute"
+      title=${title ?? nothing}
+      .value=${value}
+      @change=${(e: Event) => onChange((e.target as HTMLInputElement).value)}
+    />`;
+  }
+
+  /**
    * Icon field for the hand-rolled rows (issue #106), mirroring
    * {@link _renderEntityPicker}: HA's searchable picker when the frontend has
    * registered it, a plain text input otherwise. Used by the state-rule list,
@@ -4139,10 +4202,25 @@ export class FloorplanCardEditor extends LitElement {
       const badgeSource = {
         source: badgeReading(this.hass, it)?.source ?? "primary",
         primaryLabel: friendly(it.entity),
-        secondaryLabel: friendly(it.secondaryEntity),
+        // One label per reading, positionally — the dropdown names each rather
+        // than numbering them, and a reading with no entity of its own is read
+        // off this device, so that is the name to show for it (issue #180).
+        readingLabels: itemReadings(it).map((r) => friendly(r.entity || it.entity)),
       } as const;
       return html`
-        ${this._renderForm(itemForm(it, areaEntities, deviceClass, badgeSource), (patch, live) => {
+        <!-- Entity, Attribute, then every other reading, then the rest: the
+             device's readings all sit together and in the order the label
+             prints them (issue #180). -->
+        ${this._renderForm(itemEntityForm(it, areaEntities), (patch, live) => {
+          // Any entity change re-derives the item kind (icon defaults etc.) —
+          // including clearing it, which resets kind to "generic".
+          if ("entity" in patch && typeof patch.entity === "string") {
+            patch = { ...patch, kind: kindFromEntity(patch.entity) };
+          }
+          this._applyElementPatch("item", it.id, patch, live);
+        })}
+        ${this._renderItemReadings(it)}
+        ${this._renderForm(itemForm(it, deviceClass, badgeSource), (patch, live) => {
           // Any entity change re-derives the item kind (icon defaults etc.) —
           // including clearing it, which resets kind to "generic".
           if ("entity" in patch && typeof patch.entity === "string") {
@@ -4176,7 +4254,6 @@ export class FloorplanCardEditor extends LitElement {
               onCommit: (rippleColor) => this._updateItem(it.id, { rippleColor }),
             })
           : nothing}
-        ${this._renderItemReadings(it)}
         ${this._renderItemIconRow(it)}
         ${this._renderStateColorRules(
           it.stateColor,
@@ -5558,8 +5635,8 @@ export class FloorplanCardEditor extends LitElement {
       flex: 1 1 auto;
       min-width: 0;
     }
-    .reading-attr {
-      flex: 0 0 90px;
+    .item-reading .reading-attr {
+      flex: 0 0 130px;
       min-width: 0;
     }
     /* The panel ("Project" config) and the new element-edit area share the

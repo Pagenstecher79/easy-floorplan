@@ -5,6 +5,7 @@ import {
   normalizeFormPatch,
   openingForm,
   itemForm,
+  itemEntityForm,
   textForm,
   furnitureForm,
   trackerForm,
@@ -377,7 +378,7 @@ describe("itemForm", () => {
 
   it("offers Ripple on presence devices only, sized behind the toggle (#127)", () => {
     const motion = { ...item, entity: "binary_sensor.hall", kind: "binary_sensor" } as FloorItem;
-    const names = (it: FloorItem, dc?: string) => itemForm(it, undefined, dc).fields.map((x) => x.name);
+    const names = (it: FloorItem, dc?: string) => itemForm(it, dc).fields.map((x) => x.name);
     // A light is not something that detects presence, whatever it can do.
     expect(names(item)).not.toContain("ripple");
     expect(names(item, "motion")).not.toContain("ripple");
@@ -560,10 +561,10 @@ describe("itemForm", () => {
       secondaryEntity: "sensor.plug_power",
       badgeContent: "value",
     } as FloorItem;
-    const names = (it: FloorItem, src?: Parameters<typeof itemForm>[3]) =>
-      itemForm(it, undefined, undefined, src).fields.map((x) => x.name);
+    const names = (it: FloorItem, src?: Parameters<typeof itemForm>[2]) =>
+      itemForm(it, undefined, src).fields.map((x) => x.name);
 
-    it("appears only when the badge shows a value AND there is a second entity", () => {
+    it("appears only when the badge shows a value AND there is another reading", () => {
       expect(names(plug)).toContain("badgeEntity");
       // Nothing to choose between with one entity.
       expect(names({ ...plug, secondaryEntity: undefined } as FloorItem)).not.toContain(
@@ -581,27 +582,52 @@ describe("itemForm", () => {
       // fallback, with no badgeEntity stored. A form defaulting to "primary"
       // would name the switch while the badge shows watts — and the next
       // unrelated edit would save that and drop the reading to an icon.
-      const asRead = itemForm(plug, undefined, undefined, { source: "secondary" });
-      expect(asRead.data.badgeEntity).toBe("secondary");
+      const asRead = itemForm(plug, undefined, { source: 0 });
+      expect(asRead.data.badgeEntity).toBe("0");
       // A stored choice always wins over the live reading.
       expect(
-        itemForm({ ...plug, badgeEntity: "primary" } as FloorItem, undefined, undefined, {
-          source: "secondary",
+        itemForm({ ...plug, badgeEntity: "primary" } as FloorItem, undefined, {
+          source: 0,
         }).data.badgeEntity,
       ).toBe("primary");
+      // …including the legacy spelling, which means index 0.
+      expect(
+        itemForm({ ...plug, badgeEntity: "secondary" } as FloorItem, undefined, {
+          source: "primary",
+        }).data.badgeEntity,
+      ).toBe("0");
     });
 
     it("names the entities, with no 'Automatic' among them (#127's precedent)", () => {
-      const field = itemForm(plug, undefined, undefined, {
-        source: "secondary",
+      const field = itemForm(plug, undefined, {
+        source: 0,
         primaryLabel: "Kitchen plug",
-        secondaryLabel: "Kitchen plug power",
+        readingLabels: ["Kitchen plug power"],
       }).fields.find((x) => x.name === "badgeEntity")!;
       const opts = (field.selector as { select: { options: { value: string; label: string }[] } })
         .select.options;
-      expect(opts.map((o) => o.value)).toEqual(["primary", "secondary"]);
+      expect(opts.map((o) => o.value)).toEqual(["primary", "0"]);
       expect(opts.map((o) => o.label)).toEqual(["Kitchen plug", "Kitchen plug power"]);
       expect(opts.map((o) => o.value)).not.toContain("auto");
+    });
+
+    it("offers one option per reading, not just the second (#180)", () => {
+      const many = {
+        ...plug,
+        secondaryEntity: undefined,
+        readings: [
+          { entity: "sensor.plug_power" },
+          { entity: "sensor.plug_lqi" },
+          { attribute: "battery" },
+        ],
+      } as FloorItem;
+      const field = itemForm(many).fields.find((x) => x.name === "badgeEntity")!;
+      const opts = (field.selector as { select: { options: { value: string; label: string }[] } })
+        .select.options;
+      expect(opts.map((o) => o.value)).toEqual(["primary", "0", "1", "2"]);
+      // A reading with no entity of its own is read off this device, and the
+      // label says so rather than leaving the row nameless.
+      expect(opts[3].label).toContain("battery");
     });
 
     it("falls back to entity ids when hass has no friendly names", () => {
@@ -610,8 +636,10 @@ describe("itemForm", () => {
       expect(opts.map((o) => o.label)).toEqual(["switch.plug", "sensor.plug_power"]);
     });
 
-    it("passes the choice straight through as a config key", () => {
-      expect(itemForm(plug).toPatch({ badgeEntity: "secondary" }).badgeEntity).toBe("secondary");
+    it("stores the choice as an index, so the legacy spelling stops spreading", () => {
+      expect(itemForm(plug).toPatch({ badgeEntity: "0" }).badgeEntity).toBe(0);
+      expect(itemForm(plug).toPatch({ badgeEntity: "2" }).badgeEntity).toBe(2);
+      expect(itemForm(plug).toPatch({ badgeEntity: "primary" }).badgeEntity).toBe("primary");
     });
   });
 
@@ -620,32 +648,33 @@ describe("itemForm", () => {
     expect(itemForm(item).data.icon).toBeUndefined();
   });
 
-  it("scopes the entity/secondaryEntity pickers to the area's entities when given", () => {
-    const unscoped = itemForm(item);
+  it("scopes the entity picker to the area's entities when given", () => {
+    const unscoped = itemEntityForm(item);
     expect(unscoped.fields.find((x) => x.name === "entity")!.selector).toEqual({ entity: {} });
-    const scoped = itemForm({ ...item, entity: "light.kitchen" } as FloorItem, {
+    const scoped = itemEntityForm({ ...item, entity: "light.kitchen" } as FloorItem, {
       entities: ["light.kitchen", "switch.kitchen"],
       name: "Kitchen",
     });
     expect(scoped.fields.find((x) => x.name === "entity")!.selector).toEqual({
       entity: { include_entities: ["light.kitchen", "switch.kitchen"] },
     });
-    expect(scoped.fields.find((x) => x.name === "secondaryEntity")!.selector).toEqual({
-      entity: { include_entities: ["light.kitchen", "switch.kitchen"] },
-    });
+    // There is no second entity *field* to scope any more (issue #180) — the
+    // readings rows are hand-rolled, and the editor scopes their pickers off
+    // the same _areaEntitiesAt call.
+    expect(scoped.fields.map((x) => x.name)).toEqual(["entity", "attribute"]);
   });
 
   it("an empty area list does NOT filter — an empty picker would hide everything", () => {
     // Regression: `[]` is truthy, so the old code emitted
     // `include_entities: []` and the picker listed nothing at all — the
     // common case when a linked HA area has no entities assigned.
-    const scoped = itemForm(item, { entities: [], name: "Kitchen" });
+    const scoped = itemEntityForm(item, { entities: [], name: "Kitchen" });
     expect(scoped.fields.find((x) => x.name === "entity")!.selector).toEqual({ entity: {} });
     expect(scoped.fields.find((x) => x.name === "entity")!.helper).toBeUndefined();
   });
 
   it("always keeps the bound entity pickable, even from another area", () => {
-    const scoped = itemForm({ ...item, entity: "light.hallway" } as FloorItem, {
+    const scoped = itemEntityForm({ ...item, entity: "light.hallway" } as FloorItem, {
       entities: ["light.kitchen"],
       name: "Kitchen",
     });
@@ -655,14 +684,10 @@ describe("itemForm", () => {
   });
 
   it("says why the list is short, and how to widen it", () => {
-    const scoped = itemForm(item, { entities: ["light.kitchen"], name: "Kitchen" });
+    const scoped = itemEntityForm(item, { entities: ["light.kitchen"], name: "Kitchen" });
     const helper = scoped.fields.find((x) => x.name === "entity")!.helper!;
     expect(helper).toContain("Kitchen");
     expect(helper).toContain("Filter entities");
-    // The secondary picker keeps its own explanation too.
-    expect(scoped.fields.find((x) => x.name === "secondaryEntity")!.helper).toContain(
-      "Shown next to the primary state"
-    );
   });
 });
 
@@ -1376,12 +1401,12 @@ describe("area scoping never traps you (issue reported on #83)", () => {
 
   it("outside every area, and inside an empty one, nothing is filtered", () => {
     // No scope at all — the element sits outside every area.
-    expect(itemForm(item).fields.find((x) => x.name === "entity")!.selector).toEqual({
+    expect(itemEntityForm(item).fields.find((x) => x.name === "entity")!.selector).toEqual({
       entity: {},
     });
     // Inside an area whose HA area has no entities: same, unfiltered.
     expect(
-      itemForm(item, { entities: [], name: "Spare" }).fields.find((x) => x.name === "entity")!
+      itemEntityForm(item, { entities: [], name: "Spare" }).fields.find((x) => x.name === "entity")!
         .selector
     ).toEqual({ entity: {} });
   });

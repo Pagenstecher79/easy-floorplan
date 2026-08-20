@@ -147,10 +147,12 @@ views:
             items:
               # Paired temperature/humidity: stored at two decimals, displayed at
               # one. Should read like "17.9 °C · 49.3%".
-              # Many readings on one device (issue #180). The first two are the
-              # old pair (`entity` + `secondaryEntity`); `readings` stacks on
-              # top of them rather than replacing them, which is the ordering
-              # this is here to prove: entity, then secondary, then these.
+              # Many readings on one device (issue #180): one list, in the
+              # order the label prints them. This one deliberately still uses
+              # the legacy `secondaryEntity` for its second reading, so the
+              # plan proves the compatibility path as well as the new key --
+              # the card reads both as one pool, and opening this device in
+              # the editor rewrites the old spelling into `readings`.
               - id: i1
                 entity: sensor.living_area_temperature
                 secondaryEntity: sensor.living_area_humidity

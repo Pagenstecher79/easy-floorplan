@@ -103,11 +103,11 @@ then pick the entity in the **Element** section below the canvas.
   both read `Name · state`. **Label size** sets the font size. The editor canvas draws
   the same line the card will, so turning one on is visible straight away; a device
   showing neither still gets a dimmed editor-only label so you can tell it apart.
-- **Two readings in one** — add a **Second entity** to render e.g. `21.5 °C · 45%`. Or set
-  **Attribute** / **2nd attribute** to read attributes instead of states, so a single
-  climate entity shows its temperature and humidity.
-- **More readings** — beyond those two, **+ Add reading** appends as many as you like.
-  See [More readings per device](#more-readings-per-device).
+- **More readings** — **+ Add reading**, right under the entity, appends as many as the
+  device has: `21.5 °C · 45% · 1013 hPa`. Each row picks an entity, an attribute, or both
+  — leave the entity empty and it reads that attribute off this device, so one climate
+  entity can show four of its own numbers. See
+  [More readings per device](#more-readings-per-device).
 - **Label position** — **Below** the badge (the default), or hung off its **left** or
   **right**. A reading under a badge grows in both directions and meets whatever sits
   beside it; hung off one side it grows one way only.
@@ -461,9 +461,9 @@ distorted anyway.
 | ------------- | -------------------------------------- | ------------ | ------------------------------------------------------ |
 | `id`          | string                                 | —            | Unique id.                                             |
 | `entity`      | string                                 | —            | Entity to bind. Without one the device is a static badge. |
-| `secondaryEntity` | string                             | —            | Second entity shown alongside (e.g. humidity).         |
+| `secondaryEntity` | string                             | —            | **Legacy** spelling of the first `readings` row. Still read — it goes at the head of the list — but it has no editor field, and editing a device's readings rewrites it. Use `readings`. |
 | `attribute`   | string                                 | —            | Show this attribute instead of the state (e.g. `current_temperature`). |
-| `secondaryAttribute` | string                          | —            | Attribute for the 2nd reading — from `secondaryEntity`, or from `entity` when none. |
+| `secondaryAttribute` | string                          | —            | **Legacy**, as above: the attribute for that first row — from `secondaryEntity`, or from `entity` when none. |
 | `stateColor`  | rule[]                                 | —            | Badge/label color rules, regardless of on/off; beats `activeColor`. Each is `{ above? , state?, color, icon? }` — an exact `state` beats a threshold, the highest matching `above` wins, neither is the default, and a matching `icon` beats the device's own. |
 | `x`, `y`      | number                                 | —            | Position.                                              |
 | `kind`        | light/switch/sensor/binary_sensor/climate/cover/media_player/fan/camera/lock/humidifier/vacuum/generic | inferred | Used for the default icon. |
@@ -480,12 +480,12 @@ distorted anyway.
 | `glowRadius`  | number                                 | `140`        | Radius of the cast pool at full brightness, in canvas units. A dimmer lamp casts a proportionally smaller pool, down to half this. |
 | `glowColor`   | string                                 | `#ffd9a0`    | Pool color for a bulb that can't report one; color-capable lights use their own. |
 | `badgeContent` | `icon` \| `value` \| `none`           | `icon`       | What the badge holds. `value` draws the reading inside it, falling back to the icon when there is no number; `none` leaves the label alone. |
-| `badgeEntity` | `primary` \| `secondary`               | automatic    | Which entity a `value` badge reads. Unset picks the first with a number to show; set, only that entity is read. |
+| `badgeEntity` | `primary` \| number                    | automatic    | Which reading a `value` badge shows: the device's own entity, or an index into `readings`. Unset picks the first with a number; set, only that one is read (an index past the end shows the icon). `secondary` is accepted as the legacy spelling of `0`. |
 | `showIcon`    | boolean                                | `true`       | **Deprecated** — use `badgeContent`. Honoured only when it is unset (`false` = `none`). |
 | `hideWhenInactive` | boolean                           | `false`      | Hide on the card while the entity is inactive. Always shown, dimmed, in the editor. |
 | `showState`   | boolean                                | sensors only | Show the entity state in the label line. Governs this device's **own** state only — `readings` show regardless. |
 | `showName`    | boolean                                | `false`      | Show the device's name in the label line (`Name · state` when combined). |
-| `readings`    | `{ entity?, attribute? }[]`            | —            | Further readings appended to the label — a sensor's humidity and pressure, a plug's power, link quality and battery. Shown whether or not `showState` is. See [More readings per device](#more-readings-per-device). |
+| `readings`    | `{ entity?, attribute? }[]`            | —            | Everything this device reads beyond its own state — a sensor's humidity and pressure, a plug's power, link quality and battery. Shown whether or not `showState` is. See [More readings per device](#more-readings-per-device). |
 | `labelPosition` | `below` \| `left` \| `right`         | `below`      | Where the label sits relative to the badge. |
 | `labelSize`   | number                                 | `12`         | Label line font size (px).                             |
 | `tap_action`  | ActionConfig                           | per domain   | Standard Lovelace action. By default `light`, `switch`, `fan` and `input_boolean` toggle and everything else — covers included — opens more-info. |
@@ -1121,19 +1121,39 @@ its label should carry the *other* numbers and not the word "on":
       - { attribute: battery }
 ```
 
-→ `Desk plug · 1.2 kW · 84 · 84`. `showState` governs the device's **own** state line;
-`readings` are their own statement. A plan with no `readings` therefore gains nothing on
-upgrade.
+→ `Desk plug · 1.2 kW · 84 · 84`. `showState` is about the device's **own state**;
+`readings` are their own statement.
 
-### Why not more entity boxes
+### One list, not two mechanisms
 
-`readings` is additive rather than a replacement for `secondaryEntity`. That key is the
-*paired* reading — joined with the same separator, and offered to the badge itself through
-`badgeEntity` (see **Badge reads**) — so folding it into `readings[0]` would have broken
-both. The order on the label is `entity`, then `secondaryEntity`, then these.
+There used to be a `secondaryEntity` / `secondaryAttribute` pair — one extra reading, with
+its own pair of dropdowns and its own rule about when it showed. It is now simply the
+**first row of `readings`**: still read, so no existing plan breaks, but with no field of
+its own in the editor, and rewritten into `readings` the first time you touch a device's
+readings. The order on the label is `entity`, then that legacy row, then the rest.
 
-In the editor they are added one at a time with **+ Add reading**, rather than by putting
-four entity dropdowns on every device that will never use them.
+The badge follows the same list. **Badge reads** offers one option per reading rather than
+just "the second one", so a plug reporting power, link quality and battery can badge
+whichever it likes:
+
+```yaml
+    badgeContent: value
+    badgeEntity: 1            # index into readings; "primary" is the device itself
+```
+
+`badgeEntity: secondary` still works and means index `0`.
+
+> **Upgrading?** One behaviour changed with the merge. `secondaryEntity` used to be part of
+> the state line, so it only showed while **Show state** was on — which is off by default
+> for anything that isn't a `sensor`. As a reading it now shows on its own terms. If you
+> have a light or a switch with a second entity and Show state off, a reading will appear
+> under it that wasn't there before; delete that row, or leave it — it is the number you
+> pointed the device at. Sensors, which show state by default, are unaffected.
+
+In the editor the readings sit **directly under the entity**, added one at a time with
+**+ Add reading** rather than by putting four entity dropdowns on every device that will
+never use them. Each row's attribute box is HA's own attribute picker, listing what that
+entity actually has.
 
 ## Offline devices
 
