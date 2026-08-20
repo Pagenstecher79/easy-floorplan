@@ -961,8 +961,12 @@ export class FloorplanCard extends LitElement {
                       // rakes it across the room. A pinned bearing states a
                       // picture rather than reading the sky, so it keeps the
                       // plain reach — same rule as the strength above.
+                      // Coerced here so the elevation still scales a sane
+                      // base — cssNumber is what the sun brightness above
+                      // already uses on its own hand-edited numbers. The
+                      // bounds live at the sink, in sunReachFraction.
                       reach:
-                        (c.sunReach ?? SUN_REACH) *
+                        cssNumber(c.sunReach, SUN_REACH) *
                         (sunIsPinned(c)
                           ? 1
                           : sunReachScale(this.hass?.states["sun.sun"]?.attributes?.elevation)),

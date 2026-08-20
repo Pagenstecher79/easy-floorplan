@@ -3261,6 +3261,19 @@ export const SUN_LIGHT_COLOR = "var(--fp-skin-sunlight, #ffd9a0)";
 export const SUN_SHADE_COLOR = "var(--fp-skin-sunshade, #000)";
 
 /**
+ * A usable reach fraction: {@link cssNumber}'s coercion, then bounded.
+ *
+ * The lower bound is not zero. A reach of zero is a beam with no length,
+ * which is a gradient with no extent and a polygon folded onto its own mouth
+ * — legal SVG that draws nothing, and indistinguishable on screen from the
+ * feature being broken. The upper bound is what keeps a typo like `40` from
+ * asking the browser for a polygon sixteen thousand units long.
+ */
+export function sunReachFraction(value: unknown): number {
+  return Math.max(0.02, Math.min(1.5, cssNumber(value, SUN_REACH)));
+}
+
+/**
  * How far the light reaches for a sun at `elevation`, as a multiple of the
  * base reach.
  *
@@ -3579,7 +3592,12 @@ export function renderSunlight(
   // Below the horizon there is nothing to let in, so there is nothing to draw
   // — not a layer at zero opacity, which would still cost every polygon.
   if (strength <= 0) return nothing;
-  const reach = Math.min(width, height) * (opts.reach ?? SUN_REACH);
+  // Coerced and bounded at the sink, so no caller can put a NaN into a
+  // coordinate. `sunReach` is hand-editable YAML: "wide" or a stray NaN made
+  // every far corner NaN — in the polygon *and* in the gradient that fades
+  // it — and a negative one did something quieter and worse, sweeping the
+  // beam backwards so the light left through the wall it came in by.
+  const reach = Math.min(width, height) * sunReachFraction(opts.reach);
   // Doorways already subtracted, so an open door casts no shadow across the
   // room behind it. Windows too — glass casts none whatever its sash is doing.
   // How much of each gap is clear, asked once and used for both families —
@@ -3596,20 +3614,32 @@ export function renderSunlight(
   // second sun of every opening that happened to line up with a window: the
   // doorway behind it re-emitted at its own full width, and a window on the
   // shaded façade threw a patch out of the house (issues #177 / #178).
-  const lit = openings.filter((o) => clear(o) > 0 && sunReachesOpening(o, walls, dir));
-  if (!lit.length) return nothing;
+  // One slot per opening, holes included — NOT compacted, for exactly the
+  // reason renderSunDimMask spells out above (issue #119). Filtering to the
+  // lit ones renumbers every later beam the moment a door opens, which
+  // rewrites the `id` on an existing <linearGradient> and leaves the polygon
+  // that referenced it pointing at a paint server the browser has already
+  // cached under that name. Here the symptom would be this very feature
+  // failing: a beam painted flat and full-length again, and only the ones
+  // *after* the door that moved — the fade looking intermittent rather than
+  // broken. Emitting the holes in place keeps DOM positions stable too.
+  //
   // Each beam keeps the opening it came from: the fade runs from that
   // opening's own centre along the light, so every patch dims over its own
   // length rather than sharing one gradient across the plan.
-  const beams = lit.map((o, i) => ({
-    points: polyPoints(sunBeamPolygon(o, dir, reach, clear(o), spread)),
-    x1: o.x,
-    y1: o.y,
-    x2: o.x + dir.x * reach,
-    y2: o.y + dir.y * reach,
-    lightId: `${id}-b${i}`,
-    shadeId: `${id}-s${i}`,
-  }));
+  const beams = openings.map((o, i) => {
+    if (!(clear(o) > 0 && sunReachesOpening(o, walls, dir))) return undefined;
+    return {
+      points: polyPoints(sunBeamPolygon(o, dir, reach, clear(o), spread)),
+      x1: o.x,
+      y1: o.y,
+      x2: o.x + dir.x * reach,
+      y2: o.y + dir.y * reach,
+      lightId: `${id}-b${i}`,
+      shadeId: `${id}-s${i}`,
+    };
+  });
+  if (!beams.some((b) => b !== undefined)) return nothing;
   const shadows = shadowPolys.map(polyPoints);
   const pad = WALL_THICKNESS;
   const shadeId = `${id}-shade`;
@@ -3652,8 +3682,10 @@ export function renderSunlight(
            back wherever a wall stands in one. The order is the whole logic. -->
       <mask id=${shadeId} maskUnits="userSpaceOnUse" x=${x} y=${y} width=${w} height=${h}>
         ${cover("#fff")}
-        ${beams.map((b) => fade(b.shadeId, b.x1, b.y1, b.x2, b.y2, "#000"))}
-        ${beams.map((b) => svg`<polygon points=${b.points} fill=${`url(#${b.shadeId})`} />`)}
+        ${beams.map((b) => (b ? fade(b.shadeId, b.x1, b.y1, b.x2, b.y2, "#000") : nothing))}
+        ${beams.map((b) =>
+          b ? svg`<polygon points=${b.points} fill=${`url(#${b.shadeId})`} />` : nothing
+        )}
         ${shadows.map((p) => shadowPoly(p, "#fff"))}
       </mask>`;
   return svg`
@@ -3675,12 +3707,15 @@ export function renderSunlight(
       }
       <g mask=${`url(#${shadowId})`} opacity=${SUN_PATCH_OPACITY * strength}>
         ${beams.map((b) =>
-          fade(b.lightId, b.x1, b.y1, b.x2, b.y2, cssColorOr(paint.light, SUN_LIGHT_COLOR))
+          b
+            ? fade(b.lightId, b.x1, b.y1, b.x2, b.y2, cssColorOr(paint.light, SUN_LIGHT_COLOR))
+            : nothing
         )}
-        ${beams.map(
-          (b) =>
-            svg`<polygon class="fp-sunbeam" points=${b.points}
-                        fill=${`url(#${b.lightId})`} />`
+        ${beams.map((b) =>
+          b
+            ? svg`<polygon class="fp-sunbeam" points=${b.points}
+                          fill=${`url(#${b.lightId})`} />`
+            : nothing
         )}
       </g>
     </g>`;

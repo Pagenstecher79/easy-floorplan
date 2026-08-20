@@ -1295,6 +1295,10 @@ export interface FloorplanCardConfig extends LovelaceCardConfig {
    * a midday sun lays a short patch, an evening one rakes across the room
    * (issue #185). Raise it for a plan whose rooms read as too dark, lower it
    * for one where the patches still reach further than they should.
+   *
+   * Coerced and clamped to 0.02-1.5 before it reaches the drawing — see
+   * {@link sunReachFraction}. It is hand-editable YAML, and an unreadable one
+   * put NaN straight into a coordinate.
    */
   sunReach?: number;
   /**

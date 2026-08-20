@@ -212,6 +212,63 @@ describe("renderSunlight — the markup, not just the geometry", () => {
     expect(mask).not.toMatch(/<polygon points=[^>]*fill="#000"/);
   });
 
+  it("pins each beam's gradient id to its opening, not to its rank (issue #119)", () => {
+    // The trap renderSunDimMask documents, in this feature's own terms: filter
+    // the openings down to the lit ones and every later beam renumbers when a
+    // door moves, rewriting the id on a <linearGradient> that a polygon is
+    // already pointing at through a cached paint server. The beams after the
+    // door would go back to painting flat and full-length — this very bug,
+    // reappearing, and only sometimes.
+    const many = [
+      { ...win, id: "door", x: 80, type: "door" } as Opening,
+      { ...win, id: "a", x: 200 } as Opening,
+      { ...win, id: "b", x: 320 } as Opening,
+    ];
+    const idsByOpening = (doorOpen: number) => {
+      const s = serialize(
+        renderSunlight([wall], many, 400, 400, "sun", {
+          dir: sun,
+          openAmount: (o) => (o.id === "door" ? doorOpen : 0),
+          shutterOpen: () => undefined,
+        })
+      );
+      const out: Record<string, string> = {};
+      for (const m of s.matchAll(/<linearGradient id=(sun-b\d+)[^>]*x1=(\d+)/g)) out[m[2]!] = m[1]!;
+      return out;
+    };
+    const shut = idsByOpening(0);
+    const open = idsByOpening(1);
+    // The two windows keep the same gradient ids whatever the door is doing.
+    expect(shut["200"]).toBe(open["200"]);
+    expect(shut["320"]).toBe(open["320"]);
+    // …and the door, once it is lit, brings its own rather than taking one.
+    expect(open["80"]).toBeDefined();
+    expect(new Set(Object.values(open)).size).toBe(3);
+  });
+
+  it("never puts a NaN in a coordinate, whatever reach it is handed", () => {
+    // sunReach is hand-editable YAML. "wide" made every far corner NaN, in
+    // the polygon and in the gradient both; a negative one swept the beam
+    // backwards, so the light left through the wall it came in by.
+    for (const bad of [NaN, Infinity, -Infinity, "wide" as unknown as number, -3, 40, null]) {
+      const s = serialize(
+        renderSunlight([wall], [win], 400, 400, "sun", {
+          dir: sun,
+          openAmount: () => 1,
+          shutterOpen: () => undefined,
+          reach: bad as number,
+        })
+      );
+      expect(s).not.toContain("NaN");
+      expect(s).not.toContain("Infinity");
+      // Light travels the way it was sent: sun is {x:0,y:1}, so the far edge
+      // is below the wall at y=100, never back above it.
+      const pts = s.match(/class="fp-sunbeam" points=([-\d., ]+)/)![1]!;
+      const ys = pts.trim().split(" ").map((q) => Number(q.split(",")[1]));
+      expect(Math.max(...ys)).toBeGreaterThan(100);
+    }
+  });
+
   it("paints with the colours it is given", () => {
     const s = serialize(
       renderSunlight([wall], [win], 400, 400, "sun", { dir: sun, openAmount: () => 0, shutterOpen: () => undefined, light: "#ff0000", shade: "#0000ff" })
