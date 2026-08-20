@@ -2031,6 +2031,46 @@ export function openingActionForGesture(
 }
 
 /**
+ * What a gesture on a room resolves to (issue #181), or `undefined` for
+ * "nothing configured".
+ *
+ * Tap is the one with a prior claim: an area has zoomed to itself on tap since
+ * zooming existed, and plans rely on it. So this answers only for *configured*
+ * actions, and the card falls back to the zoom when tap resolves to nothing —
+ * which keeps every existing plan behaving exactly as it did, and leaves hold
+ * and double-tap free for a room that wants both.
+ *
+ * The action's own `entity` wins, else the area's. A room bound to a presence
+ * sensor can therefore say `tap_action: { action: toggle }` and mean it,
+ * without naming the entity twice.
+ */
+export function areaActionForGesture(
+  a: Pick<Area, "entity" | "tap_action" | "hold_action" | "double_tap_action">,
+  gesture: "tap" | "hold" | "double_tap",
+): { entity?: string; config: ActionConfig } | undefined {
+  const configured =
+    gesture === "tap" ? a.tap_action : gesture === "hold" ? a.hold_action : a.double_tap_action;
+  if (!configured) return undefined;
+  return { entity: configured.entity ?? a.entity, config: configured };
+}
+
+/**
+ * Whether a room does anything a plain zoom would not — i.e. whether any of
+ * its three gestures is configured.
+ *
+ * The card uses it for the `button` role and the tab stop. Not for the *hit
+ * target*: every area is already tappable because every area zooms, so unlike
+ * an opening there is no affordance here that has to be earned.
+ */
+export function areaHasActions(
+  a: Pick<Area, "tap_action" | "hold_action" | "double_tap_action">,
+): boolean {
+  return (["tap", "hold", "double_tap"] as const).some((g) =>
+    hasAction(areaActionForGesture(a, g)?.config),
+  );
+}
+
+/**
  * Whether pressing an opening does anything at all — the mirror of
  * {@link itemIsInteractive}, and used for the same things: the hit target, the
  * `button` role and the tab stop. An opening with nothing bound draws no
@@ -2068,11 +2108,28 @@ export function resolveOpeningOpen(o: Opening, state: string | undefined): boole
   // Fail closed on an outage before applying invert — a stale "open" during a
   // sensor dropout is worse than showing closed.
   if (isSensorOutage(state)) return false;
-  // `opening`/`closing` are transient cover states: the cover is in motion and
-  // not fully closed, so draw it open. Anything else (closed/off/…) reads closed.
-  const open =
-    state === "on" || state === "open" || state === "opening" || state === "closing";
+  const open = openingEntityReadsOpen(o.entity, state);
   return o.invert ? !open : open;
+}
+
+/**
+ * Whether a bound entity's raw state means "open", by the rules of its domain.
+ *
+ * A **lock** says it the domain's own way (issue #176): `locked` is a shut
+ * door and `unlocked` an open one, and neither word is `on` or `open`, so the
+ * generic test called every lock closed forever. The states that count come
+ * from {@link entityIsActive} rather than a second list here — that table
+ * already answers "is this lock doing its active thing" for devices, and two
+ * copies of it would be two chances for a door and its badge to disagree about
+ * the same entity.
+ *
+ * Everything else keeps the generic reading: `on`/`open` are open, and
+ * `opening`/`closing` are transient cover states — the cover is in motion and
+ * not fully closed, so it draws open.
+ */
+function openingEntityReadsOpen(entityId: string, state: string): boolean {
+  if (entityId.split(".")[0] === "lock") return entityIsActive(entityId, state);
+  return state === "on" || state === "open" || state === "opening" || state === "closing";
 }
 
 /** A `cover` in transit. Its `current_position` may not have caught up yet. */
