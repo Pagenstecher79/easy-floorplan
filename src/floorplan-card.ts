@@ -38,6 +38,8 @@ import {
   openingIsActive,
   openingActionForGesture,
   openingIsPressable,
+  areaActionForGesture,
+  areaHasActions,
   openingHasTwoLeaves,
   secondLeafOf,
   shutterAmount,
@@ -469,6 +471,27 @@ export class FloorplanCard extends LitElement {
     this._zoomedAreaId = this._zoomedAreaId === a.id ? undefined : a.id;
   }
 
+  /**
+   * A gesture on a room (issue #181): its configured action, or — for a tap
+   * with nothing configured — the zoom the room has always done.
+   *
+   * The fallback is what keeps this backwards compatible. Every plan drawn
+   * before areas had actions has three unset gestures, so every tap still
+   * zooms and hold and double-tap still do nothing.
+   */
+  private _onAreaAction(
+    ev: CustomEvent<{ action: "tap" | "hold" | "double_tap" }>,
+    a: Area,
+  ): void {
+    const press = areaActionForGesture(a, ev.detail.action);
+    if (!press) {
+      if (ev.detail.action === "tap") this._onAreaClick(a);
+      return;
+    }
+    if (!this.hass) return;
+    executeAction(this, this.hass, { entity: press.entity }, press.config);
+  }
+
   private _renderBadge(item: FloorItem, scale: OverlayScale): TemplateResult {
     const size = cssNumber(item.size, DEFAULT_ITEM_SIZE);
     const box = overlayLength(size, scale);
@@ -843,12 +866,26 @@ export class FloorplanCard extends LitElement {
                           preserveAspectRatio=${imageFitRatio(active.imageFit)}
                           opacity=${active.imageOpacity ?? 1} />`
               : nothing}
-            ${active.areas?.map(
-              (a) =>
-                svg`<g class="area-tap-target" @click=${() => this._onAreaClick(a)}>
+            ${active.areas?.map((a) => {
+              // Rooms answer gestures now (issue #181). The hit target is
+              // unconditional, as it always was — every room zooms — so only
+              // the role and the tab stop are earned by having an action.
+              const acts = areaHasActions(a);
+              return svg`<g class="area-tap-target"
+                    role=${acts ? "button" : nothing}
+                    tabindex=${acts ? "0" : nothing}
+                    @action=${(ev: CustomEvent<{ action: "tap" | "hold" | "double_tap" }>) =>
+                      this._onAreaAction(ev, a)}
+                    .actionHandler=${actionHandler({
+                      // Only wait out the timers when a gesture can resolve:
+                      // otherwise every tap on an ordinary room would sit for
+                      // 500ms before zooming.
+                      hasHold: hasAction(areaActionForGesture(a, "hold")?.config),
+                      hasDoubleClick: hasAction(areaActionForGesture(a, "double_tap")?.config),
+                    })}>
                   ${renderArea(a, areaColor(a, a.entity ? this.hass?.states[a.entity]?.state : undefined))}
-                </g>`
-            )}
+                </g>`;
+            })}
             <!-- Dead spaces (issue #88): the regions the walls seal off that no
                  door or window reaches, hatched. Above the room fills, so a
                  region someone has also drawn an area over still reads as

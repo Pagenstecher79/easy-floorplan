@@ -2187,6 +2187,46 @@ export function openingActionForGesture(
 }
 
 /**
+ * What a gesture on a room resolves to (issue #181), or `undefined` for
+ * "nothing configured".
+ *
+ * Tap is the one with a prior claim: an area has zoomed to itself on tap since
+ * zooming existed, and plans rely on it. So this answers only for *configured*
+ * actions, and the card falls back to the zoom when tap resolves to nothing —
+ * which keeps every existing plan behaving exactly as it did, and leaves hold
+ * and double-tap free for a room that wants both.
+ *
+ * The action's own `entity` wins, else the area's. A room bound to a presence
+ * sensor can therefore say `tap_action: { action: toggle }` and mean it,
+ * without naming the entity twice.
+ */
+export function areaActionForGesture(
+  a: Pick<Area, "entity" | "tap_action" | "hold_action" | "double_tap_action">,
+  gesture: "tap" | "hold" | "double_tap",
+): { entity?: string; config: ActionConfig } | undefined {
+  const configured =
+    gesture === "tap" ? a.tap_action : gesture === "hold" ? a.hold_action : a.double_tap_action;
+  if (!configured) return undefined;
+  return { entity: configured.entity ?? a.entity, config: configured };
+}
+
+/**
+ * Whether a room does anything a plain zoom would not — i.e. whether any of
+ * its three gestures is configured.
+ *
+ * The card uses it for the `button` role and the tab stop. Not for the *hit
+ * target*: every area is already tappable because every area zooms, so unlike
+ * an opening there is no affordance here that has to be earned.
+ */
+export function areaHasActions(
+  a: Pick<Area, "tap_action" | "hold_action" | "double_tap_action">,
+): boolean {
+  return (["tap", "hold", "double_tap"] as const).some((g) =>
+    hasAction(areaActionForGesture(a, g)?.config),
+  );
+}
+
+/**
  * Whether pressing an opening does anything at all — the mirror of
  * {@link itemIsInteractive}, and used for the same things: the hit target, the
  * `button` role and the tab stop. An opening with nothing bound draws no
@@ -2221,14 +2261,51 @@ function isSensorOutage(state: string | undefined): boolean {
  */
 export function resolveOpeningOpen(o: Opening, state: string | undefined): boolean {
   if (!o.entity || state === undefined) return openingDefaultOpen(o);
-  // Fail closed on an outage before applying invert — a stale "open" during a
-  // sensor dropout is worse than showing closed.
-  if (isSensorOutage(state)) return false;
-  // `opening`/`closing` are transient cover states: the cover is in motion and
-  // not fully closed, so draw it open. Anything else (closed/off/…) reads closed.
-  const open =
-    state === "on" || state === "open" || state === "opening" || state === "closing";
+  // Fail closed before applying invert — a stale "open" while we have no
+  // reliable reading is worse than showing closed.
+  if (openingReadingFailsClosed(o.entity, state)) return false;
+  const open = openingEntityReadsOpen(o.entity, state);
   return o.invert ? !open : open;
+}
+
+/**
+ * States that mean "no reliable reading", so the opening draws shut and
+ * `invert` does not get to flip that into a door standing open.
+ *
+ * The outages every entity can report, plus one the lock domain adds:
+ * **`jammed`**, which is a lock that tried to move and could not. The bolt is
+ * neither thrown nor withdrawn — or is, and the lock does not know — so it is
+ * the same "we do not know" the dropouts are, not a third open/closed reading.
+ * Treating it as merely "not unlocked" would leave `invert: true` drawing a
+ * jammed front door wide open, which is the one picture a jam must not paint.
+ *
+ * Lock-domain only: no other domain reports `jammed`, and a hypothetical
+ * `sensor.jammed` reading the literal word should keep meaning whatever its
+ * own domain says.
+ */
+function openingReadingFailsClosed(entityId: string, state: string): boolean {
+  if (isSensorOutage(state)) return true;
+  return entityId.split(".")[0] === "lock" && state === "jammed";
+}
+
+/**
+ * Whether a bound entity's raw state means "open", by the rules of its domain.
+ *
+ * A **lock** says it the domain's own way (issue #176): `locked` is a shut
+ * door and `unlocked` an open one, and neither word is `on` or `open`, so the
+ * generic test called every lock closed forever. The states that count come
+ * from {@link entityIsActive} rather than a second list here — that table
+ * already answers "is this lock doing its active thing" for devices, and two
+ * copies of it would be two chances for a door and its badge to disagree about
+ * the same entity.
+ *
+ * Everything else keeps the generic reading: `on`/`open` are open, and
+ * `opening`/`closing` are transient cover states — the cover is in motion and
+ * not fully closed, so it draws open.
+ */
+function openingEntityReadsOpen(entityId: string, state: string): boolean {
+  if (entityId.split(".")[0] === "lock") return entityIsActive(entityId, state);
+  return state === "on" || state === "open" || state === "opening" || state === "closing";
 }
 
 /** A `cover` in transit. Its `current_position` may not have caught up yet. */

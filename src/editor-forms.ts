@@ -145,6 +145,19 @@ export interface FormSpec {
 const identity = (patch: Record<string, unknown>) => patch;
 
 /**
+ * What an opening's leaf can be bound to.
+ *
+ * `lock` joined with issue #176: a door with a smart lock and no contact
+ * sensor knows perfectly well whether it is shut, and `locked` / `unlocked` is
+ * the domain's way of saying so. See `resolveOpeningOpen`, which reads those
+ * states through the same domain table the badges use.
+ *
+ * The shutter's picker is deliberately *not* this list — a shutter is a cover
+ * or a reed contact, and a lock on one would not mean anything.
+ */
+const OPENING_ENTITY_DOMAINS = ["binary_sensor", "cover", "lock"] as const;
+
+/**
  * The named fields of `spec`, in the order given, sharing its data and its
  * `toPatch` — one group of a panel that is otherwise one form.
  *
@@ -307,10 +320,13 @@ export function openingForm(o: Opening, featuresOf: (entityId: string) => number
   fields.push({
     name: "entity",
     label: "Entity",
+    // Says locks are usable, because nothing else would: a lock is neither a
+    // contact nor a cover, and its states are `locked` / `unlocked` rather
+    // than anything that looks like open/closed (issue #176).
     helper: twoLeaves
-      ? "Drives the first leaf; type and motion follow its device class"
-      : "Type and motion follow the entity's device class",
-    selector: { entity: { filter: [{ domain: ["binary_sensor", "cover"] }] } },
+      ? "Contact, cover or lock. Drives the first leaf; type and motion follow its device class"
+      : "Contact, cover or lock — a lock reads unlocked as open. Type and motion follow its device class",
+    selector: { entity: { filter: [{ domain: OPENING_ENTITY_DOMAINS }] } },
   });
   // One sensor per leaf (issues #145, #159). Only a two-leaved opening has a
   // second leaf to drive — a two-panel slider, or a hinged double — and only
@@ -321,7 +337,7 @@ export function openingForm(o: Opening, featuresOf: (entityId: string) => number
       name: "secondaryEntity",
       label: "Second leaf",
       helper: "Its own sensor for the other leaf — leave empty to move both together",
-      selector: { entity: { filter: [{ domain: ["binary_sensor", "cover"] }] } },
+      selector: { entity: { filter: [{ domain: OPENING_ENTITY_DOMAINS }] } },
     });
   }
   // Offered on doors too: French doors and patio doors get shutters as well.
@@ -1260,6 +1276,22 @@ export function areaForm(a: Area): FormSpec {
             },
           ]
         : []),
+      // Actions on the room itself (issue #181). Tap already does something —
+      // it zooms — so its default is named here rather than left blank: the
+      // dropdown says "Zoom to room", which is what leaving it alone gives
+      // you, on the same principle as the opening's "Tap opens".
+      {
+        name: "tap_action",
+        label: "Tap action",
+        helper: "Replaces the zoom. Put an action on hold or double-tap to keep both",
+        selector: { ui_action: { default_action: "none" } },
+      },
+      { name: "hold_action", label: "Hold action", selector: { ui_action: { default_action: "none" } } },
+      {
+        name: "double_tap_action",
+        label: "Double-tap action",
+        selector: { ui_action: { default_action: "none" } },
+      },
     ],
     data: {
       showName: a.showName ?? true,
@@ -1268,6 +1300,9 @@ export function areaForm(a: Area): FormSpec {
       entity: a.entity ?? "",
       activeOpacity: a.activeOpacity ?? a.opacity ?? DEFAULT_AREA_OPACITY,
       highlight: a.highlight ?? "fill",
+      tap_action: a.tap_action,
+      hold_action: a.hold_action,
+      double_tap_action: a.double_tap_action,
     },
     // "fill" is the default, so keep it out of the YAML.
     toPatch: (p) => ("highlight" in p && p.highlight === "fill" ? { ...p, highlight: undefined } : p),
