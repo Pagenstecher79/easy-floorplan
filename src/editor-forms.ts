@@ -1084,7 +1084,54 @@ export function itemBadgeForm(it: FloorItem, badgeSource?: BadgeSourceInfo): For
     },
   };
 }
+/** Group 6: ripple and cast light effects. */
+export function itemEffectsForm(it: FloorItem, deviceClass?: string): FormSpec | null {
+  const presence = isPresenceEntity(it.entity, deviceClass);
+  const isLight = it.kind === "light" || it.entity?.startsWith("light.");
+  if (!presence && !isLight) return null;
 
+  const fields: FormField[] = [];
+
+  if (isLight) {
+    fields.push({
+      name: "glow",
+      label: "Cast light",
+      helper: "Pools the light's own color onto the plan; overlapping lights mix",
+      selector: { boolean: {} },
+    });
+    if (it.glow) {
+      fields.push(
+        {
+          name: "glowRadius",
+          label: "Light radius",
+          selector: { number: { min: 20, max: 600, step: 10, mode: "slider" } },
+        },
+        {
+          name: "glowColor",
+          label: "Light color",
+          helper: "Only for bulbs that can't report a color; others use their own",
+          selector: { text: {} },
+        }
+      );
+    }
+  }
+
+  return {
+    fields,
+    data: {
+      ripple: it.ripple ?? false,
+      rippleSize: it.rippleSize ?? DEFAULT_RIPPLE_SIZE,
+      glow: it.glow ?? false,
+      glowRadius: it.glowRadius ?? DEFAULT_GLOW_RADIUS,
+      glowColor: it.glowColor ?? "",
+    },
+    toPatch: (p) => {
+      if (!("ripple" in p)) return p;
+      const { ripple: ring, ...rest } = p;
+      return { ...rest, ...badgeModePatch(badgeModeOf(it), !!ring) };
+    },
+  };
+}
 /** Group 7: when the device is drawn at all, and what a press does. */
 export function itemBehaviourForm(it: FloorItem): FormSpec {
   return {
