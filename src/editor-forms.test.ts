@@ -32,7 +32,7 @@ import type { FormField } from "./editor-forms";
 import type { Area, Opening, FloorItem, Floor, Furniture, Tracker, FloorplanCardConfig } from "./types";
 import { DEFAULT_GLOW_RADIUS, DEFAULT_PRESS_EFFECT } from "./types";
 import { DEFAULT_SKIN, SKINS, MAX_SKIN_WALL_WIDTH } from "./skins";
-import { DEFAULT_SUN_BEARING } from "./render";
+import { DEFAULT_SUN_BEARING, SUN_REACH } from "./render";
 
 const fields: FormField[] = [
   { name: "name", label: "Name", selector: { text: {} } },
@@ -158,12 +158,18 @@ describe("openingForm", () => {
     });
   });
 
-  it("invert only offered with an entity; entity filter targets covers and binary_sensors", () => {
+  it("invert only offered with an entity; the picker takes contacts, covers and locks", () => {
     expect(openingForm(door).fields.map((x) => x.name)).not.toContain("invert");
     const bound = openingForm({ ...door, entity: "cover.x" } as Opening);
     expect(bound.fields.map((x) => x.name)).toContain("invert");
     const entity = bound.fields.find((x) => x.name === "entity")!;
-    expect(entity.selector).toEqual({ entity: { filter: [{ domain: ["binary_sensor", "cover"] }] } });
+    // `lock` joined with issue #176 — a door with a smart lock and no contact.
+    expect(entity.selector).toEqual({
+      entity: { filter: [{ domain: ["binary_sensor", "cover", "lock"] }] },
+    });
+    // …and the helper says so, because nothing else would: a lock is neither
+    // a contact nor a cover and its states look nothing like open/closed.
+    expect(entity.helper).toContain("lock");
   });
 
   it("maps view-model patches back to config shape", () => {
@@ -223,9 +229,9 @@ describe("openingForm — two-panel sliders (issue #145)", () => {
       const bound = openingForm(slider({ sliderStyle, entity: "binary_sensor.a" }));
       expect(bound.fields.map((x) => x.name)).toContain("secondaryEntity");
       const field = bound.fields.find((x) => x.name === "secondaryEntity")!;
-      // Same pickers as the first panel: a contact or a cover per leaf.
+      // Same pickers as the first leaf: a contact, a cover or a lock per leaf.
       expect(field.selector).toEqual({
-        entity: { filter: [{ domain: ["binary_sensor", "cover"] }] },
+        entity: { filter: [{ domain: ["binary_sensor", "cover", "lock"] }] },
       });
     }
   });
@@ -1523,6 +1529,7 @@ describe("projectReliefForm", () => {
       "sunlight",
       "north",
       "sunShade",
+      "sunReach",
       "sunFollows",
     ]);
     // The angle itself only appears once the light is pinned — while it
@@ -1540,6 +1547,17 @@ describe("projectReliefForm", () => {
     expect(projectReliefForm(cfg({ sunlight: true })).toPatch({ sunFollows: false })).toEqual({
       sunBearing: DEFAULT_SUN_BEARING,
     });
+  });
+
+  it("offers the reach as a slider, and keeps its default out of the YAML", () => {
+    // The whole point of #185 is that the right distance is a matter of taste,
+    // so it has to be reachable without hand-editing YAML.
+    const f = projectReliefForm(cfg({ sunlight: true }));
+    expect(f.data.sunReach).toBe(SUN_REACH);
+    expect(f.toPatch({ sunReach: SUN_REACH })).toStrictEqual({ sunReach: undefined });
+    expect(f.toPatch({ sunReach: 0.6 })).toStrictEqual({ sunReach: 0.6 });
+    // Nothing to reach with the light off.
+    expect(projectReliefForm(cfg({})).fields.map((x) => x.name)).not.toContain("sunReach");
   });
 
   it("shutting the sun out takes everything it aimed and painted with it", () => {
@@ -1566,6 +1584,7 @@ describe("projectReliefForm", () => {
       sunlight: undefined,
       north: undefined,
       sunBearing: undefined,
+      sunReach: undefined,
       sunShade: undefined,
       sunlightColor: undefined,
       sunShadeColor: undefined,
@@ -1630,6 +1649,39 @@ describe("projectSunForm (issue #113)", () => {
   });
 });
 
+describe("areaForm — actions on rooms (issue #181)", () => {
+  const area = (extra: Partial<Area> = {}): Area =>
+    ({ id: "a", points: [{ x: 0, y: 0 }], ...extra }) as Area;
+
+  it("offers the three gestures on every room", () => {
+    const names = areaForm(area()).fields.map((x) => x.name);
+    expect(names).toContain("tap_action");
+    expect(names).toContain("hold_action");
+    expect(names).toContain("double_tap_action");
+  });
+
+  it("says what tap costs — the zoom — and how to keep it", () => {
+    const tap = areaForm(area()).fields.find((x) => x.name === "tap_action")!;
+    expect(tap.helper).toContain("zoom");
+    expect(tap.helper).toContain("hold");
+  });
+
+  it("carries the stored actions, and leaves unset ones unset", () => {
+    expect(areaForm(area()).data.tap_action).toBeUndefined();
+    const d = areaForm(area({ tap_action: { action: "toggle" } })).data;
+    expect(d.tap_action).toEqual({ action: "toggle" });
+    expect(d.hold_action).toBeUndefined();
+  });
+
+  it("does not disturb the highlight default it shares a toPatch with", () => {
+    const form = areaForm(area({ entity: "light.k" }));
+    expect(form.toPatch({ highlight: "fill" })).toEqual({ highlight: undefined });
+    expect(form.toPatch({ tap_action: { action: "toggle" } })).toEqual({
+      tap_action: { action: "toggle" },
+    });
+  });
+});
+
 // The panels are grouped by lists of field names living in editor.ts. A field
 // the form produces that no group names would silently stop being editable —
 // it would simply never render, with nothing failing. These lists are copied
@@ -1654,7 +1706,12 @@ describe("every field lands in exactly one panel group", () => {
   ];
   const FURNITURE_GROUPS = [["type", "hand", "w", "h", "angle"], ["entity"]];
   const TRACKER_GROUPS = [["w", "h", "x", "y", "angle"], ["dotSize"]];
-  const AREA_GROUPS = [["showName", "labelSize"], ["entity"], ["highlight", "opacity", "activeOpacity"]];
+  const AREA_GROUPS = [
+    ["showName", "labelSize"],
+    ["entity"],
+    ["highlight", "opacity", "activeOpacity"],
+    ["tap_action", "hold_action", "double_tap_action"],
+  ];
 
   const check = (fields: { name: string }[], groups: string[][], what: string) => {
     const grouped = groups.flat();

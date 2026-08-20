@@ -884,6 +884,28 @@ export interface Area {
    * everything inside it — which reads better on a busy plan.
    */
   highlight?: "fill" | "border" | "both";
+  /**
+   * Lovelace actions for the room itself (issue #181) — tapping the floor of a
+   * room to run a scene, toggle its lights, or open a dashboard for it.
+   *
+   * Same shape as {@link FloorItem.tap_action}, with one difference that comes
+   * from a room already doing something when you tap it: **tap defaults to
+   * zoom-to-room**, which is what an area has done since zooming existed.
+   * Setting `tap_action` replaces that zoom; leaving it unset keeps it. Hold
+   * and double-tap have no default and are free.
+   *
+   * So a room can zoom *and* act: put the action on hold or double-tap. A room
+   * that should act on tap and never zoom sets `tap_action`; a room that should
+   * do neither sets `tap_action: { action: "none" }`.
+   *
+   * An action's `entity` falls back to the area's own {@link entity}, so a room
+   * already bound to a presence sensor needs no second mention of it. With no
+   * entity anywhere, only actions that need none (navigate, url, call-service)
+   * do anything. See `areaActionForGesture`.
+   */
+  tap_action?: ActionConfig;
+  hold_action?: ActionConfig;
+  double_tap_action?: ActionConfig;
 }
 
 /**
@@ -1262,6 +1284,21 @@ export interface FloorplanCardConfig extends LovelaceCardConfig {
    * here reads as cold north light, a warm grey as dusk.
    */
   sunShadeColor?: string;
+  /**
+   * How far sunlight carries from an opening, as a fraction of the plan's
+   * shorter side. Default {@link SUN_REACH} (0.34).
+   *
+   * The light fades out over this distance rather than stopping at it, and
+   * while the plan follows the real sun it is shortened as the sun climbs —
+   * a midday sun lays a short patch, an evening one rakes across the room
+   * (issue #185). Raise it for a plan whose rooms read as too dark, lower it
+   * for one where the patches still reach further than they should.
+   *
+   * Coerced and clamped to 0.02-1.5 before it reaches the drawing — see
+   * {@link sunReachFraction}. It is hand-editable YAML, and an unreadable one
+   * put NaN straight into a coordinate.
+   */
+  sunReach?: number;
   /**
    * What a device does when you press it (issue #134). Tapping used to change
    * nothing on screen until the entity itself came back — which on a cover or

@@ -33,7 +33,7 @@ screen size.
 <img width="240" height="358" alt="conditionals" src="https://github.com/user-attachments/assets/11d359b6-de8c-483c-8763-105ddf7d915b" />
 
 - (${\color{red}NEW!}$) **Many readings, one device** — a sensor that reports temperature, humidity and pressure needs one badge, not three. Add entities one at a time; they show whether or not the device's own state does, so a smart plug can label itself `1.2 kW · 84 · 5 min ago` while the badge colour carries the on/off. The label can sit below, left or right of the badge.
-- **Animated doors & windows** — bind a contact `binary_sensor` or `cover` and openings swing, slide or roll with their real state, partial positions included.
+- **Animated doors & windows** — bind a contact `binary_sensor`, `cover` or `lock` and openings swing, slide or roll with their real state, partial positions included. A lock reads `unlocked` as open, so a door with no contact sensor still animates.
   - (${\color{red}NEW!}$) **A sensor per leaf** — anything with two leaves takes a second contact and draws them independently: a casement window with one sash open and one shut, a double door ajar on one side, a pair of shutters with one folded back.
 - (${\color{red}NEW!}$) **Offline devices read as offline** — an entity that is unavailable, unknown, or gone from Home Assistant is dimmed (or crossed out), instead of looking exactly like a device someone switched off.
 - (${\color{red}NEW!}$) **Furniture** — 26 gray line-art diagrams (table, sofa, bed, stove, stairs, tv…), each bindable to an entity, in a searchable picker. Every one is a plain JSON file of numbers you can copy: draw your own in the editor's paste box, use it straight away, and open a PR when it's good. No SVG, so nothing you paste can run anything.
@@ -369,6 +369,7 @@ The editor writes this config for you; manual editing is optional.
 | `sunShade`   | boolean  | `true`             | Darken everywhere the light does not reach. Off draws the patches alone, leaving the plan as bright as it was. |
 | `sunlightColor` | string | warm white        | Colour of the light the openings let in. |
 | `sunShadeColor` | string | black             | Colour of that shade — a blue reads as cold north light, a warm grey as dusk. |
+| `sunReach`   | number   | `0.34`             | How far light carries from an opening, as a fraction of the plan's shorter side. It fades out over that distance rather than stopping at it, and shortens as the sun climbs. Clamped to `0.02`–`1.5`; anything unreadable falls back to the default. |
 | `skin`       | string   | `default`          | Built-in look for the whole plan: `default`, `odnetnin`, `pastel` or `tron`. See [Skins](#skins). |
 | `pressEffect`| string   | `scale`            | Feedback when a device is pressed: `scale`, `ripple`, `flash` or `none`. Only devices that actually do something respond. See [Press feedback](#press-feedback). |
 | `offlineStyle`| string  | `dim`              | How a device whose entity is **offline** is drawn: `dim`, `strike` (dimmed with a diagonal through the badge) or `none`. See [Offline devices](#offline-devices). |
@@ -440,7 +441,7 @@ distorted anyway.
 | `x`, `y`      | number                      | Center position.                                       |
 | `length`      | number                      | Length along the wall.                                 |
 | `angle`       | number                      | Rotation in degrees.                                   |
-| `entity`      | string                      | Contact `binary_sensor` / `cover` driving open/closed (or `current_position` for partial). |
+| `entity`      | string                      | Contact `binary_sensor`, `cover` or `lock` driving open/closed (a `cover`'s `current_position` gives partial travel). A **lock** reads `unlocked` as open and `locked` as closed — see [Doors on locks](#doors-on-locks). |
 | `secondaryEntity` | string                  | Anything with **two leaves**: a second contact / `cover` for the other leaf, so each moves on its own state. That means the two-panel sliders (`biparting`, `biparting-bypass`, `converging`) and any hinged double — a casement window, or a `sash: double` door. `entity` drives the leaf at the −x jamb, so `flipH` swaps which sensor draws which. Unset = both follow `entity`; ignored where there is only one leaf. |
 | `invert`      | boolean                     | Flip the open/closed interpretation.                   |
 | `activeColor` | string                      | Leaf/arc color while actively open (default primary). On a roll-up it colours the curtain and the track it leaves behind, so a fully raised shutter still reads as open. |
@@ -634,7 +635,7 @@ animated inside a rectangular tracked area:
 
 ### Area
 
-`{ id, points, name?, showName?, labelSize?, color?, opacity?, haArea?, filterEntities?, entity?, stateColor?, activeColor?, activeOpacity?, borderColor?, borderWidth?, highlight? }`
+`{ id, points, name?, showName?, labelSize?, color?, opacity?, haArea?, filterEntities?, entity?, stateColor?, activeColor?, activeOpacity?, borderColor?, borderWidth?, highlight?, tap_action?, hold_action?, double_tap_action? }`
 
 - `points` — `{ x, y }` vertices in drawing order, implicitly closed last-to-first.
 - `name` / `showName` — label centered on the polygon (`showName` defaults `true`).
@@ -663,6 +664,12 @@ animated inside a rectangular tracked area:
   down the middle, an exterior wall colors on its inside face only. `borderWidth` is the
   width seen on the room's own side and defaults to `4` here; widen it and the band runs
   past the wall onto the floor.
+- `tap_action` / `hold_action` / `double_tap_action` — standard Lovelace actions on the
+  room itself. **Tap already does something** — it zooms the plan to the room — so setting
+  `tap_action` *replaces* that zoom; leaving it unset keeps it. Put the action on hold or
+  double-tap to have both. An action's `entity` falls back to the area's own, so a room
+  bound to a presence sensor needs no second mention of it. `tap_action: { action: none }`
+  turns the zoom off without adding anything.
 
 ```yaml
 areas:
@@ -942,6 +949,14 @@ gap moved the same way. So:
   throws a narrow patch, not the one it would throw standing wide open. Sliding styles
   count the gap they actually clear rather than the distance a leaf travels, so a
   converging pair reads the same here as it draws;
+- a patch **fades out as it travels**, and fans a little as it goes: light scatters, and a
+  beam drawn as a hard-edged stripe at flat brightness reads as a cut-out rather than as
+  light. It reaches `sunReach` of the plan's shorter side and is gone by the end of it,
+  instead of crossing the whole house at the brightness it started with;
+- while the plan follows the real sun, that reach **shortens as the sun climbs** — a patch
+  is about as deep as the opening is tall over the tangent of the sun's angle, so a midday
+  sun lays a short patch at your feet and an evening one rakes across the room. A pinned
+  `sunBearing` states a picture rather than reading the sky, so it keeps the plain reach;
 - **walls cast the shade behind them**, cutting the patches — and the part of a door that
   is still shut casts shade like the wall it stands in, while an open doorway casts none,
   the same rule the lamps already follow;
@@ -1171,6 +1186,66 @@ label gets no Label group, and an opening with no shutter gets no Shutter group.
 
 Walls and text keep a plain list: a wall is thickness and length, a text is its words, size
 and angle. A heading over one or two fields is chrome rather than structure.
+
+## Doors on locks
+
+A door with a smart lock and no contact sensor already knows whether it is shut. Bind the
+lock and it drives the door (issue #176):
+
+```yaml
+openings:
+  - { id: front, type: door, x: 300, y: 100, length: 90, angle: 0, entity: lock.front_door }
+```
+
+`unlocked` draws the door open, `locked` draws it shut. The in-between states follow the
+lock domain's own reading, the same table the device badges use: `unlocking` and a latch
+`open` / `opening` count as open, and `locking` is on its way to shut and draws shut.
+`invert` flips all of those, for a lock wired the other way round.
+
+**`jammed` is not one of those readings.** A lock that tried to move and could not has a
+bolt that is neither thrown nor withdrawn, so it is the same "we don't know" as an
+`unavailable` or `unknown` entity: the door draws shut, and `invert` does not get to turn
+that into a door standing open.
+
+A lock publishes no position, so the door is fully open or fully shut, never partway.
+
+**A tap on a lock-driven door opens its dialog; it never turns the lock.** That is the
+same rule that keeps a tap off a shutter motor: unlocking a front door by brushing the
+plan is the worst version of an accidental hardware move. `tap_action: { action: toggle }`
+opts in, explicitly.
+
+## Actions on rooms
+
+Rooms answer gestures (issue #181) — tap the floor of a room to run a scene, toggle its
+lights, or open a dashboard for it:
+
+```yaml
+areas:
+  - id: kitchen
+    points: [ … ]
+    entity: light.kitchen_lights
+    hold_action: { action: toggle }
+```
+
+**Tap already does something**: it zooms the plan to that room, and has since zooming
+existed. So `tap_action` *replaces* the zoom rather than joining it, and leaving it unset
+keeps the zoom exactly as it was — every plan drawn before this behaves identically.
+
+That gives three arrangements:
+
+| You want | Set |
+| --- | --- |
+| Zoom, and an action | the action on `hold_action` or `double_tap_action` |
+| An action instead of the zoom | `tap_action` |
+| Neither | `tap_action: { action: none }` |
+
+An action's own `entity` wins; without one it falls back to the area's `entity`, so the
+example above toggles `light.kitchen_lights` without naming it twice. With no entity
+anywhere, only the actions that need none — `navigate`, `url`, `call-service` — do
+anything.
+
+A room with an action bound announces itself as a button and takes a tab stop; a room that
+only zooms does not, exactly as before.
 
 ## Offline devices
 

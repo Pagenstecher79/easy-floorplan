@@ -4539,6 +4539,15 @@ export class FloorplanCardEditor extends LitElement {
               `
             : nothing
         )}
+        ${this._renderGroup(
+          // What tapping the room does (issue #181). Last, as it is on every
+          // other element: the thing it *does*, after everything it *is*.
+          "Behavior",
+          this._renderForm(
+            formSlice(aSpec, ["tap_action", "hold_action", "double_tap_action"]),
+            aApply
+          )
+        )}
         ${a.haArea
           ? this._renderGroup(
               // Everything that only exists because this room is linked to a

@@ -41,6 +41,8 @@ import {
   SUN_ELEVATION_FULL,
   sunShadowPolygon,
   SUN_REACH,
+  SUN_REACH_REF,
+  sunReachScale,
   DEFAULT_SUN_BEARING,
   shutterAmount,
   shutterStyleOf,
@@ -78,6 +80,8 @@ import {
   trackerSensorReading,
   openingInMotion,
   openingIsActive,
+  areaActionForGesture,
+  areaHasActions,
   entityStateText,
   itemStateText,
   itemBadgeLabel,
@@ -2759,6 +2763,61 @@ describe("sunlight through the openings", () => {
     expect(SUN_REACH).toBeGreaterThan(0);
     expect(SUN_REACH).toBeLessThanOrEqual(1);
   });
+
+  it("stops well short of crossing the plan (issue #185)", () => {
+    // The complaint was a stripe that ran the length of the house at the
+    // brightness it started with. Half the plan's short side is the point at
+    // which a patch stops reading as a patch and starts reading as a corridor.
+    expect(SUN_REACH).toBeLessThan(0.5);
+  });
+
+  it("fans as it travels, symmetrically about the light", () => {
+    const o = win();
+    const straight = sunBeamPolygon(o, down, 200, 1, 0);
+    const fanned = sunBeamPolygon(o, down, 200, 1, 1);
+    const widthOf = (p: { x: number }[], i: number, j: number) => Math.abs(p[j]!.x - p[i]!.x);
+    // Same mouth: it still leaves the gap it came through.
+    expect(widthOf(fanned, 0, 1)).toBeCloseTo(widthOf(straight, 0, 1));
+    // …and a wider far edge, which is what scattering looks like.
+    expect(widthOf(fanned, 3, 2)).toBeCloseTo(widthOf(straight, 3, 2) * 2);
+    // Symmetric about the opening's centre, so the fan follows the light
+    // rather than leaning to one side of it.
+    const mid = (o.x * 2) / 2;
+    expect((fanned[2]!.x + fanned[3]!.x) / 2).toBeCloseTo(mid);
+    // It reaches exactly as far as before — wider, not longer.
+    expect(fanned[3]!.y - fanned[0]!.y).toBeCloseTo(straight[3]!.y - straight[0]!.y);
+    // Spread defaults to off, so every existing caller gets the old shape.
+    expect(sunBeamPolygon(o, down, 200, 1)).toEqual(straight);
+  });
+
+  it("shortens the patch as the sun climbs, and lengthens it at dusk", () => {
+    // A patch of sun is as deep as the opening is tall over tan(elevation) —
+    // which is why a midday sun does not lay a stripe across the house.
+    expect(sunReachScale(SUN_REACH_REF)).toBeCloseTo(1);
+    expect(sunReachScale(60)).toBeLessThan(1);
+    expect(sunReachScale(15)).toBeGreaterThan(1);
+    expect(sunReachScale(60)).toBeLessThan(sunReachScale(45));
+    expect(sunReachScale(45)).toBeLessThan(sunReachScale(20));
+  });
+
+  it("clamps the reach scale at both ends", () => {
+    // Near the horizon tan runs away and would throw a beam of unbounded
+    // length; near the zenith it collapses and the patch would vanish at noon.
+    expect(sunReachScale(0.2)).toBeLessThanOrEqual(1.9);
+    expect(sunReachScale(89.9)).toBeGreaterThanOrEqual(0.45);
+    for (const e of [0.1, 1, 5, 30, 60, 89, 90]) {
+      expect(sunReachScale(e)).toBeGreaterThan(0);
+      expect(Number.isFinite(sunReachScale(e))).toBe(true);
+    }
+  });
+
+  it("falls back to the plain reach on an unreadable sun", () => {
+    // Same allowlist and the same fail-ordinary rule as sunlightStrength.
+    for (const dead of [undefined, null, "", false, "unavailable", NaN]) {
+      expect(sunReachScale(dead)).toBe(1);
+    }
+    expect(sunReachScale("45")).toBeCloseTo(sunReachScale(45));
+  });
 });
 
 describe("shutterAmount / shutterActive (issue #74)", () => {
@@ -4860,5 +4919,141 @@ describe("itemHiddenWhenInactive (issue #55)", () => {
     expect(itemHiddenWhenInactive({ entity: "light.a", hideWhenInactive: true }, undefined))
       .toBe(true);
     expect(itemHiddenWhenInactive({ hideWhenInactive: true }, "on")).toBe(true);
+  });
+});
+
+describe("a lock drives a door (issue #176)", () => {
+  const door = (extra: Partial<Opening> = {}) =>
+    ({ id: "d", type: "door", x: 0, y: 0, length: 90, angle: 0, entity: "lock.front", ...extra }) as Opening;
+
+  it("reads unlocked as open and locked as closed", () => {
+    expect(resolveOpeningOpen(door(), "unlocked")).toBe(true);
+    expect(resolveOpeningOpen(door(), "locked")).toBe(false);
+  });
+
+  it("takes the transient and latch states from the domain's own table", () => {
+    // Exactly entityIsActive's lock set, so a door and a badge bound to the
+    // same lock can never disagree about it.
+    for (const state of ["unlocked", "unlocking", "open", "opening"]) {
+      expect({ state, open: resolveOpeningOpen(door(), state) }).toEqual({ state, open: true });
+      expect({ state, active: entityIsActive("lock.front", state) }).toEqual({ state, active: true });
+    }
+    // `locking` is on its way to shut, so it draws shut.
+    expect(resolveOpeningOpen(door(), "locking")).toBe(false);
+  });
+
+  it("fails closed on no reliable reading, before invert can flip it", () => {
+    // `jammed` belongs here rather than with the ordinary readings: the lock
+    // tried to move and could not, so the bolt is neither thrown nor
+    // withdrawn. Inverting it would draw a jammed front door wide open, which
+    // is the one picture a jam must not paint.
+    for (const state of ["unavailable", "unknown", "jammed"]) {
+      expect({ state, open: resolveOpeningOpen(door(), state) }).toEqual({ state, open: false });
+      expect({ state, inverted: resolveOpeningOpen(door({ invert: true }), state) }).toEqual({
+        state,
+        inverted: false,
+      });
+    }
+  });
+
+  it("only a lock's jam fails closed — no other domain reports one", () => {
+    // A `sensor.jammed` reading the literal word keeps meaning whatever its
+    // own domain says, and there `jammed` is simply not an open state, so
+    // invert may flip it like any other.
+    const contact = (extra = {}) =>
+      ({ ...door({ ...extra }), entity: "binary_sensor.d" }) as Opening;
+    expect(resolveOpeningOpen(contact(), "jammed")).toBe(false);
+    expect(resolveOpeningOpen(contact({ invert: true }), "jammed")).toBe(true);
+  });
+
+  it("inverts for a lock wired the other way round", () => {
+    expect(resolveOpeningOpen(door({ invert: true }), "locked")).toBe(true);
+    expect(resolveOpeningOpen(door({ invert: true }), "unlocked")).toBe(false);
+  });
+
+  it("a jam is never active, and lets no light through", () => {
+    expect(openingIsActive(door(), { state: "jammed" })).toBe(false);
+    expect(openingIsActive(door({ invert: true }), { state: "jammed" })).toBe(false);
+    expect(resolveOpeningAmount(door({ invert: true }), { state: "jammed" })).toBe(0);
+  });
+
+  it("drives the amount, the accent and the light like any other opening", () => {
+    expect(resolveOpeningAmount(door(), { state: "unlocked" })).toBe(1);
+    expect(resolveOpeningAmount(door(), { state: "locked" })).toBe(0);
+    expect(openingIsActive(door(), { state: "unlocked" })).toBe(true);
+    expect(openingIsActive(door(), { state: "locked" })).toBe(false);
+    // A lock has no position to publish, so it stays binary.
+    expect(
+      resolveOpeningAmount(door(), { state: "unlocked", attributes: { current_position: 40 } }),
+    ).toBeCloseTo(0.4);
+  });
+
+  it("leaves every other domain reading exactly as it did", () => {
+    const contact = (state: string) =>
+      resolveOpeningOpen({ ...door(), entity: "binary_sensor.d" } as Opening, state);
+    expect(contact("on")).toBe(true);
+    expect(contact("off")).toBe(false);
+    // A contact that somehow reads "unlocked" is not a lock, and does not
+    // silently become one.
+    expect(contact("unlocked")).toBe(false);
+    const cover = (state: string) =>
+      resolveOpeningOpen({ ...door(), entity: "cover.d" } as Opening, state);
+    for (const state of ["open", "opening", "closing"]) expect(cover(state)).toBe(true);
+    expect(cover("closed")).toBe(false);
+  });
+
+  it("never toggles a lock on a tap — it opens its dialog", () => {
+    // The accidental-hardware rule the shutter defaults already follow, and
+    // unlocking a front door by brushing the plan is the worst version of it.
+    expect(openingClickAction("lock.front", 0)).toBe("more-info");
+    expect(openingClickAction("lock.front", 255)).toBe("more-info");
+    expect(
+      openingActionForGesture({ entity: "lock.front" }, "tap", () => 255)?.config.action,
+    ).toBe("more-info");
+  });
+});
+
+describe("actions on rooms (issue #181)", () => {
+  const area = (extra: Partial<Area> = {}) =>
+    ({ id: "a", points: [{ x: 0, y: 0 }], ...extra }) as Area;
+
+  it("resolves only what is configured — tap is left to the zoom otherwise", () => {
+    expect(areaActionForGesture(area(), "tap")).toBeUndefined();
+    expect(areaActionForGesture(area(), "hold")).toBeUndefined();
+    expect(areaActionForGesture(area(), "double_tap")).toBeUndefined();
+  });
+
+  it("takes the action's own entity, else the room's", () => {
+    const a = area({ entity: "light.kitchen", tap_action: { action: "toggle" } });
+    expect(areaActionForGesture(a, "tap")).toEqual({
+      entity: "light.kitchen",
+      config: { action: "toggle" },
+    });
+    // An action naming its own entity wins over the room's.
+    const b = area({
+      entity: "light.kitchen",
+      hold_action: { action: "more-info", entity: "sensor.temp" },
+    });
+    expect(areaActionForGesture(b, "hold")?.entity).toBe("sensor.temp");
+    // …and with no entity anywhere, only actions that need none do anything.
+    expect(areaActionForGesture(area({ tap_action: { action: "navigate" } }), "tap")).toEqual({
+      entity: undefined,
+      config: { action: "navigate" },
+    });
+  });
+
+  it("a room can zoom and act — the two live on different gestures", () => {
+    const a = area({ entity: "light.k", hold_action: { action: "toggle" } });
+    // Tap unset, so the card falls back to the zoom.
+    expect(areaActionForGesture(a, "tap")).toBeUndefined();
+    expect(areaActionForGesture(a, "hold")?.config).toEqual({ action: "toggle" });
+  });
+
+  it("knows whether a room does anything a plain zoom would not", () => {
+    expect(areaHasActions(area())).toBe(false);
+    // "none" is a real choice — it turns the zoom off — but it is not an action.
+    expect(areaHasActions(area({ tap_action: { action: "none" } }))).toBe(false);
+    expect(areaHasActions(area({ tap_action: { action: "toggle" } }))).toBe(true);
+    expect(areaHasActions(area({ double_tap_action: { action: "more-info" } }))).toBe(true);
   });
 });

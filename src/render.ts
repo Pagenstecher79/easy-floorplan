@@ -2215,6 +2215,46 @@ export function openingActionForGesture(
 }
 
 /**
+ * What a gesture on a room resolves to (issue #181), or `undefined` for
+ * "nothing configured".
+ *
+ * Tap is the one with a prior claim: an area has zoomed to itself on tap since
+ * zooming existed, and plans rely on it. So this answers only for *configured*
+ * actions, and the card falls back to the zoom when tap resolves to nothing —
+ * which keeps every existing plan behaving exactly as it did, and leaves hold
+ * and double-tap free for a room that wants both.
+ *
+ * The action's own `entity` wins, else the area's. A room bound to a presence
+ * sensor can therefore say `tap_action: { action: toggle }` and mean it,
+ * without naming the entity twice.
+ */
+export function areaActionForGesture(
+  a: Pick<Area, "entity" | "tap_action" | "hold_action" | "double_tap_action">,
+  gesture: "tap" | "hold" | "double_tap",
+): { entity?: string; config: ActionConfig } | undefined {
+  const configured =
+    gesture === "tap" ? a.tap_action : gesture === "hold" ? a.hold_action : a.double_tap_action;
+  if (!configured) return undefined;
+  return { entity: configured.entity ?? a.entity, config: configured };
+}
+
+/**
+ * Whether a room does anything a plain zoom would not — i.e. whether any of
+ * its three gestures is configured.
+ *
+ * The card uses it for the `button` role and the tab stop. Not for the *hit
+ * target*: every area is already tappable because every area zooms, so unlike
+ * an opening there is no affordance here that has to be earned.
+ */
+export function areaHasActions(
+  a: Pick<Area, "tap_action" | "hold_action" | "double_tap_action">,
+): boolean {
+  return (["tap", "hold", "double_tap"] as const).some((g) =>
+    hasAction(areaActionForGesture(a, g)?.config),
+  );
+}
+
+/**
  * Whether pressing an opening does anything at all — the mirror of
  * {@link itemIsInteractive}, and used for the same things: the hit target, the
  * `button` role and the tab stop. An opening with nothing bound draws no
@@ -2249,14 +2289,51 @@ function isSensorOutage(state: string | undefined): boolean {
  */
 export function resolveOpeningOpen(o: Opening, state: string | undefined): boolean {
   if (!o.entity || state === undefined) return openingDefaultOpen(o);
-  // Fail closed on an outage before applying invert — a stale "open" during a
-  // sensor dropout is worse than showing closed.
-  if (isSensorOutage(state)) return false;
-  // `opening`/`closing` are transient cover states: the cover is in motion and
-  // not fully closed, so draw it open. Anything else (closed/off/…) reads closed.
-  const open =
-    state === "on" || state === "open" || state === "opening" || state === "closing";
+  // Fail closed before applying invert — a stale "open" while we have no
+  // reliable reading is worse than showing closed.
+  if (openingReadingFailsClosed(o.entity, state)) return false;
+  const open = openingEntityReadsOpen(o.entity, state);
   return o.invert ? !open : open;
+}
+
+/**
+ * States that mean "no reliable reading", so the opening draws shut and
+ * `invert` does not get to flip that into a door standing open.
+ *
+ * The outages every entity can report, plus one the lock domain adds:
+ * **`jammed`**, which is a lock that tried to move and could not. The bolt is
+ * neither thrown nor withdrawn — or is, and the lock does not know — so it is
+ * the same "we do not know" the dropouts are, not a third open/closed reading.
+ * Treating it as merely "not unlocked" would leave `invert: true` drawing a
+ * jammed front door wide open, which is the one picture a jam must not paint.
+ *
+ * Lock-domain only: no other domain reports `jammed`, and a hypothetical
+ * `sensor.jammed` reading the literal word should keep meaning whatever its
+ * own domain says.
+ */
+function openingReadingFailsClosed(entityId: string, state: string): boolean {
+  if (isSensorOutage(state)) return true;
+  return entityId.split(".")[0] === "lock" && state === "jammed";
+}
+
+/**
+ * Whether a bound entity's raw state means "open", by the rules of its domain.
+ *
+ * A **lock** says it the domain's own way (issue #176): `locked` is a shut
+ * door and `unlocked` an open one, and neither word is `on` or `open`, so the
+ * generic test called every lock closed forever. The states that count come
+ * from {@link entityIsActive} rather than a second list here — that table
+ * already answers "is this lock doing its active thing" for devices, and two
+ * copies of it would be two chances for a door and its badge to disagree about
+ * the same entity.
+ *
+ * Everything else keeps the generic reading: `on`/`open` are open, and
+ * `opening`/`closing` are transient cover states — the cover is in motion and
+ * not fully closed, so it draws open.
+ */
+function openingEntityReadsOpen(entityId: string, state: string): boolean {
+  if (entityId.split(".")[0] === "lock") return entityIsActive(entityId, state);
+  return state === "on" || state === "open" || state === "opening" || state === "closing";
 }
 
 /** A `cover` in transit. Its `current_position` may not have caught up yet. */
@@ -3171,8 +3248,34 @@ export function sunlightStrengthOf(
 // precisely its gap translated the same way. No ray casting, no per-pixel
 // work — two polygon families and a mask.
 
-/** How far light reaches into the plan, as a fraction of its shorter side. */
-export const SUN_REACH = 0.55;
+/**
+ * How far light reaches into the plan, as a fraction of its shorter side, for
+ * a sun at {@link SUN_REACH_REF} degrees.
+ *
+ * A patch of sun on a floor is bounded by the room, not by the drawing: it is
+ * about as deep as the opening is tall divided by the tangent of the sun's
+ * angle, which for an ordinary window and an ordinary sun is a stripe a few
+ * paces long — not one that crosses the whole house (issue #185). This used
+ * to be 0.55 of the plan and flat all the way, so a single window lit every
+ * room in line with it at exactly the brightness it lit the first.
+ */
+export const SUN_REACH = 0.34;
+/**
+ * The sun angle {@link SUN_REACH} describes — a mid-morning sun. Reach is
+ * scaled from here by {@link sunReachScale}.
+ */
+export const SUN_REACH_REF = 30;
+/**
+ * How much wider a beam grows over its full reach, as a multiple of the gap
+ * it came through.
+ *
+ * Light scatters. A beam drawn as the gap swept along the sun is exact for a
+ * perfect ray, and reads as a cut-out: hard parallel edges the whole way,
+ * which is the other half of what makes issue #185's screenshots look wrong.
+ * Widening as it travels is what a real patch does, and it costs one number
+ * rather than a blur filter over the whole canvas.
+ */
+export const SUN_SPREAD = 0.9;
 /** How dark the plan goes where no sunlight lands. */
 export const SUN_SHADE = 0.16;
 /** How strongly the sunlit patches are tinted. */
@@ -3184,6 +3287,47 @@ export const SUN_PATCH_OPACITY = 0.3;
  */
 export const SUN_LIGHT_COLOR = "var(--fp-skin-sunlight, #ffd9a0)";
 export const SUN_SHADE_COLOR = "var(--fp-skin-sunshade, #000)";
+
+/**
+ * A usable reach fraction: {@link cssNumber}'s coercion, then bounded.
+ *
+ * The lower bound is not zero. A reach of zero is a beam with no length,
+ * which is a gradient with no extent and a polygon folded onto its own mouth
+ * — legal SVG that draws nothing, and indistinguishable on screen from the
+ * feature being broken. The upper bound is what keeps a typo like `40` from
+ * asking the browser for a polygon sixteen thousand units long.
+ */
+export function sunReachFraction(value: unknown): number {
+  return Math.max(0.02, Math.min(1.5, cssNumber(value, SUN_REACH)));
+}
+
+/**
+ * How far the light reaches for a sun at `elevation`, as a multiple of the
+ * base reach.
+ *
+ * The steeper the sun, the shorter the patch — that is the whole reason a
+ * midday sun does not lay a stripe across the house, and it is the reason
+ * issue #185 gives for the beams looking wrong. Depth goes as `1/tan(e)`, so
+ * this is that ratio against {@link SUN_REACH_REF}: a 30° sun reaches exactly
+ * the base, a 60° one a little over half as far, a 10° evening sun nearly
+ * twice as far and raking.
+ *
+ * Clamped at both ends. Near the horizon the tangent runs away to infinity
+ * and would throw a beam of unbounded length for a sun that is barely up;
+ * near the zenith it collapses to nothing, and a patch that vanishes entirely
+ * at noon reads as a bug rather than as physics.
+ *
+ * An unreadable elevation returns 1 — the base reach — for the same reason
+ * {@link sunlightStrength} returns full strength: an outage should leave the
+ * plan looking ordinary.
+ */
+export function sunReachScale(elevation: unknown): number {
+  const e = liveSunAttribute(elevation);
+  if (e === undefined) return 1;
+  const rad = (deg: number) => (deg * Math.PI) / 180;
+  const scale = Math.tan(rad(SUN_REACH_REF)) / Math.tan(rad(Math.max(1, Math.min(89, e))));
+  return Math.max(0.45, Math.min(1.9, scale));
+}
 
 /**
  * **How much** of an opening lets sunlight in, 0..1 of its gap.
@@ -3364,14 +3508,31 @@ export function sunBeamPolygon(
    * beam and the shade it sits in line up exactly instead of leaking.
    */
   clear = 1,
+  /**
+   * How much wider the far end is than the gap, as a multiple of the gap —
+   * see {@link SUN_SPREAD}. 0 keeps the exact parallel-ray parallelogram.
+   */
+  spread = 0,
 ): AreaPoint[] {
   const [a, b] = openingEnds(o);
   const f = Math.max(0, Math.min(1, clear));
-  if (f >= 1) return sweep(a, b, dir, reach);
   const mx = (a.x + b.x) / 2;
   const my = (a.y + b.y) / 2;
-  const lerp = (p: AreaPoint) => ({ x: mx + (p.x - mx) * f, y: my + (p.y - my) * f });
-  return sweep(lerp(a), lerp(b), dir, reach);
+  // Scale about the opening's own centre, so the clear part of a half-open
+  // door sits where the wall left the gap.
+  const at = (p: AreaPoint, k: number) => ({ x: mx + (p.x - mx) * k, y: my + (p.y - my) * k });
+  const near = [at(a, f), at(b, f)];
+  if (spread <= 0) return sweep(near[0]!, near[1]!, dir, reach);
+  // The far edge is the same gap, widened — light scatters, so the patch is a
+  // fan rather than a stripe cut with a knife. Widened about the centre line,
+  // which keeps the fan symmetric about the direction the light travels.
+  const far = [at(a, f * (1 + spread)), at(b, f * (1 + spread))];
+  return [
+    near[0]!,
+    near[1]!,
+    { x: far[1]!.x + dir.x * reach, y: far[1]!.y + dir.y * reach },
+    { x: far[0]!.x + dir.x * reach, y: far[0]!.y + dir.y * reach },
+  ];
 }
 
 /**
@@ -3424,6 +3585,14 @@ export interface SunlightOptions {
    * is no layer at all rather than a transparent one.
    */
   strength?: number;
+  /**
+   * How far the light carries, as a fraction of the plan's shorter side.
+   * Defaults to {@link SUN_REACH}; the card scales it by the sun's height
+   * (see {@link sunReachScale}).
+   */
+  reach?: number;
+  /** How much the beam fans over that distance — {@link SUN_SPREAD}. */
+  spread?: number;
   light?: string;
   /**
    * `null` draws the light without darkening anything else — the patches
@@ -3442,7 +3611,7 @@ export function renderSunlight(
   id: string,
   opts: SunlightOptions,
 ): SVGTemplateResult | typeof nothing {
-  const { dir, openAmount, shutterOpen, strength = 1 } = opts;
+  const { dir, openAmount, shutterOpen, strength = 1, spread = SUN_SPREAD } = opts;
   const paint = {
     light: opts.light ?? SUN_LIGHT_COLOR,
     // `?? ` would swallow the explicit null that means "no shade at all".
@@ -3451,7 +3620,12 @@ export function renderSunlight(
   // Below the horizon there is nothing to let in, so there is nothing to draw
   // — not a layer at zero opacity, which would still cost every polygon.
   if (strength <= 0) return nothing;
-  const reach = Math.min(width, height) * SUN_REACH;
+  // Coerced and bounded at the sink, so no caller can put a NaN into a
+  // coordinate. `sunReach` is hand-editable YAML: "wide" or a stray NaN made
+  // every far corner NaN — in the polygon *and* in the gradient that fades
+  // it — and a negative one did something quieter and worse, sweeping the
+  // beam backwards so the light left through the wall it came in by.
+  const reach = Math.min(width, height) * sunReachFraction(opts.reach);
   // Doorways already subtracted, so an open door casts no shadow across the
   // room behind it. Windows too — glass casts none whatever its sash is doing.
   // How much of each gap is clear, asked once and used for both families —
@@ -3468,9 +3642,32 @@ export function renderSunlight(
   // second sun of every opening that happened to line up with a window: the
   // doorway behind it re-emitted at its own full width, and a window on the
   // shaded façade threw a patch out of the house (issues #177 / #178).
-  const lit = openings.filter((o) => clear(o) > 0 && sunReachesOpening(o, walls, dir));
-  if (!lit.length) return nothing;
-  const beams = lit.map((o) => polyPoints(sunBeamPolygon(o, dir, reach, clear(o))));
+  // One slot per opening, holes included — NOT compacted, for exactly the
+  // reason renderSunDimMask spells out above (issue #119). Filtering to the
+  // lit ones renumbers every later beam the moment a door opens, which
+  // rewrites the `id` on an existing <linearGradient> and leaves the polygon
+  // that referenced it pointing at a paint server the browser has already
+  // cached under that name. Here the symptom would be this very feature
+  // failing: a beam painted flat and full-length again, and only the ones
+  // *after* the door that moved — the fade looking intermittent rather than
+  // broken. Emitting the holes in place keeps DOM positions stable too.
+  //
+  // Each beam keeps the opening it came from: the fade runs from that
+  // opening's own centre along the light, so every patch dims over its own
+  // length rather than sharing one gradient across the plan.
+  const beams = openings.map((o, i) => {
+    if (!(clear(o) > 0 && sunReachesOpening(o, walls, dir))) return undefined;
+    return {
+      points: polyPoints(sunBeamPolygon(o, dir, reach, clear(o), spread)),
+      x1: o.x,
+      y1: o.y,
+      x2: o.x + dir.x * reach,
+      y2: o.y + dir.y * reach,
+      lightId: `${id}-b${i}`,
+      shadeId: `${id}-s${i}`,
+    };
+  });
+  if (!beams.some((b) => b !== undefined)) return nothing;
   const shadows = shadowPolys.map(polyPoints);
   const pad = WALL_THICKNESS;
   const shadeId = `${id}-shade`;
@@ -3490,6 +3687,18 @@ export function renderSunlight(
   // without this the light leaks along both edges of every wall it passes.
   const shadowPoly = (p: string, paint: string) =>
     svg`<polygon points=${p} fill=${paint} stroke=${paint} stroke-width=${WALL_THICKNESS} />`;
+  // A patch is brightest where it comes in and gone by the end of its reach —
+  // the half of issue #185 that geometry alone cannot fix, since a fanned
+  // beam at flat opacity still ends in a straight edge across the room. The
+  // middle stop keeps it from reading as a linear ramp, which looks like a
+  // gradient rather than like light.
+  const fade = (gid: string, x1: number, y1: number, x2: number, y2: number, color: string) =>
+    svg`<linearGradient id=${gid} gradientUnits="userSpaceOnUse"
+                        x1=${x1} y1=${y1} x2=${x2} y2=${y2}>
+          <stop offset="0" stop-color=${color} stop-opacity="1" />
+          <stop offset="0.45" stop-color=${color} stop-opacity="0.55" />
+          <stop offset="1" stop-color=${color} stop-opacity="0" />
+        </linearGradient>`;
   // Only built when it is going to be used: the shade mask is the one that
   // needs every beam *and* every shadow, so declining the shade halves the
   // shapes this emits rather than hiding them behind an opacity of zero.
@@ -3501,7 +3710,10 @@ export function renderSunlight(
            back wherever a wall stands in one. The order is the whole logic. -->
       <mask id=${shadeId} maskUnits="userSpaceOnUse" x=${x} y=${y} width=${w} height=${h}>
         ${cover("#fff")}
-        ${beams.map((p) => svg`<polygon points=${p} fill="#000" />`)}
+        ${beams.map((b) => (b ? fade(b.shadeId, b.x1, b.y1, b.x2, b.y2, "#000") : nothing))}
+        ${beams.map((b) =>
+          b ? svg`<polygon points=${b.points} fill=${`url(#${b.shadeId})`} />` : nothing
+        )}
         ${shadows.map((p) => shadowPoly(p, "#fff"))}
       </mask>`;
   return svg`
@@ -3522,10 +3734,16 @@ export function renderSunlight(
             opacity=${SUN_SHADE * strength} mask=${`url(#${shadeId})`} />`
       }
       <g mask=${`url(#${shadowId})`} opacity=${SUN_PATCH_OPACITY * strength}>
-        ${beams.map(
-          (p) =>
-            svg`<polygon class="fp-sunbeam" points=${p}
-                        style=${`fill:${cssColorOr(paint.light, SUN_LIGHT_COLOR)};`} />`
+        ${beams.map((b) =>
+          b
+            ? fade(b.lightId, b.x1, b.y1, b.x2, b.y2, cssColorOr(paint.light, SUN_LIGHT_COLOR))
+            : nothing
+        )}
+        ${beams.map((b) =>
+          b
+            ? svg`<polygon class="fp-sunbeam" points=${b.points}
+                          fill=${`url(#${b.lightId})`} />`
+            : nothing
         )}
       </g>
     </g>`;
