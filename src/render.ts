@@ -2105,11 +2105,31 @@ function isSensorOutage(state: string | undefined): boolean {
  */
 export function resolveOpeningOpen(o: Opening, state: string | undefined): boolean {
   if (!o.entity || state === undefined) return openingDefaultOpen(o);
-  // Fail closed on an outage before applying invert — a stale "open" during a
-  // sensor dropout is worse than showing closed.
-  if (isSensorOutage(state)) return false;
+  // Fail closed before applying invert — a stale "open" while we have no
+  // reliable reading is worse than showing closed.
+  if (openingReadingFailsClosed(o.entity, state)) return false;
   const open = openingEntityReadsOpen(o.entity, state);
   return o.invert ? !open : open;
+}
+
+/**
+ * States that mean "no reliable reading", so the opening draws shut and
+ * `invert` does not get to flip that into a door standing open.
+ *
+ * The outages every entity can report, plus one the lock domain adds:
+ * **`jammed`**, which is a lock that tried to move and could not. The bolt is
+ * neither thrown nor withdrawn — or is, and the lock does not know — so it is
+ * the same "we do not know" the dropouts are, not a third open/closed reading.
+ * Treating it as merely "not unlocked" would leave `invert: true` drawing a
+ * jammed front door wide open, which is the one picture a jam must not paint.
+ *
+ * Lock-domain only: no other domain reports `jammed`, and a hypothetical
+ * `sensor.jammed` reading the literal word should keep meaning whatever its
+ * own domain says.
+ */
+function openingReadingFailsClosed(entityId: string, state: string): boolean {
+  if (isSensorOutage(state)) return true;
+  return entityId.split(".")[0] === "lock" && state === "jammed";
 }
 
 /**

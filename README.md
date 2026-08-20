@@ -1055,9 +1055,13 @@ openings:
 
 `unlocked` draws the door open, `locked` draws it shut. The in-between states follow the
 lock domain's own reading, the same table the device badges use: `unlocking` and a latch
-`open` / `opening` count as open, `locking` is on its way to shut and draws shut, and
-`jammed` — like any unavailable or unknown state — fails closed. `invert` flips it for a
-lock wired the other way round.
+`open` / `opening` count as open, and `locking` is on its way to shut and draws shut.
+`invert` flips all of those, for a lock wired the other way round.
+
+**`jammed` is not one of those readings.** A lock that tried to move and could not has a
+bolt that is neither thrown nor withdrawn, so it is the same "we don't know" as an
+`unavailable` or `unknown` entity: the door draws shut, and `invert` does not get to turn
+that into a door standing open.
 
 A lock publishes no position, so the door is fully open or fully shut, never partway.
 

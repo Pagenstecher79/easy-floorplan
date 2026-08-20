@@ -4660,19 +4660,41 @@ describe("a lock drives a door (issue #176)", () => {
     }
     // `locking` is on its way to shut, so it draws shut.
     expect(resolveOpeningOpen(door(), "locking")).toBe(false);
-    expect(resolveOpeningOpen(door(), "jammed")).toBe(false);
   });
 
-  it("fails closed on an outage, before invert can flip it", () => {
-    for (const state of ["unavailable", "unknown"]) {
-      expect(resolveOpeningOpen(door(), state)).toBe(false);
-      expect(resolveOpeningOpen(door({ invert: true }), state)).toBe(false);
+  it("fails closed on no reliable reading, before invert can flip it", () => {
+    // `jammed` belongs here rather than with the ordinary readings: the lock
+    // tried to move and could not, so the bolt is neither thrown nor
+    // withdrawn. Inverting it would draw a jammed front door wide open, which
+    // is the one picture a jam must not paint.
+    for (const state of ["unavailable", "unknown", "jammed"]) {
+      expect({ state, open: resolveOpeningOpen(door(), state) }).toEqual({ state, open: false });
+      expect({ state, inverted: resolveOpeningOpen(door({ invert: true }), state) }).toEqual({
+        state,
+        inverted: false,
+      });
     }
+  });
+
+  it("only a lock's jam fails closed — no other domain reports one", () => {
+    // A `sensor.jammed` reading the literal word keeps meaning whatever its
+    // own domain says, and there `jammed` is simply not an open state, so
+    // invert may flip it like any other.
+    const contact = (extra = {}) =>
+      ({ ...door({ ...extra }), entity: "binary_sensor.d" }) as Opening;
+    expect(resolveOpeningOpen(contact(), "jammed")).toBe(false);
+    expect(resolveOpeningOpen(contact({ invert: true }), "jammed")).toBe(true);
   });
 
   it("inverts for a lock wired the other way round", () => {
     expect(resolveOpeningOpen(door({ invert: true }), "locked")).toBe(true);
     expect(resolveOpeningOpen(door({ invert: true }), "unlocked")).toBe(false);
+  });
+
+  it("a jam is never active, and lets no light through", () => {
+    expect(openingIsActive(door(), { state: "jammed" })).toBe(false);
+    expect(openingIsActive(door({ invert: true }), { state: "jammed" })).toBe(false);
+    expect(resolveOpeningAmount(door({ invert: true }), { state: "jammed" })).toBe(0);
   });
 
   it("drives the amount, the accent and the light like any other opening", () => {
