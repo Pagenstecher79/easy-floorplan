@@ -374,7 +374,7 @@ The editor writes this config for you; manual editing is optional.
 | `pressEffect`| string   | `scale`            | Feedback when a device is pressed: `scale`, `ripple`, `flash` or `none`. Only devices that actually do something respond. See [Press feedback](#press-feedback). |
 | `offlineStyle`| string  | `dim`              | How a device whose entity is **offline** is drawn: `dim`, `strike` (dimmed with a diagonal through the badge) or `none`. See [Offline devices](#offline-devices). |
 | `compactHeader`| boolean | `false`           | Draw the title inside the plan and the floor buttons in a row, instead of spending a card header row on them. See [Compact header](#compact-header). |
-| `overlayScale`| string  | `plan`             | How badges, labels, room names and text are sized: `plan` = canvas units so they scale with the drawing, `fixed` = screen pixels. See [Overlay scale](#overlay-scale). |
+| `overlayScale`| string  | `fixed`; `plan` in new plans | How badges, labels, room names and text are sized: `plan` = canvas units so they scale with the drawing, `fixed` = screen pixels. A card added from the picker is created with `plan`; a config that doesn't say renders `fixed`, which is what every plan drawn before the option existed was laid out in. See [Overlay scale](#overlay-scale). |
 | `background` | string   | skin / card bg     | Canvas background color (CSS / hex). Overrides the skin's paper. |
 | `floors`     | Floor[]  | —                  | Per-floor element groups (see [Floor](#floor)).   |
 | `defaultFloor`| string  | first floor        | Id of the floor shown first.                 |
@@ -640,11 +640,12 @@ animated inside a rectangular tracked area:
 - `points` — `{ x, y }` vertices in drawing order, implicitly closed last-to-first.
 - `name` / `showName` — label centered on the polygon (`showName` defaults `true`).
   Mirrors the linked HA area's name when `haArea` is set.
-- `labelSize` — that label's size, `8`–`40`, default `14`. Canvas units under the default
-  `overlayScale: plan`, px under `fixed`,
-  canvas units under `plan`. Small rooms want a smaller number than the big ones beside them.
-  Left unset on a `fixed` card the size stays in the stylesheet, so a card-mod rule on
-  `.area-label` still wins; set it, or switch to `plan`, and it moves inline and takes over.
+- `labelSize` — that label's size, `8`–`40`, default `14`. Px under `overlayScale: fixed`,
+  which is what a plan renders as unless it says otherwise; canvas units under `plan`,
+  which is what a new plan is created with. Small rooms want a smaller number than the big
+  ones beside them. Left unset on a `fixed` card the size stays in the stylesheet, so a
+  card-mod rule on `.area-label` still wins; set it, or switch to `plan`, and it moves
+  inline and takes over.
 - `color` / `opacity` — the room's fill; theme primary and `0.25` by default.
 - `haArea` — id of a linked Home Assistant area, set by the editor when `name` matches one.
 - `filterEntities` — with `haArea` set, scopes the entity picker for devices inside this
@@ -1011,9 +1012,9 @@ the canvas to whatever width the card gets — draw at any size, they always fit
 labels, room names and text are HTML on top of that, so they stay upright under `rotation`
 and can take clicks.
 
-**By default the overlay is sized in canvas units too** (`overlayScale: plan`), so both
-layers shrink together and the card looks the same at every size — a scale drawing rather
-than a drawing with fixed-size furniture on it. Every measure follows: `size` and
+**A new plan is created with the overlay in canvas units too** (`overlayScale: plan`), so
+both layers shrink together and the card looks the same at every size — a scale drawing
+rather than a drawing with fixed-size furniture on it. Every measure follows: `size` and
 `labelSize` on a device, the reading drawn inside a badge, `size` on text, an area's
 `labelSize`, and `rippleSize`. Hairlines deliberately don't — a badge border and a label's
 drop shadow are about a pixel either way, and scaling them down is how you lose them.
@@ -1022,7 +1023,13 @@ Sizes then mean the same thing as everything else in the config: `labelSize: 14`
 units on a `980`-unit-wide canvas, about 1.4 % of the card's width whatever that turns out
 to be.
 
-### `fixed`, and why it isn't the default
+**The editor previews whichever mode the plan uses.** The canvas sizes its badges and
+labels the same way the card will, so the number you type is the number that renders — and
+zooming the canvas previews the card at other widths. (Before this it always drew screen
+pixels, so a plan in canvas units looked right in the editor and small on the dashboard,
+which is what made 1.5's change so hard to place.)
+
+### `fixed`, and when to reach for it
 
 `overlayScale: fixed` pins the overlay to **screen pixels** instead:
 
@@ -1033,8 +1040,9 @@ height: 700
 overlayScale: fixed
 ```
 
-That was the original behaviour, and the original default. It agrees with the drawing only
-while the card renders at roughly its canvas size — which is not something a plan gets to
+That is the original behaviour, and what a config that doesn't mention `overlayScale`
+still renders as. It agrees with the drawing only while the card renders at roughly its
+canvas size — which is not something a plan gets to
 decide, because the dashboard hands it whatever width it has. Below that the two come
 apart: a `980`-wide plan shown `500` wide draws every wall at half size while a 14px room
 name stays 14px, so names spill past their rooms and collide with the badges under them.
@@ -1053,10 +1061,19 @@ there is no relative position left to preserve.)
 Reach for `fixed` when the card renders **larger** than its canvas, or on a wall tablet
 where a px floor under the text is what keeps it readable from across the room.
 
-> **Upgrading?** The default changed, so a plan that never set `overlayScale` now scales
-> its overlay with the drawing. If your card renders at about its canvas width you will
-> barely see it; if it renders much smaller, labels get smaller (which is the point) and if
-> much larger, bigger. Setting `overlayScale: fixed` restores the old behaviour exactly.
+> **Upgrading from 1.5.x?** 1.5.0 changed what a *missing* `overlayScale` meant, which
+> resized the overlay of every plan that had never set one — including plans whose author
+> had deliberately chosen the pixels, since that was the default at the time and the editor
+> wrote nothing down for it. On a card narrower than its canvas the badges came out a
+> fraction of their size (issue #192). That is undone: **a config with no `overlayScale`
+> renders in pixels, as it always did.** Canvas units are what a plan wants, so a card
+> added from the picker is created with `overlayScale: plan` written into it — a new
+> default belongs in new configs, not in a changed reading of old ones.
+>
+> If you liked what 1.5 did, add `overlayScale: plan` and keep it — or pick **Canvas
+> units** under **Display** in the editor, which now writes your choice down instead of
+> omitting it for being the default. Merely opening that panel changes nothing: a plan's
+> YAML gains the key when you choose a mode, not because you looked at the setting.
 
 ### Where it helps, and where it costs
 

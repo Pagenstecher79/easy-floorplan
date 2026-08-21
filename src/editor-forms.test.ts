@@ -1078,12 +1078,14 @@ describe("wallForm / projectForm / floorImageForm", () => {
     expect(form.fields[0].helper).toBe(tron.description);
   });
 
-  it("overlay scale shares that form, defaults to plan, and stays out of the YAML when default", () => {
+  it("overlay scale shares that form, and records whichever value is chosen", () => {
     const form = projectDisplayForm({ type: "t", width: 1000, height: 600 } as FloorplanCardConfig);
-    expect(form.data.overlayScale).toBe("plan");
-    // Canvas units are the default, so they are what stays unwritten; "fixed"
-    // is the choice that has to be recorded.
-    expect(form.toPatch({ overlayScale: "plan" })).toEqual({ overlayScale: undefined });
+    // A config with no key is an older plan, and shows the pixels it is drawn in.
+    expect(form.data.overlayScale).toBe("fixed");
+    // Neither value is omitted as "the default" — that habit is what let a
+    // changed default restyle every plan in the field (issue #192). A plan says
+    // how it renders, so opening this panel pins whatever it is already doing.
+    expect(form.toPatch({ overlayScale: "plan" })).toEqual({ overlayScale: "plan" });
     expect(form.toPatch({ overlayScale: "fixed" })).toEqual({ overlayScale: "fixed" });
     // Patching one field must not invent a value for the other.
     expect(form.toPatch({ rotation: "90" })).toEqual({ rotation: 90 });
@@ -1091,15 +1093,37 @@ describe("wallForm / projectForm / floorImageForm", () => {
       type: "t",
       width: 1000,
       height: 600,
-      overlayScale: "fixed",
+      overlayScale: "plan",
     } as FloorplanCardConfig);
-    expect(pinned.data.overlayScale).toBe("fixed");
-    // The default leads the dropdown, so the list opens on what a plan wants.
+    expect(pinned.data.overlayScale).toBe("plan");
+    // Canvas units still lead the dropdown: they are what a new plan is made
+    // with and what a plan generally wants.
     const field = form.fields.find((x) => x.name === "overlayScale")!;
     const opts = (field.selector as { select: { options: { value: string }[] } }).select.options.map(
       (o) => o.value
     );
     expect(opts).toEqual(["plan", "fixed"]);
+  });
+
+  it("does not invent an overlayScale for a plan that never set one", () => {
+    // The whole editing lifecycle, because the claim "opening Display pins the
+    // mode" turned out to be wrong and worth pinning down as a test rather than
+    // as prose (review of #193). ha-form re-emits its whole data object; the
+    // editor diffs that against `data` and patches only what changed. `data`
+    // already carries the *normalized* mode, so an untouched dropdown never
+    // differs from itself and nothing about the overlay reaches the config.
+    const legacy = { type: "t", width: 1000, height: 600 } as FloorplanCardConfig;
+    const form = projectDisplayForm(legacy);
+    const emitted = { ...form.data, rotation: "90" };
+    const diff = diffFormValue(form.data, emitted, form.fields);
+    expect(diff).toEqual({ rotation: "90" });
+    expect(form.toPatch(diff)).toEqual({ rotation: 90 });
+    // Opening and closing it, changing nothing, is a no-op all the way down.
+    expect(diffFormValue(form.data, { ...form.data }, form.fields)).toEqual({});
+    // Which is the behaviour to want: a plan's YAML gains a key when someone
+    // chooses one, not because they looked at the panel. Choosing is what
+    // records it — including choosing the mode the plan is already in.
+    expect(form.toPatch({ overlayScale: "fixed" })).toEqual({ overlayScale: "fixed" });
   });
 
   it("image opacity appears only when an image is set", () => {
