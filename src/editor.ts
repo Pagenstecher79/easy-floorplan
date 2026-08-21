@@ -2128,18 +2128,25 @@ export class FloorplanCardEditor extends LitElement {
                about the device: an entity can be bound for the badge to read
                and kept out of the label text. -->
           <div class="row wide reading-show">
-            <label for=${`show-reading-${it.id}-${i}`}>Show on label</label>
-            <input
-              id=${`show-reading-${it.id}-${i}`}
-              type="checkbox"
-              title="Off keeps this entity bound — the badge can still read it — without printing it in the label"
-              .checked=${reading.showState !== false}
-              @change=${(e: Event) =>
-                patch(i, {
-                  // `true` is the default, so it stays out of the YAML.
-                  showState: (e.target as HTMLInputElement).checked ? undefined : false,
-                })}
-            />
+            <!-- The input is *inside* its label rather than paired to it by
+                 id: the only id available here is the element's own, which
+                 comes from config and can be anything, so a generated "for"
+                 would be invalid or duplicated exactly when someone
+                 hand-writes their YAML. Wrapping needs no id, and clicking
+                 the words toggles the box either way. -->
+            <label>
+              <input
+                type="checkbox"
+                title="Off keeps this entity bound — the badge can still read it — without printing it in the label"
+                .checked=${reading.showState !== false}
+                @change=${(e: Event) =>
+                  patch(i, {
+                    // `true` is the default, so it stays out of the YAML.
+                    showState: (e.target as HTMLInputElement).checked ? undefined : false,
+                  })}
+              />
+              Show on label
+            </label>
             <span class="hint"
               >${reading.showState === false
                 ? "Bound but not printed — the badge can still read it."
@@ -2155,8 +2162,9 @@ export class FloorplanCardEditor extends LitElement {
       </div>
       ${list.length
         ? html`<p class="hint rule-note">
-            Shown whether or not "Show state" is on — that toggle is about this
-            device's own state, so a device can label itself with these alone.
+            These show whether or not the device's own "Show state" above is on
+            — that toggle is about the device's entity, not about these. Use
+            each row's own "Show on label" to keep one bound without printing it.
           </p>`
         : nothing}
     `;
@@ -5956,6 +5964,12 @@ export class FloorplanCardEditor extends LitElement {
     .reading-show label {
       flex: 0 0 auto;
       font-size: 12px;
+      /* Holds the checkbox it wraps, so the pair reads as one control and the
+         whole thing is a click target. */
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
     }
     /* The panel ("Project" config) and the new element-edit area share the
        same boxed look so the two sections below the canvas read as siblings. */

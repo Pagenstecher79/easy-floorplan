@@ -460,7 +460,9 @@ export interface FloorItem {
    * they show. Resolve with `itemReadings`, never by reading either key
    * directly.
    *
-   * **Shown whether or not `showState` is**, which is the point of them. A plug
+   * **Shown whether or not the *device's* {@link FloorItem.showState} is**,
+   * which is the point of them — a row's own {@link ItemReading.showState} is
+   * the switch for hiding one of these. A plug
    * says on/off through its badge colour, so its owner wants Power · LQI ·
    * Battery and *not* the word "on" (I-G-1-1's case in discussion #173).
    * `showState` is about the device's *own state*; these are not it.
