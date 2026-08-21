@@ -950,10 +950,11 @@ gap moved the same way. So:
   throws a narrow patch, not the one it would throw standing wide open. Sliding styles
   count the gap they actually clear rather than the distance a leaf travels, so a
   converging pair reads the same here as it draws;
-- a patch **fades out radially from its opening**, the way a lamp's pool does, over the
-  distance the light actually travels before a wall stops it — so it is always faint by
-  the time it ends, whatever size the room is. `sunReach` is the ceiling on that
-  distance, not a fixed span;
+- a patch **fades out from its opening** over the distance the light actually travels
+  before a wall stops it, so it is always faint by the time it ends, whatever size the
+  room is. `sunReach` is the ceiling on that distance, not a fixed span. The falloff is
+  an ellipse fitted to the patch — long along the light, narrow across it — so the tip
+  rounds off and the flanks dim, instead of the light stopping at an edge;
   What ends a patch is that circle, not the edge of any shape: the beam's outline always
   extends past the point the light has faded to nothing, so you see the arc and never a
   straight cut across the room;

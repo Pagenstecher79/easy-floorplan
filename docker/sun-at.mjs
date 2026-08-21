@@ -23,7 +23,19 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const store = resolve(here, "config", ".storage", "core.config");
+// configuration.yaml, NOT .storage/core.config. A `homeassistant:` block in
+// YAML wins over the stored core config, and this instance has one — editing
+// the store looks like it works (the file changes, the UI even shows the new
+// place) and moves the sun not at all. That cost an afternoon: the card was
+// correctly drawing nothing, because sun.sun was still reading below_horizon
+// from coordinates half a world from where the store claimed to be.
+const store = resolve(here, "config", "configuration.yaml");
+const LAT = /^(\s*latitude:\s*)(-?[\d.]+)/m;
+const LON = /^(\s*longitude:\s*)(-?[\d.]+)/m;
+const readLoc = (text) => ({
+  latitude: Number(text.match(LAT)?.[2]),
+  longitude: Number(text.match(LON)?.[2]),
+});
 
 const rad = (d) => (d * Math.PI) / 180;
 const deg = (r) => (r * 180) / Math.PI;
@@ -49,8 +61,12 @@ function solarPosition(date, lat, lon) {
   return { elevation, azimuth, solarTime: ((solar % 24) + 24) % 24 };
 }
 
-const cfg = JSON.parse(readFileSync(store, "utf8"));
-const data = cfg.data;
+const text = readFileSync(store, "utf8");
+const data = readLoc(text);
+if (!Number.isFinite(data.latitude) || !Number.isFinite(data.longitude)) {
+  console.error("Could not find latitude/longitude in docker/config/configuration.yaml.");
+  process.exit(1);
+}
 const now = new Date();
 const arg = process.argv[2];
 
@@ -77,8 +93,9 @@ while (lon > 180) lon -= 360;
 while (lon < -180) lon += 360;
 
 const before = solarPosition(now, data.latitude, data.longitude);
-data.longitude = Number(lon.toFixed(4));
-writeFileSync(store, JSON.stringify(cfg, null, 2));
+const next = Number(lon.toFixed(4));
+writeFileSync(store, text.replace(LON, `$1${next}`));
+data.longitude = next;
 const after = solarPosition(now, data.latitude, data.longitude);
 
 console.log(`  solar time  ${before.solarTime.toFixed(2)}h -> ${after.solarTime.toFixed(2)}h`);

@@ -3242,16 +3242,21 @@ export const SUN_REACH = 0.34;
  */
 export const SUN_REACH_REF = 30;
 /**
- * How much wider a beam grows over its full reach, as a multiple of the gap
- * it came through.
+ * How far the falloff spreads ACROSS the beam, as a multiple of the gap's
+ * width — the other half of the ellipse the light dies into.
  *
- * Light scatters. A beam drawn as the gap swept along the sun is exact for a
- * perfect ray, and reads as a cut-out: hard parallel edges the whole way,
- * which is the other half of what makes issue #185's screenshots look wrong.
- * Widening as it travels is what a real patch does, and it costs one number
- * rather than a blur filter over the whole canvas.
+ * The falloff is an ellipse fitted to the beam, not a circle. That is the
+ * whole difference between a rounded tip and a flat one, and it took four
+ * attempts to find because a circle centred on the opening is nearly a
+ * straight edge by the time it has travelled far enough to matter: on the
+ * plan that reopened issue #185, a radius of 163 bowed 13px across a 129-wide
+ * window, 10% of the width. An ellipse squashed to the beam's own proportions
+ * curves on the scale of its WIDTH instead, which is what reads as round.
+ *
+ * A shade under 1 means the light is already dimming at the gap's own edges,
+ * so the patch has soft flanks as well as a soft tip.
  */
-export const SUN_SPREAD = 0;
+export const SUN_ACROSS = 0.95;
 /** How dark the plan goes where no sunlight lands. */
 export const SUN_SHADE = 0.16;
 /** How strongly the sunlit patches are tinted. */
@@ -3511,35 +3516,16 @@ export function sunBeamPolygon(
   /**
    * How much of the gap is clear, 0..1 — see {@link openingSunFraction}. The
    * patch narrows about the opening's centre, matching the gap {@link
-   * wallsLightPassesThrough} leaves in the wall for the same fraction, so the
-   * beam and the shade it sits in line up exactly instead of leaking.
+   * wallsLightPassesThrough} leaves in the wall for the same fraction.
    */
   clear = 1,
-  /**
-   * How much wider the far end is than the gap, as a multiple of the gap —
-   * see {@link SUN_SPREAD}. 0 keeps the exact parallel-ray parallelogram.
-   */
-  spread = 0,
 ): AreaPoint[] {
   const [a, b] = openingEnds(o);
   const f = Math.max(0, Math.min(1, clear));
   const mx = (a.x + b.x) / 2;
   const my = (a.y + b.y) / 2;
-  // Scale about the opening's own centre, so the clear part of a half-open
-  // door sits where the wall left the gap.
-  const at = (p: AreaPoint, k: number) => ({ x: mx + (p.x - mx) * k, y: my + (p.y - my) * k });
-  const near = [at(a, f), at(b, f)];
-  if (spread <= 0) return sweep(near[0]!, near[1]!, dir, reach);
-  // The far edge is the same gap, widened — light scatters, so the patch is a
-  // fan rather than a stripe cut with a knife. Widened about the centre line,
-  // which keeps the fan symmetric about the direction the light travels.
-  const far = [at(a, f * (1 + spread)), at(b, f * (1 + spread))];
-  return [
-    near[0]!,
-    near[1]!,
-    { x: far[1]!.x + dir.x * reach, y: far[1]!.y + dir.y * reach },
-    { x: far[0]!.x + dir.x * reach, y: far[0]!.y + dir.y * reach },
-  ];
+  const at = (p: AreaPoint) => ({ x: mx + (p.x - mx) * f, y: my + (p.y - my) * f });
+  return sweep(at(a), at(b), dir, reach);
 }
 
 /**
@@ -3598,8 +3584,6 @@ export interface SunlightOptions {
    * (see {@link sunReachScale}).
    */
   reach?: number;
-  /** How much the beam fans over that distance — {@link SUN_SPREAD}. */
-  spread?: number;
   light?: string;
   /**
    * `null` draws the light without darkening anything else — the patches
@@ -3618,7 +3602,7 @@ export function renderSunlight(
   id: string,
   opts: SunlightOptions,
 ): SVGTemplateResult | typeof nothing {
-  const { dir, openAmount, shutterOpen, strength = 1, spread = SUN_SPREAD } = opts;
+  const { dir, openAmount, shutterOpen, strength = 1 } = opts;
   const paint = {
     light: opts.light ?? SUN_LIGHT_COLOR,
     // `?? ` would swallow the explicit null that means "no shade at all".
@@ -3664,30 +3648,28 @@ export function renderSunlight(
   // length rather than sharing one gradient across the plan.
   const beams = openings.map((o, i) => {
     if (!(clear(o) > 0 && sunReachesOpening(o, walls, dir))) return undefined;
-    // How far this beam actually gets. The falloff is measured against this,
-    // so a patch is faint by the time a wall ends it however deep the room is.
-    const travel = sunTravelDistance(o, dir, walls, reach);
-    // The outline runs PAST that, by the width of the gap it came through.
-    //
-    // The two shapes disagree about what "the end" means: the falloff ends on
-    // a circle centred on the opening, the outline ends on a straight edge at
-    // a constant distance *along* the beam. They cross. Cut both at the same
-    // number and the near corner of that edge is still lit — measured on the
-    // reporter's own card, a corner 131 units out against a falloff reaching
-    // 163, so about a third of full strength, stopping dead. That was the
-    // sharp end; the fade was working the whole time behind it.
-    //
-    // Overshooting puts the entire far edge outside the circle, where the
-    // light has already gone. What bounds the patch is then the falloff
-    // alone, and a falloff bounded by nothing else is round.
-    const span = travel + o.length;
+    // How far the light gets before a wall stops it. The falloff is measured
+    // against this, so a patch is faint by the time it ends however deep or
+    // shallow the room is.
+    const along = sunTravelDistance(o, dir, walls, reach);
+    // …and how wide it is, measured across the light rather than along the
+    // wall: a gap seen obliquely admits a narrower beam than its own length.
+    const [ga, gb] = openingEnds(o);
+    const gx = gb.x - ga.x;
+    const gy = gb.y - ga.y;
+    const width = Math.abs(gx * dir.y - gy * dir.x) * clear(o);
     return {
-      points: polyPoints(sunBeamPolygon(o, dir, span, clear(o), spread)),
+      // The outline runs past the falloff, so the ellipse is what bounds the
+      // patch and never the polygon's flat far edge.
+      points: polyPoints(sunBeamPolygon(o, dir, along + o.length, clear(o))),
       cx: o.x,
       cy: o.y,
-      travel,
+      along,
+      across: Math.max(1, width * SUN_ACROSS),
+      angle: (Math.atan2(dir.y, dir.x) * 180) / Math.PI,
       lightId: `${id}-b${i}`,
       shadeId: `${id}-s${i}`,
+      fadeId: `${id}-f${i}`,
     };
   });
   if (!beams.some((b) => b !== undefined)) return nothing;
@@ -3710,22 +3692,23 @@ export function renderSunlight(
   // without this the light leaks along both edges of every wall it passes.
   const shadowPoly = (p: string, paint: string) =>
     svg`<polygon points=${p} fill=${paint} stroke=${paint} stroke-width=${WALL_THICKNESS} />`;
-  // A patch is brightest at the opening and dies out in EVERY direction from
-  // it — radially, the way a lamp's pool does, which is what issue #185
-  // asked for by name. The first cut at this faded along the beam's length
-  // only, and it was not enough: the sides stayed knife-cuts at full
-  // brightness from mouth to tip, so a beam still read as a stripe laid on
-  // the floor, and wherever a wall's shadow cut one short the end was a hard
-  // diagonal. A radial falloff centred on the opening fixes all three at
-  // once — the far end rounds off before the polygon runs out, the sides dim
-  // with distance, and a shadow cut lands where the light is already faint.
-  // The polygon's job shrinks to bounding the light (the fan, the walls);
-  // the gradient is what says how bright it is. Same construction as
-  // renderGlow, and the same middle stop as before so it does not read as a
-  // textbook radial ramp.
-  const fade = (gid: string, cx: number, cy: number, r: number, color: string) =>
-    svg`<radialGradient id=${gid} gradientUnits="userSpaceOnUse"
-                        cx=${cx} cy=${cy} r=${r}>
+  // The falloff, as an ellipse fitted to the beam rather than a circle.
+  //
+  // A unit circle is mapped onto the beam's own frame — rotated to point down
+  // the light, stretched to its reach along, squashed to the gap's width
+  // across. So its iso-lines curve on the scale of the beam's WIDTH, which is
+  // what makes the tip read as round; a true circle centred on the opening is
+  // nearly a straight edge by the time it gets there, which is what every
+  // earlier attempt drew and what kept reading as a hard stop.
+  //
+  // It reaches zero at the far end, so nothing bounds the patch except the
+  // light giving out — and the flanks dim too, because SUN_ACROSS is under 1.
+  const fade = (
+    b: { fadeId: string; cx: number; cy: number; along: number; across: number; angle: number },
+    gid: string,
+    color: string,
+  ) => svg`<radialGradient id=${gid} gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1"
+              gradientTransform=${`translate(${b.cx} ${b.cy}) rotate(${b.angle}) scale(${b.along} ${b.across})`}>
           <stop offset="0" stop-color=${color} stop-opacity="1" />
           <stop offset="0.45" stop-color=${color} stop-opacity="0.55" />
           <stop offset="1" stop-color=${color} stop-opacity="0" />
@@ -3741,7 +3724,7 @@ export function renderSunlight(
            back wherever a wall stands in one. The order is the whole logic. -->
       <mask id=${shadeId} maskUnits="userSpaceOnUse" x=${x} y=${y} width=${w} height=${h}>
         ${cover("#fff")}
-        ${beams.map((b) => (b ? fade(b.shadeId, b.cx, b.cy, b.travel, "#000") : nothing))}
+        ${beams.map((b) => (b ? fade(b, b.shadeId, "#000") : nothing))}
         ${beams.map((b) =>
           b
             ? svg`<polygon points=${b.points} fill=${`url(#${b.shadeId})`} />`
@@ -3769,7 +3752,7 @@ export function renderSunlight(
       <g mask=${`url(#${shadowId})`} opacity=${SUN_PATCH_OPACITY * strength}>
         ${beams.map((b) =>
           b
-            ? fade(b.lightId, b.cx, b.cy, b.travel, cssColorOr(paint.light, SUN_LIGHT_COLOR))
+            ? fade(b, b.lightId, cssColorOr(paint.light, SUN_LIGHT_COLOR))
             : nothing
         )}
         ${beams.map((b) =>

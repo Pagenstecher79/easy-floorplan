@@ -70,31 +70,6 @@ describe("renderSunlight — the markup, not just the geometry", () => {
     expect(two.match(/fp-sunbeam/g)?.length).toBe(2);
   });
 
-  it("fades over the distance the light really travels, not a share of the plan", () => {
-    // A room shallower than the reach used to get a patch still at full
-    // brightness when the far wall cut it — a hard bar across the floor.
-    // The falloff radius is the ray's own travel, so it is faint by the end
-    // whatever size the room is.
-    const near = { id: "near", x1: 0, y1: 160, x2: 400, y2: 160 };  // 60 away
-    const far = { id: "far", x1: 0, y1: 340, x2: 400, y2: 340 };    // 240 away
-    const radiusWith = (blocker: Wall) => {
-      const out = serialize(
-        renderSunlight([wall, blocker], [win], 400, 400, "sun", {
-          dir: sun, openAmount: () => 0, shutterOpen: () => undefined,
-        })
-      );
-      return Number(out.match(/<radialGradient id=sun-b0[^>]*r=([\d.]+)/)![1]);
-    };
-    const shallow = radiusWith(near);
-    const deep = radiusWith(far);
-    // A wall closer than the reach pulls the falloff in to meet it.
-    expect(shallow).toBeCloseTo(60, 0);
-    // A wall further away does not push it out: sunReach stays the ceiling,
-    // so this is 0.34 x 400 = 136, not the 240 to the wall.
-    expect(deep).toBeCloseTo(SUN_REACH * 400, 0);
-    expect(shallow).toBeLessThan(deep);
-  });
-
   it("every id a beam references is actually defined, shade or no shade", () => {
     // The bug this exists for: the edge masks were emitted INSIDE the shade
     // mask, so turning the shade off deleted them while the beams went on
@@ -121,52 +96,49 @@ describe("renderSunlight — the markup, not just the geometry", () => {
     }
   });
 
-  it("ends in the gradient's circle, never in the polygon's straight edge", () => {
-    // What #185 asked for in the first place: "limit the reach of that
-    // sunlight, maybe radially, like we do for light bulbs". The falloff has
-    // to reach zero strictly INSIDE the beam's outline, so what terminates
-    // the visible patch is the gradient's circular arc and not the flat far
-    // edge of the polygon. Two earlier attempts failed here — a fan that the
-    // wall clipped, then a lateral feather whose gradient ran along the gap
-    // and so cut diagonally across obliquely-lit beams, fading one side and
-    // not the other.
-    const s = light();
-    // It dies at zero, not at some residual value that would leave an edge.
-    const stops = s.slice(s.indexOf("<radialGradient id=sun-b0"));
-    expect(stops.slice(0, stops.indexOf("</radialGradient>"))).toContain('stop-opacity="0"');
-    // Both FAR corners are at or beyond that radius, so the light has already
-    // gone to nothing before the outline is reached and what bounds the patch
-    // is the circle.
-    const farCorners = (markup: string) => {
-      const g2 = markup.match(/<radialGradient id=sun-b0[^>]*cx=([\d.]+) cy=([\d.]+) r=([\d.]+)/)!;
-      const [gx, gy, gr] = [Number(g2[1]), Number(g2[2]), Number(g2[3])];
-      const q = markup.match(/class="fp-sunbeam" points=([-\d., ]+)/)![1]!.trim().split(" ")
-        .map((t) => t.split(",").map(Number));
-      // points 0,1 are the mouth (at the gap, correctly full strength);
-      // 2,3 are the far edge.
-      return { r: gr, far: [2, 3].map((i) => Math.hypot(q[i]![0]! - gx, q[i]![1]! - gy)) };
-    };
-    const straight = farCorners(s);
-    expect(Math.min(...straight.far)).toBeGreaterThanOrEqual(straight.r);
+  it("fades over the distance the light really travels, not a share of the plan", () => {
+    // A room shallower than the reach used to keep the patch at full strength
+    // until a wall cut it — a hard bar across the floor.
+    const near = { id: "near", x1: 0, y1: 160, x2: 400, y2: 160 };
+    const far = { id: "far", x1: 0, y1: 340, x2: 400, y2: 340 };
+    const alongWith = (blocker: Wall) =>
+      falloff(
+        serialize(
+          renderSunlight([wall, blocker], [win], 400, 400, "sun", {
+            dir: sun,
+            openAmount: () => 0,
+            shutterOpen: () => undefined,
+          })
+        )
+      )!.along;
+    expect(alongWith(near)).toBeCloseTo(60, 0);
+    // A wall further off does not push it out: sunReach stays the ceiling.
+    expect(alongWith(far)).toBeCloseTo(SUN_REACH * 400, 0);
+  });
 
-    // …and the same for light arriving OBLIQUELY, which is the case that
-    // matters. The falloff ends on a circle; the outline ends on a straight
-    // edge at a constant distance along the beam. They cross, and when the
-    // sun is square-on to the wall they happen to agree — so a fixture using
-    // perpendicular light passes while a real plan shows a hard bright edge
-    // where the near corner stops dead. That is exactly what shipped.
-    const oblique = farCorners(
-      serialize(
+  it("runs its outline past the falloff, so the ellipse is what bounds it", () => {
+    for (const dir of [sun, { x: 0.72, y: 0.69 }]) {
+      const markup = serialize(
         renderSunlight([wall], [win], 400, 400, "sun", {
-          dir: { x: 0.72, y: 0.69 },
+          dir,
           openAmount: () => 0,
           shutterOpen: () => undefined,
         })
-      )
-    );
-    expect(Math.min(...oblique.far)).toBeGreaterThanOrEqual(oblique.r);
-    // …and the two long edges are untouched, so neither side is favoured.
-    expect(s).not.toContain("<linearGradient");
+      );
+      const f = falloff(markup)!;
+      const pts = markup.match(/class="fp-sunbeam" points=([-\d., ]+)/)![1]!.trim().split(" ")
+        .map((q) => q.split(",").map(Number));
+      // Distance from the opening to each FAR corner, measured in the
+      // ellipse's own units: at or beyond 1 means the light is already gone.
+      const rad = (-f.angle * Math.PI) / 180;
+      for (const i of [2, 3]) {
+        const dx = pts[i]![0]! - f.cx;
+        const dy = pts[i]![1]! - f.cy;
+        const u = (dx * Math.cos(rad) - dy * Math.sin(rad)) / f.along;
+        const v = (dx * Math.sin(rad) + dy * Math.cos(rad)) / f.across;
+        expect(Math.hypot(u, v)).toBeGreaterThanOrEqual(1);
+      }
+    }
   });
 
   it("a door ajar throws a narrower patch than one standing open", () => {
@@ -286,26 +258,22 @@ describe("renderSunlight — the markup, not just the geometry", () => {
     expect(s).toContain("points=30,100 90,100");
   });
 
-  it("fades every patch out radially from its opening (issue #185)", () => {
+  it("fades every patch out with an ellipse fitted to it (issue #185)", () => {
     const s = light();
-    // A RADIAL gradient per beam, centred on the opening it came from — the
-    // lamp-pool construction the issue asks for by name. The first fix faded
-    // along the beam's length only, and the sides stayed knife-cuts at full
-    // brightness from mouth to tip: still a stripe, just a shorter one.
-    const grads = [...s.matchAll(/<radialGradient id=[^ ]+ [^>]*cx=(\d+) cy=(\d+) r=([\d.]+)/g)];
-    expect(grads.length).toBeGreaterThanOrEqual(2); // one for the light, one for the shade
-    for (const g of grads) {
-      // Centred on the window, not on some shared anchor.
-      expect(Number(g[1])).toBe(win.x);
-      expect(Number(g[2])).toBe(win.y);
-      // Dying exactly at the reach, so the polygon's far edge is already dark
-      // and no straight cut survives.
-      expect(Number(g[3])).toBeGreaterThan(0);
-    }
-    // Nothing linear left: the falloff is radial and it is the whole effect.
-    expect(s).not.toContain("<linearGradient");
+    // An ELLIPSE, not a circle. A circle centred on the opening is nearly a
+    // straight edge by the time it has travelled far enough to matter — on
+    // the plan that reopened #185 it bowed 13px across a 129-wide window —
+    // so the tip read as a hard stop however the stops were tuned. Squashed
+    // to the beam's own proportions it curves on the scale of the WIDTH.
+    const f = falloff(s)!;
+    expect(f).toBeDefined();
+    expect(f.cx).toBe(win.x);
+    expect(f.cy).toBe(win.y);
+    expect(f.across).toBeLessThan(f.along); // squashed across the light
+    // Tip curvature is across^2/along; it has to be small next to the beam's
+    // own width or the end is flat again.
+    expect((f.across * f.across) / f.along).toBeLessThan(win.length);
     expect(s).toContain('stop-opacity="0"');
-    // The beam is filled by that gradient rather than by a flat colour.
     expect(s).toMatch(/class="fp-sunbeam"[^>]*fill=url\(#/);
   });
 
@@ -341,7 +309,10 @@ describe("renderSunlight — the markup, not just the geometry", () => {
         })
       );
       const out: Record<string, string> = {};
-      for (const m of s.matchAll(/<radialGradient id=(sun-b\d+)[^>]*cx=(\d+)/g)) out[m[2]!] = m[1]!;
+      for (const m of s.matchAll(
+        /<radialGradient id=(sun-b\d+)[^>]*gradientTransform=translate\((\d+)/g
+      ))
+        out[m[2]!] = m[1]!;
       return out;
     };
     const shut = idsByOpening(0);
@@ -444,6 +415,16 @@ describe("renderSunlight — the markup, not just the geometry", () => {
     expect(light()).toContain("fp-sunlight");
   });
 });
+
+
+/** The falloff ellipse a beam is painted with: where it sits and how big. */
+function falloff(markup: string, id = "sun-b0") {
+  const m = markup.match(
+    new RegExp(`<radialGradient id=${id}[^>]*gradientTransform=translate\\(([-\\d.]+) ([-\\d.]+)\\) rotate\\(([-\\d.]+)\\) scale\\(([\\d.]+) ([\\d.]+)\\)`)
+  );
+  if (!m) return undefined;
+  return { cx: +m[1]!, cy: +m[2]!, angle: +m[3]!, along: +m[4]!, across: +m[5]! };
+}
 
 describe("renderOpening — orientation mirror", () => {
   it("wraps the body in an identity scale by default (unchanged output)", () => {
