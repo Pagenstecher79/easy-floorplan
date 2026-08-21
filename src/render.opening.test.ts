@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { renderOpening, renderSunlight } from "./render";
+import { renderOpening, renderSunlight, SUN_REACH } from "./render";
 import type { OpeningStyle } from "./render";
-import type { Opening } from "./types";
+import type { Opening, Wall } from "./types";
 import { nothing } from "lit";
 
 /**
@@ -61,14 +61,84 @@ describe("renderSunlight — the markup, not just the geometry", () => {
 
   it("draws a patch per opening that admits light, and a shadow per wall piece", () => {
     const s = light();
-    // The window splits its wall in two, so two shadow pieces — and they
-    // appear in both masks, while the one beam appears in the shade mask and
-    // again as the warm patch itself.
+    // The window splits its wall in two, so two shadow pieces, in both masks
+    // (4). The beam is a hole in the shade mask and the warm patch itself (2).
     expect(s.match(/<polygon/g)?.length).toBe(6);
-    expect(s).toContain("fp-sunbeam");
+    expect(s.match(/fp-sunbeam/g)?.length).toBe(1);
     // Two windows in the same wall: a patch each.
     const two = light([win, { ...win, id: "o2", x: 320 } as Opening]);
     expect(two.match(/fp-sunbeam/g)?.length).toBe(2);
+  });
+
+  it("every id a beam references is actually defined, shade or no shade", () => {
+    // The bug this exists for: the edge masks were emitted INSIDE the shade
+    // mask, so turning the shade off deleted them while the beams went on
+    // pointing at them. An undefined mask is not an error in SVG — it simply
+    // does not apply — so the patches came back at full strength with knife
+    // edges and nothing looked broken enough to suspect. It shipped, and it
+    // was the one configuration the reporter was running.
+    //
+    // So this checks the graph rather than any one feature: whatever a beam
+    // points at has to exist, in both configurations.
+    for (const shade of [undefined, null]) {
+      const s = serialize(
+        renderSunlight([wall], [win], 400, 400, "sun", {
+          dir: sun, openAmount: () => 0, shutterOpen: () => undefined, shade,
+        })
+      );
+      const referenced = [...s.matchAll(/url\(#([^)]+)\)/g)].map((m) => m[1]!);
+      expect(referenced.length).toBeGreaterThan(0);
+      const defined = new Set(
+        [...s.matchAll(/<(?:mask|linearGradient|radialGradient|clipPath) id=([^\s>]+)/g)].map((m) => m[1]!)
+      );
+      const dangling = referenced.filter((id) => !defined.has(id));
+      expect(dangling).toEqual([]);
+    }
+  });
+
+  it("fades over the distance the light really travels, not a share of the plan", () => {
+    // A room shallower than the reach used to keep the patch at full strength
+    // until a wall cut it — a hard bar across the floor.
+    const near = { id: "near", x1: 0, y1: 160, x2: 400, y2: 160 };
+    const far = { id: "far", x1: 0, y1: 340, x2: 400, y2: 340 };
+    const alongWith = (blocker: Wall) =>
+      falloff(
+        serialize(
+          renderSunlight([wall, blocker], [win], 400, 400, "sun", {
+            dir: sun,
+            openAmount: () => 0,
+            shutterOpen: () => undefined,
+          })
+        )
+      )!.along;
+    expect(alongWith(near)).toBeCloseTo(60, 0);
+    // A wall further off does not push it out: sunReach stays the ceiling.
+    expect(alongWith(far)).toBeCloseTo(SUN_REACH * 400, 0);
+  });
+
+  it("runs its outline past the falloff, so the ellipse is what bounds it", () => {
+    for (const dir of [sun, { x: 0.72, y: 0.69 }]) {
+      const markup = serialize(
+        renderSunlight([wall], [win], 400, 400, "sun", {
+          dir,
+          openAmount: () => 0,
+          shutterOpen: () => undefined,
+        })
+      );
+      const f = falloff(markup)!;
+      const pts = markup.match(/class="fp-sunbeam" points=([-\d., ]+)/)![1]!.trim().split(" ")
+        .map((q) => q.split(",").map(Number));
+      // Distance from the opening to each FAR corner, measured in the
+      // ellipse's own units: at or beyond 1 means the light is already gone.
+      const rad = (-f.angle * Math.PI) / 180;
+      for (const i of [2, 3]) {
+        const dx = pts[i]![0]! - f.cx;
+        const dy = pts[i]![1]! - f.cy;
+        const u = (dx * Math.cos(rad) - dy * Math.sin(rad)) / f.along;
+        const v = (dx * Math.sin(rad) + dy * Math.cos(rad)) / f.across;
+        expect(Math.hypot(u, v)).toBeGreaterThanOrEqual(1);
+      }
+    }
   });
 
   it("a door ajar throws a narrower patch than one standing open", () => {
@@ -132,7 +202,7 @@ describe("renderSunlight — the markup, not just the geometry", () => {
     ] as Opening[];
     const s = light(facing, [north, south]);
     const beams = s.match(/class="fp-sunbeam"/g) ?? [];
-    expect(beams.length).toBe(1);
+    expect(beams.length).toBe(1); // exactly one lit opening
     // …and it is the one on the sunlit side: the patch starts at y=0.
     expect(s).toContain('points=170,0 230,0');
     expect(s).not.toContain("230,300");
@@ -154,7 +224,7 @@ describe("renderSunlight — the markup, not just the geometry", () => {
         shutterOpen: () => undefined,
       })
     );
-    expect(s.match(/class="fp-sunbeam"/g)?.length).toBe(1);
+    expect(s.match(/class="fp-sunbeam"/g)?.length).toBe(1); // exactly one lit opening
     // The one beam is the window's, 20 across — not the door's 120.
     expect(s).toContain("points=190,100 210,100");
     // The light still gets *through* the doorway: the interior wall is cut
@@ -184,20 +254,26 @@ describe("renderSunlight — the markup, not just the geometry", () => {
         shutterOpen: () => undefined,
       })
     );
-    expect(s.match(/class="fp-sunbeam"/g)?.length).toBe(1);
+    expect(s.match(/class="fp-sunbeam"/g)?.length).toBe(1); // exactly one lit opening
     expect(s).toContain("points=30,100 90,100");
   });
 
-  it("fades every patch out over its own length (issue #185)", () => {
+  it("fades every patch out with an ellipse fitted to it (issue #185)", () => {
     const s = light();
-    // A gradient per beam, anchored on the opening it came from — not one
-    // shared ramp across the plan, which would fade patches by where they sit
-    // rather than by how far the light has travelled.
-    const grads = s.match(/<linearGradient/g) ?? [];
-    expect(grads.length).toBeGreaterThanOrEqual(2); // one for the light, one for the shade
-    // It ends at nothing, which is what stops the straight cut across the room.
+    // An ELLIPSE, not a circle. A circle centred on the opening is nearly a
+    // straight edge by the time it has travelled far enough to matter — on
+    // the plan that reopened #185 it bowed 13px across a 129-wide window —
+    // so the tip read as a hard stop however the stops were tuned. Squashed
+    // to the beam's own proportions it curves on the scale of the WIDTH.
+    const f = falloff(s)!;
+    expect(f).toBeDefined();
+    expect(f.cx).toBe(win.x);
+    expect(f.cy).toBe(win.y);
+    expect(f.across).toBeLessThan(f.along); // squashed across the light
+    // Tip curvature is across^2/along; it has to be small next to the beam's
+    // own width or the end is flat again.
+    expect((f.across * f.across) / f.along).toBeLessThan(win.length);
     expect(s).toContain('stop-opacity="0"');
-    // The beam is filled by that gradient rather than by a flat colour.
     expect(s).toMatch(/class="fp-sunbeam"[^>]*fill=url\(#/);
   });
 
@@ -233,7 +309,10 @@ describe("renderSunlight — the markup, not just the geometry", () => {
         })
       );
       const out: Record<string, string> = {};
-      for (const m of s.matchAll(/<linearGradient id=(sun-b\d+)[^>]*x1=(\d+)/g)) out[m[2]!] = m[1]!;
+      for (const m of s.matchAll(
+        /<radialGradient id=(sun-b\d+)[^>]*gradientTransform=translate\((\d+)/g
+      ))
+        out[m[2]!] = m[1]!;
       return out;
     };
     const shut = idsByOpening(0);
@@ -325,7 +404,9 @@ describe("renderSunlight — the markup, not just the geometry", () => {
         shutterOpen: () => undefined,
       })
     );
-    const op = (s: string) => Number(s.match(/opacity=([0-9.]+)/)![1]);
+    // The strength lives on the beam group's own opacity; the penumbra bands
+    // carry fill-opacity, which this must not match instead.
+    const op = (s: string) => Number(s.match(/<g mask=[^>]*? opacity=([0-9.]+)/)![1]);
     expect(op(dusk)).toBeLessThan(op(noon));
   });
 
@@ -334,6 +415,16 @@ describe("renderSunlight — the markup, not just the geometry", () => {
     expect(light()).toContain("fp-sunlight");
   });
 });
+
+
+/** The falloff ellipse a beam is painted with: where it sits and how big. */
+function falloff(markup: string, id = "sun-b0") {
+  const m = markup.match(
+    new RegExp(`<radialGradient id=${id}[^>]*gradientTransform=translate\\(([-\\d.]+) ([-\\d.]+)\\) rotate\\(([-\\d.]+)\\) scale\\(([\\d.]+) ([\\d.]+)\\)`)
+  );
+  if (!m) return undefined;
+  return { cx: +m[1]!, cy: +m[2]!, angle: +m[3]!, along: +m[4]!, across: +m[5]! };
+}
 
 describe("renderOpening — orientation mirror", () => {
   it("wraps the body in an identity scale by default (unchanged output)", () => {
