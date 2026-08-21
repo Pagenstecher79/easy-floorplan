@@ -640,11 +640,12 @@ animated inside a rectangular tracked area:
 - `points` — `{ x, y }` vertices in drawing order, implicitly closed last-to-first.
 - `name` / `showName` — label centered on the polygon (`showName` defaults `true`).
   Mirrors the linked HA area's name when `haArea` is set.
-- `labelSize` — that label's size, `8`–`40`, default `14`. Canvas units under the default
-  `overlayScale: plan`, px under `fixed`,
-  canvas units under `plan`. Small rooms want a smaller number than the big ones beside them.
-  Left unset on a `fixed` card the size stays in the stylesheet, so a card-mod rule on
-  `.area-label` still wins; set it, or switch to `plan`, and it moves inline and takes over.
+- `labelSize` — that label's size, `8`–`40`, default `14`. Px under `overlayScale: fixed`,
+  which is what a plan renders as unless it says otherwise; canvas units under `plan`,
+  which is what a new plan is created with. Small rooms want a smaller number than the big
+  ones beside them. Left unset on a `fixed` card the size stays in the stylesheet, so a
+  card-mod rule on `.area-label` still wins; set it, or switch to `plan`, and it moves
+  inline and takes over.
 - `color` / `opacity` — the room's fill; theme primary and `0.25` by default.
 - `haArea` — id of a linked Home Assistant area, set by the editor when `name` matches one.
 - `filterEntities` — with `haArea` set, scopes the entity picker for devices inside this
@@ -1069,9 +1070,10 @@ where a px floor under the text is what keeps it readable from across the room.
 > added from the picker is created with `overlayScale: plan` written into it — a new
 > default belongs in new configs, not in a changed reading of old ones.
 >
-> If you liked what 1.5 did, add `overlayScale: plan` and keep it. Opening **Display** in
-> the editor also pins whichever mode your plan is already using, so a later default can
-> never move it again.
+> If you liked what 1.5 did, add `overlayScale: plan` and keep it — or pick **Canvas
+> units** under **Display** in the editor, which now writes your choice down instead of
+> omitting it for being the default. Merely opening that panel changes nothing: a plan's
+> YAML gains the key when you choose a mode, not because you looked at the setting.
 
 ### Where it helps, and where it costs
 

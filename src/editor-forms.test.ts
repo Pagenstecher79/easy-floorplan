@@ -1105,6 +1105,27 @@ describe("wallForm / projectForm / floorImageForm", () => {
     expect(opts).toEqual(["plan", "fixed"]);
   });
 
+  it("does not invent an overlayScale for a plan that never set one", () => {
+    // The whole editing lifecycle, because the claim "opening Display pins the
+    // mode" turned out to be wrong and worth pinning down as a test rather than
+    // as prose (review of #193). ha-form re-emits its whole data object; the
+    // editor diffs that against `data` and patches only what changed. `data`
+    // already carries the *normalized* mode, so an untouched dropdown never
+    // differs from itself and nothing about the overlay reaches the config.
+    const legacy = { type: "t", width: 1000, height: 600 } as FloorplanCardConfig;
+    const form = projectDisplayForm(legacy);
+    const emitted = { ...form.data, rotation: "90" };
+    const diff = diffFormValue(form.data, emitted, form.fields);
+    expect(diff).toEqual({ rotation: "90" });
+    expect(form.toPatch(diff)).toEqual({ rotation: 90 });
+    // Opening and closing it, changing nothing, is a no-op all the way down.
+    expect(diffFormValue(form.data, { ...form.data }, form.fields)).toEqual({});
+    // Which is the behaviour to want: a plan's YAML gains a key when someone
+    // chooses one, not because they looked at the panel. Choosing is what
+    // records it — including choosing the mode the plan is already in.
+    expect(form.toPatch({ overlayScale: "fixed" })).toEqual({ overlayScale: "fixed" });
+  });
+
   it("image opacity appears only when an image is set", () => {
     expect(floorImageForm({ image: "x.png" } as Floor).fields.map((x) => x.name)).toContain(
       "imageOpacity"
