@@ -109,12 +109,28 @@ export function hassRenderInputsChanged(
 /** Every entity id whose state can change what a plan draws (all floors). */
 export function collectWatchedEntities(c: FloorplanCardConfig): Set<string> {
   const ids = new Set<string>();
-  // Anything that reads the real sun has to watch it...
+  // Anything that reads the real sun has to watch it. Miss this and the plan
+  // is drawn once and then frozen at whatever the sun was doing when the card
+  // loaded — the same trap entity-bound furniture (#82) and areas (#6) each
+  // fell into, and in its worst form (#145) it is not even frozen: it lurches
+  // forward whenever some *other* watched entity moves, so it reads as
+  // intermittent rather than broken. HA replaces the state object when an
+  // attribute moves, so identity comparison in hassRenderInputsChanged
+  // catches it.
+  //
+  // Sun dimming (#113) reads the elevation. Sunlight reads both halves — the
+  // azimuth for the direction, the elevation for whether there is any light —
+  // but only while it follows the real sun: a pinned sunBearing reads neither
+  // (see sunBearingOf and sunlightStrengthOf), so it needs no subscription.
   if (c.sunDimming || (c.sunlight && !sunIsPinned(c))) ids.add("sun.sun");
   for (const f of getFloors(c)) {
     for (const o of f.openings) {
       if (o.entity) ids.add(o.entity);
       if (o.shutterEntity) ids.add(o.shutterEntity);
+      // The opening's second leaf (issues #145, #159). Exactly the trap named
+      // above, and the worst version of it: the leaf is not frozen, it catches
+      // up whenever some *other* watched entity moves, so it reads as
+      // intermittent rather than broken.
       if (o.secondaryEntity) ids.add(o.secondaryEntity);
       if (o.shutterSecondaryEntity) ids.add(o.shutterSecondaryEntity);
     }
@@ -125,14 +141,22 @@ export function collectWatchedEntities(c: FloorplanCardConfig): Set<string> {
       if ((it as any).hideEntity) ids.add((it as any).hideEntity);
       if ((it as any).hideStateEntity) ids.add((it as any).hideStateEntity);
 
-      // Every reading beyond the device's own state (issue #180)
+      // Every reading beyond the device's own state (issue #180), legacy
+      // second entity included — one pool, so one loop. Same trap as the
+      // opening's second leaf above: miss one and that line of the label is
+      // not frozen but *intermittent*, catching up only when some other
+      // watched entity happens to move.
       for (const r of itemReadings(it)) if (r.entity) ids.add(r.entity);
     }
-    // Entity-bound furniture (issue #82)
+    // Entity-bound furniture (issue #82) — without this the card never
+    // re-renders when the soil sensor moves, and the plant stays its
+    // first-painted color forever.
     for (const fu of f.furniture) {
       if (fu.entity) ids.add(fu.entity);
     }
-    // Entity-bound areas (issue #6)
+    // Entity-bound areas (issue #6) — same reasoning as furniture above: miss
+    // these and a room's color is painted once and then frozen, because
+    // shouldUpdate drops every hass tick that only moved an unwatched entity.
     for (const a of f.areas) {
       if (a.entity) ids.add(a.entity);
     }
@@ -963,9 +987,11 @@ export function renderGlowMask(
 }
 
 /**
- * Whether a device should be omitted from the **live card** right now.
- * Handles both the legacy 'hideWhenInactive' and the new conditional
- * hide logic (enableHideByEntity).
+ * Whether a device should be omitted from the **live card** right now
+ * (issue #55): it asked to appear only while active, and it isn't. An item
+ * with no entity can never be active, so a hide-when-inactive item without
+ * one stays hidden rather than becoming permanently invisible furniture the
+ * user forgot about — the editor still shows it, dimmed.
  */
 export function itemHiddenWhenInactive(
   item: Pick<FloorItem, "entity" | "hideWhenInactive" | "enableHideByEntity" | "hideEntity" | "hideMode" | "hideState" | "hideOperator" | "hideThreshold" | "hideInvert">,
@@ -1038,6 +1064,7 @@ export function itemBadgeLabel(
     hideStateOperator?: string;
     hideStateThreshold?: number;
     hideStateInvert?: boolean;
+    hideStateAttribute?: string; // Hinzugefügt (wird für evalValue benötigt)
   },
 ): string {
   const parts: string[] = [];
@@ -1086,7 +1113,16 @@ export function itemBadgeLabel(
   // Alle weiteren Readings/Attribute (itemReadings) ebenfalls nur hinzufügen, 
   // wenn das Ausblenden für den Text NICHT aktiv ist!
   if (!hideStateText) {
+    // Every other reading (issue #180), deliberately *not* gated on `showState`:
+    // Each is added only if it resolves to something, so the blank row the
+    // editor's "+" creates stays invisible until it is filled in.
     for (const reading of itemReadings(item)) {
+      // `showState: false` binds the entity without printing it — for a device
+      // whose badge shows that number and has no use for it twice. The reading
+      // keeps its place in the list either way, so the badge's index into it
+      // does not move (see ItemReading.showState).
+      if (reading.showState === false) continue;
+      
       const text = itemReadingText(hass, item, reading);
       if (text) parts.push(text);
     }
@@ -1118,7 +1154,10 @@ export function itemHasLabel(item: {
 }): boolean {
   if (item.showName) return true;
   if (item.showState ?? item.kind === "sensor") return true;
-  return itemReadings(item).some((r) => r.entity || r.attribute);
+  // Only the readings that actually print count: a device whose every extra
+  // entity is bound for the badge alone draws no label, and should not be
+  // offered a label's size and position.
+  return itemReadings(item).some((r) => r.showState !== false && (r.entity || r.attribute));
 }
 
 /**

@@ -880,9 +880,14 @@ export function itemLabelForm(it: FloorItem): FormSpec {
   };
 }
 
-/** Group 4: the badge — what it holds, which reading, and how big it is. */
+/**
+ * Group 4: the badge — what it holds, which reading, and how big it is.
+ *
+ * `badgeSource` is a hass-derived fact resolved at the call site rather than
+ * here: what the badge is reading *right now*, so "Badge reads" can open on it
+ * instead of on a guess. See {@link BadgeSourceInfo}.
+ */
 export function itemBadgeForm(it: FloorItem, badgeSource?: BadgeSourceInfo): FormSpec {
-  const readings = itemReadings(it);
   const fields: FormField[] = [
     {
       name: "badgeMode",
@@ -898,8 +903,17 @@ export function itemBadgeForm(it: FloorItem, badgeSource?: BadgeSourceInfo): For
       ),
     },
   ];
-
-  if (badgeModeOf(it) === "value" && (it.secondaryEntity || readings.length > 0)) {
+  // Which reading the value comes from (issue #136) — offered only where it is
+  // a real question: the badge has to be showing a value, and the device has to
+  // have more than one reading to choose between. Most devices never see this.
+  //
+  // The options name the entities rather than offering an "Automatic", the
+  // precedent from #127's dropdown: "auto" is a fact about the config format,
+  // not about what the user is looking at. One option per reading, not just
+  // "the second one" — a plug showing power, link quality and battery can badge
+  // whichever it likes (issue #180).
+  const readings = itemReadings(it);
+  if (badgeModeOf(it) === "value" && readings.length) {
     fields.push({
       name: "badgeEntity",
       label: "Badge reads",
@@ -917,48 +931,71 @@ export function itemBadgeForm(it: FloorItem, badgeSource?: BadgeSourceInfo): For
       ),
     });
   }
-
-  fields.push({
-    name: "size",
-    label: "Object size",
-    selector: { number: { min: 10, max: 200, step: 2, mode: "slider", unit_of_measurement: "px" } },
-  });
-
+  fields.push(
+    {
+      name: "size",
+      label: "Size",
+      selector: { number: { min: 16, max: 160, step: 2, mode: "slider", unit_of_measurement: "px" } },
+    },
+    angleField()
+  );
   return {
     fields,
     data: {
       badgeMode: badgeModeOf(it),
-      badgeEntity: it.badgeEntity ?? badgeSource?.source ?? "primary",
+      // The dropdown's values are strings, so the stored index (or the legacy
+      // "secondary") is spelled the same way here; toPatch turns it back into
+      // a number. Opens on what the badge is *actually* reading when nothing
+      // is chosen, which is the whole point of badgeSource (issue #136).
+      badgeEntity: String(badgeEntityIndex(it.badgeEntity) ?? badgeSource?.source ?? "primary"),
       size: it.size ?? DEFAULT_ITEM_SIZE,
-
+      angle: it.angle ?? 0,
     },
+    // "Badge shows" is the editor's spelling of three config keys (issue
+    // #127) — expand it back, carrying the ripple state off the item since
+    // that control lives in another group now.
     toPatch: (p) => {
-      if (!("badgeMode" in p)) return p;
-      const { badgeMode, ...rest } = p;
+      let out = p;
+      // The dropdown speaks strings; the config stores "primary" or an index.
+      // Written as a number so the legacy "secondary" spelling stops spreading
+      // to configs that never had it.
+      if ("badgeEntity" in out && typeof out.badgeEntity === "string" && out.badgeEntity !== "primary")
+        out = { ...out, badgeEntity: Number(out.badgeEntity) };
+      if (!("badgeMode" in out)) return out;
+      const { badgeMode, ...rest } = out;
       return {
         ...rest,
-        ...badgeModePatch(
-          (badgeMode as BadgeMode | undefined) ?? badgeModeOf(it),
-          itemHasRipple(it)
-        ),
+        ...badgeModePatch((badgeMode as BadgeMode | undefined) ?? badgeModeOf(it), itemHasRipple(it)),
       };
     },
   };
 }
 
-/** Group 6: ripple and cast light effects. */
-export function itemEffectsForm(it: FloorItem, deviceClass?: string): FormSpec | null {
-  const presence = isPresenceEntity(it.entity, deviceClass);
-  const isLight = it.kind === "light" || it.entity?.startsWith("light.");
+/**
+ * Group 6: the optional visual extras, each offered only where it means
+ * something — a ring on a thermostat says "someone is here", which is a lie,
+ * and nothing but a light has a colour to cast.
+ *
+ * Returns `undefined` when this device qualifies for neither, so the editor
+ * can leave the whole group out rather than print an empty heading.
+ *
+ * `deviceClass` is the entity's HA device class, resolved off `hass` at the
+ * call site as the openings already do theirs: it is what separates a motion
+ * sensor from a door contact, and so decides whether the ring is offered at
+ * all (issue #127).
+ */
+export function itemEffectsForm(it: FloorItem, deviceClass?: string): FormSpec | undefined {
   const ripple = itemHasRipple(it);
-  if (!presence && !isLight) return null;
-
+  const presence = isPresenceEntity(it.entity, deviceClass);
+  const lights = it.kind === "light" || it.entity?.startsWith("light.");
+  if (!presence && !lights) return undefined;
   const fields: FormField[] = [];
-
   if (presence) {
     fields.push({
       name: "ripple",
       label: "Ripple",
+      // "Presence detected" rather than "the sensor is on": this is offered to
+      // a device_tracker and a person too, and neither of those is a sensor.
       helper: "Draws a pulsing ring while presence is detected here",
       selector: { boolean: {} },
     });
@@ -972,8 +1009,7 @@ export function itemEffectsForm(it: FloorItem, deviceClass?: string): FormSpec |
       });
     }
   }
-
-  if (isLight) {
+  if (lights) {
     fields.push({
       name: "glow",
       label: "Cast light",
@@ -996,7 +1032,6 @@ export function itemEffectsForm(it: FloorItem, deviceClass?: string): FormSpec |
       );
     }
   }
-
   return {
     fields,
     data: {
@@ -1006,6 +1041,8 @@ export function itemEffectsForm(it: FloorItem, deviceClass?: string): FormSpec |
       glowRadius: it.glowRadius ?? DEFAULT_GLOW_RADIUS,
       glowColor: it.glowColor ?? "",
     },
+    // "Ripple" is the other half of #127's three-key spelling — same expansion
+    // as the badge group's, with the badge mode read off the item.
     toPatch: (p) => {
       if (!("ripple" in p)) return p;
       const { ripple: ring, ...rest } = p;
@@ -1014,6 +1051,7 @@ export function itemEffectsForm(it: FloorItem, deviceClass?: string): FormSpec |
   };
 }
 
+/** Group 7: when the device is drawn at all, and what a press does. */
 /** Group 7: when the device is drawn at all, and what a press does. */
 export function itemBehaviourForm(it: FloorItem): FormSpec {
   const fields: FormField[] = [
@@ -1186,17 +1224,7 @@ export function itemBehaviourForm(it: FloorItem): FormSpec {
       hold_action: it.hold_action,
       double_tap_action: it.double_tap_action,
     },
-    toPatch: (patch) => {
-      if (!("badgeMode" in patch) && !("ripple" in patch)) return patch;
-      const { badgeMode, ripple: ring, ...rest } = patch;
-      return {
-        ...rest,
-        ...badgeModePatch(
-          (badgeMode as BadgeMode | undefined) ?? badgeModeOf(it),
-          ring === undefined ? itemHasRipple(it) : !!ring
-        ),
-      };
-    },
+    toPatch: identity,
   };
 }
 
