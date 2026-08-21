@@ -1038,6 +1038,11 @@ export function itemBadgeLabel(
   // Each is added only if it resolves to something, so the blank row the
   // editor's "+" creates stays invisible until it is filled in.
   for (const reading of itemReadings(item)) {
+    // `showState: false` binds the entity without printing it — for a device
+    // whose badge shows that number and has no use for it twice. The reading
+    // keeps its place in the list either way, so the badge's index into it
+    // does not move (see ItemReading.showState).
+    if (reading.showState === false) continue;
     const text = itemReadingText(hass, item, reading);
     if (text) parts.push(text);
   }
@@ -1067,7 +1072,10 @@ export function itemHasLabel(item: {
 }): boolean {
   if (item.showName) return true;
   if (item.showState ?? item.kind === "sensor") return true;
-  return itemReadings(item).some((r) => r.entity || r.attribute);
+  // Only the readings that actually print count: a device whose every extra
+  // entity is bound for the badge alone draws no label, and should not be
+  // offered a label's size and position.
+  return itemReadings(item).some((r) => r.showState !== false && (r.entity || r.attribute));
 }
 
 /**

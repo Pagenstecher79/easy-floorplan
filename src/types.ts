@@ -346,6 +346,20 @@ export interface ItemReading {
   entity?: string;
   /** Attribute to read instead of the state. */
   attribute?: string;
+  /**
+   * Whether this reading's value joins the label line. Default `true`.
+   *
+   * `false` binds the entity to the device without printing it: the badge can
+   * still be pointed at it with {@link FloorItem.badgeEntity}, and the card
+   * still watches it for changes. That is the case this exists for — a smart
+   * plug that badges `1.2 kW` in its circle has no use for the same number
+   * repeated in text underneath.
+   *
+   * Hiding a reading does **not** renumber the others: `badgeEntity` indexes
+   * the whole list, visible or not, so switching this off cannot silently
+   * repoint the badge at a different entity.
+   */
+  showState?: boolean;
 }
 
 /**
@@ -446,7 +460,9 @@ export interface FloorItem {
    * they show. Resolve with `itemReadings`, never by reading either key
    * directly.
    *
-   * **Shown whether or not `showState` is**, which is the point of them. A plug
+   * **Shown whether or not the *device's* {@link FloorItem.showState} is**,
+   * which is the point of them — a row's own {@link ItemReading.showState} is
+   * the switch for hiding one of these. A plug
    * says on/off through its badge colour, so its owner wants Power · LQI ·
    * Battery and *not* the word "on" (I-G-1-1's case in discussion #173).
    * `showState` is about the device's *own state*; these are not it.
