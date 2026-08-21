@@ -3251,22 +3251,25 @@ export const SUN_REACH_REF = 30;
  * Widening as it travels is what a real patch does, and it costs one number
  * rather than a blur filter over the whole canvas.
  */
-export const SUN_SPREAD = 0.9;
+export const SUN_SPREAD = 0;
 /**
- * The penumbra, as nested fans. All three share the beam's mouth — at the
- * glass the edge of a sun patch really is sharp — and diverge as they
- * travel, so the edge softens with distance the way a real patch's does.
- * Layered same-colour fills compose, so the centre (all three) is brightest
- * and the rim (the widest alone) faintest: a three-step lateral falloff with
- * no blur filter, which this card has none of and is not getting one for
- * cosmetics. Three steps at these opacities read as smooth; the gradient
- * along the beam's length is doing the rest of the work.
+ * How much of a beam's width each long edge fades over, as a share of the
+ * gap. 0.28 each side leaves a bright core a little under half the gap wide.
+ *
+ * Fading *inward* rather than fanning outward, which is the correction that
+ * finally made this visible. A fan widens the beam past its gap — and the
+ * wall segments either side of that gap cast shadows running exactly parallel
+ * to the beam, so the fan spread straight into them and was clipped off at a
+ * hard line. Not bad luck with one plan: for any window in any wall the
+ * penumbra was guaranteed to be cut away precisely where it was supposed to
+ * soften the edge. Measured on a real card it was invisible, while every test
+ * still passed, because the tests asserted the bands were emitted and never
+ * that they survived compositing.
+ *
+ * Inside the beam nothing can clip it, and it stays honest: no light is drawn
+ * outside the gap the sun actually came through.
  */
-export const SUN_PENUMBRA: readonly { spread: number; opacity: number }[] = [
-  { spread: 0, opacity: 0.5 }, // the gap swept straight: the bright core
-  { spread: 0.45, opacity: 0.4 },
-  { spread: SUN_SPREAD, opacity: 0.35 }, // the full fan, faintest
-];
+export const SUN_EDGE_FEATHER = 0.28;
 /** How dark the plan goes where no sunlight lands. */
 export const SUN_SHADE = 0.16;
 /** How strongly the sunlit patches are tinted. */
@@ -3290,6 +3293,37 @@ export const SUN_SHADE_COLOR = "var(--fp-skin-sunshade, #000)";
  */
 export function sunReachFraction(value: unknown): number {
   return Math.max(0.02, Math.min(1.5, cssNumber(value, SUN_REACH)));
+}
+
+/**
+ * How far the light from `o` actually travels before a wall stops it, capped
+ * at `max`.
+ *
+ * The falloff has to be measured against this rather than against a fraction
+ * of the plan, or a room shallower than the reach gets a patch that is still
+ * at full brightness when the far wall cuts it — a hard bar across the floor,
+ * which is the thing issue #185 keeps being reopened about. Fading over the
+ * distance the light has to cross means the patch is always faint by the time
+ * it ends, whatever size the room is.
+ *
+ * The same idea as {@link glowReach} for a lamp, but a single ray rather than
+ * a visibility polygon: the beam is already bounded sideways by the wall
+ * shadows, so the only unknown is how far down the middle it gets.
+ */
+export function sunTravelDistance(
+  o: Opening,
+  dir: { x: number; y: number },
+  walls: readonly Wall[],
+  max: number,
+): number {
+  let nearest = max;
+  for (const w of walls) {
+    const t = rayWallHit(o.x, o.y, dir.x, dir.y, w);
+    // A wall the opening itself sits in reports a hit at ~0; the epsilon in
+    // rayWallHit already drops those, but a gap's own wall can still graze.
+    if (t !== undefined && t > 1 && t < nearest) nearest = t;
+  }
+  return nearest;
 }
 
 /**
@@ -3648,20 +3682,25 @@ export function renderSunlight(
   // length rather than sharing one gradient across the plan.
   const beams = openings.map((o, i) => {
     if (!(clear(o) > 0 && sunReachesOpening(o, walls, dir))) return undefined;
+    // How far this beam actually gets. The falloff is measured against this,
+    // so a patch is faint by the time a wall ends it however deep the room is.
+    const travel = sunTravelDistance(o, dir, walls, reach);
+    const [ga, gb] = openingEnds(o);
     return {
-      // One polygon per penumbra band, sharing the mouth and fanning apart.
-      // `spread` (the option) scales the whole family, so a plan that asks
-      // for a narrower fan narrows its penumbra with it.
-      bands: SUN_PENUMBRA.map((band) => ({
-        points: polyPoints(
-          sunBeamPolygon(o, dir, reach, clear(o), band.spread * (spread / SUN_SPREAD))
-        ),
-        opacity: band.opacity,
-      })),
+      points: polyPoints(sunBeamPolygon(o, dir, reach, clear(o), spread)),
       cx: o.x,
       cy: o.y,
+      travel,
+      // The gap's own ends: the edge fade runs across the beam from one to
+      // the other, so its iso-lines lie along the beam's long edges.
+      ax: ga.x,
+      ay: ga.y,
+      bx: gb.x,
+      by: gb.y,
       lightId: `${id}-b${i}`,
       shadeId: `${id}-s${i}`,
+      edgeId: `${id}-e${i}`,
+      edgeMaskId: `${id}-em${i}`,
     };
   });
   if (!beams.some((b) => b !== undefined)) return nothing;
@@ -3697,6 +3736,22 @@ export function renderSunlight(
   // the gradient is what says how bright it is. Same construction as
   // renderGlow, and the same middle stop as before so it does not read as a
   // textbook radial ramp.
+  // Soft long edges, drawn INSIDE the beam so no wall shadow can clip them.
+  // A gradient from one end of the gap to the other has its iso-lines along
+  // the beam's own edges, so this feathers both sides at once. Used as a
+  // mask, it multiplies the radial falloff rather than replacing it.
+  const edgeMask = (b: { edgeId: string; edgeMaskId: string; points: string;
+                         ax: number; ay: number; bx: number; by: number }) => svg`
+      <linearGradient id=${b.edgeId} gradientUnits="userSpaceOnUse"
+                      x1=${b.ax} y1=${b.ay} x2=${b.bx} y2=${b.by}>
+        <stop offset="0" stop-color="#000" />
+        <stop offset=${SUN_EDGE_FEATHER} stop-color="#fff" />
+        <stop offset=${1 - SUN_EDGE_FEATHER} stop-color="#fff" />
+        <stop offset="1" stop-color="#000" />
+      </linearGradient>
+      <mask id=${b.edgeMaskId} maskUnits="userSpaceOnUse">
+        <polygon points=${b.points} fill=${`url(#${b.edgeId})`} />
+      </mask>`;
   const fade = (gid: string, cx: number, cy: number, r: number, color: string) =>
     svg`<radialGradient id=${gid} gradientUnits="userSpaceOnUse"
                         cx=${cx} cy=${cy} r=${r}>
@@ -3715,13 +3770,13 @@ export function renderSunlight(
            back wherever a wall stands in one. The order is the whole logic. -->
       <mask id=${shadeId} maskUnits="userSpaceOnUse" x=${x} y=${y} width=${w} height=${h}>
         ${cover("#fff")}
-        ${beams.map((b) => (b ? fade(b.shadeId, b.cx, b.cy, reach, "#000") : nothing))}
+        ${beams.map((b) => (b ? fade(b.shadeId, b.cx, b.cy, b.travel, "#000") : nothing))}
+        ${beams.map((b) => (b ? edgeMask(b) : nothing))}
         ${beams.map((b) =>
           b
-            ? b.bands.map(
-                (band) => svg`<polygon points=${band.points}
-                  fill=${`url(#${b.shadeId})`} fill-opacity=${band.opacity} />`
-              )
+            ? svg`<g mask=${`url(#${b.edgeMaskId})`}>
+                    <polygon points=${b.points} fill=${`url(#${b.shadeId})`} />
+                  </g>`
             : nothing
         )}
         ${shadows.map((p) => shadowPoly(p, "#fff"))}
@@ -3746,15 +3801,15 @@ export function renderSunlight(
       <g mask=${`url(#${shadowId})`} opacity=${SUN_PATCH_OPACITY * strength}>
         ${beams.map((b) =>
           b
-            ? fade(b.lightId, b.cx, b.cy, reach, cssColorOr(paint.light, SUN_LIGHT_COLOR))
+            ? fade(b.lightId, b.cx, b.cy, b.travel, cssColorOr(paint.light, SUN_LIGHT_COLOR))
             : nothing
         )}
         ${beams.map((b) =>
           b
-            ? b.bands.map(
-                (band) => svg`<polygon class="fp-sunbeam" points=${band.points}
-                    fill=${`url(#${b.lightId})`} fill-opacity=${band.opacity} />`
-              )
+            ? svg`<g mask=${`url(#${b.edgeMaskId})`}>
+                    <polygon class="fp-sunbeam" points=${b.points}
+                             fill=${`url(#${b.lightId})`} />
+                  </g>`
             : nothing
         )}
       </g>

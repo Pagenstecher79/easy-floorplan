@@ -950,10 +950,13 @@ gap moved the same way. So:
   throws a narrow patch, not the one it would throw standing wide open. Sliding styles
   count the gap they actually clear rather than the distance a leaf travels, so a
   converging pair reads the same here as it draws;
-- a patch **fades out radially from its opening**, the way a lamp's pool does, and its
-  edges soften with distance: sharp at the glass, feathered by the time it lands. It
-  reaches `sunReach` of the plan's shorter side and is gone by the end of it, instead of
-  crossing the whole house at the brightness it started with;
+- a patch **fades out radially from its opening**, the way a lamp's pool does, over the
+  distance the light actually travels before a wall stops it — so it is always faint by
+  the time it ends, whatever size the room is. `sunReach` is the ceiling on that
+  distance, not a fixed span;
+- its **long edges are feathered** rather than cut, so a patch reads as light rather than
+  as tape. The softness is drawn inside the beam, so no light falls outside the gap the
+  sun came through;
 - while the plan follows the real sun, that reach **shortens as the sun climbs** — a patch
   is about as deep as the opening is tall over the tangent of the sun's angle, so a midday
   sun lays a short patch at your feet and an evening one rakes across the room. A pinned
