@@ -3771,7 +3771,6 @@ export function renderSunlight(
       <mask id=${shadeId} maskUnits="userSpaceOnUse" x=${x} y=${y} width=${w} height=${h}>
         ${cover("#fff")}
         ${beams.map((b) => (b ? fade(b.shadeId, b.cx, b.cy, b.travel, "#000") : nothing))}
-        ${beams.map((b) => (b ? edgeMask(b) : nothing))}
         ${beams.map((b) =>
           b
             ? svg`<g mask=${`url(#${b.edgeMaskId})`}>
@@ -3784,6 +3783,14 @@ export function renderSunlight(
   return svg`
     <defs>
       ${shade}
+      <!-- The soft long edges, defined out here rather than inside the shade
+           mask above. That mask is only built when a shade is wanted, and
+           when it was not (sunShade: false) these definitions vanished with
+           it while the beams went on referencing them — an undefined mask is
+           not an error in SVG, it simply does not apply, so the patches came
+           out at full strength with knife edges and nothing looked broken
+           enough to suspect. -->
+      ${beams.map((b) => (b ? edgeMask(b) : nothing))}
       <!-- The wall shadows again, for the warm patches themselves. -->
       <mask id=${shadowId} maskUnits="userSpaceOnUse" x=${x} y=${y} width=${w} height=${h}>
         ${cover("#fff")}

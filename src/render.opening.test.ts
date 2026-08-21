@@ -154,6 +154,32 @@ describe("renderSunlight — the markup, not just the geometry", () => {
     expect(shallow).toBeLessThan(deep);
   });
 
+  it("every id a beam references is actually defined, shade or no shade", () => {
+    // The bug this exists for: the edge masks were emitted INSIDE the shade
+    // mask, so turning the shade off deleted them while the beams went on
+    // pointing at them. An undefined mask is not an error in SVG — it simply
+    // does not apply — so the patches came back at full strength with knife
+    // edges and nothing looked broken enough to suspect. It shipped, and it
+    // was the one configuration the reporter was running.
+    //
+    // So this checks the graph rather than any one feature: whatever a beam
+    // points at has to exist, in both configurations.
+    for (const shade of [undefined, null]) {
+      const s = serialize(
+        renderSunlight([wall], [win], 400, 400, "sun", {
+          dir: sun, openAmount: () => 0, shutterOpen: () => undefined, shade,
+        })
+      );
+      const referenced = [...s.matchAll(/url\(#([^)]+)\)/g)].map((m) => m[1]!);
+      expect(referenced.length).toBeGreaterThan(0);
+      const defined = new Set(
+        [...s.matchAll(/<(?:mask|linearGradient|radialGradient|clipPath) id=([^\s>]+)/g)].map((m) => m[1]!)
+      );
+      const dangling = referenced.filter((id) => !defined.has(id));
+      expect(dangling).toEqual([]);
+    }
+  });
+
   it("a door ajar throws a narrower patch than one standing open", () => {
     // The end of the boolean, seen in the markup: the width of the polygon is
     // the width of the gap that is actually clear, and the wall keeps the
@@ -388,7 +414,10 @@ describe("renderSunlight — the markup, not just the geometry", () => {
     // The patches stay; the shade rect and the mask it needed are simply not
     // built, rather than emitted at zero opacity.
     expect(s).toContain("fp-sunbeam");
-    expect(s.match(/<mask /g)?.length).toBe(1);
+    // The wall-shadow mask and one edge mask per beam survive — the shade's
+    // own mask is the only one that goes. Declining the shade must not take
+    // the softness with it, which is exactly what it used to do.
+    expect(s.match(/<mask /g)?.length).toBe(2);
     expect(s.match(/<rect /g)?.length).toBe(1); // the surviving mask's ground
   });
 
