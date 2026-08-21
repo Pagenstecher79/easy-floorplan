@@ -1052,7 +1052,6 @@ export function itemEffectsForm(it: FloorItem, deviceClass?: string): FormSpec |
 }
 
 /** Group 7: when the device is drawn at all, and what a press does. */
-/** Group 7: when the device is drawn at all, and what a press does. */
 export function itemBehaviourForm(it: FloorItem): FormSpec {
   const fields: FormField[] = [
     {
@@ -1223,8 +1222,7 @@ export function itemBehaviourForm(it: FloorItem): FormSpec {
       tap_action: it.tap_action,
       hold_action: it.hold_action,
       double_tap_action: it.double_tap_action,
-    },
-    toPatch: identity,
+    }
   };
 }
 
