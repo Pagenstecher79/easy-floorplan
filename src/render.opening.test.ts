@@ -131,18 +131,40 @@ describe("renderSunlight — the markup, not just the geometry", () => {
     // and so cut diagonally across obliquely-lit beams, fading one side and
     // not the other.
     const s = light();
-    const g = s.match(/<radialGradient id=sun-b0[^>]*cx=([\d.]+) cy=([\d.]+) r=([\d.]+)/)!;
-    const [cx, cy, r] = [Number(g[1]), Number(g[2]), Number(g[3])];
     // It dies at zero, not at some residual value that would leave an edge.
     const stops = s.slice(s.indexOf("<radialGradient id=sun-b0"));
     expect(stops.slice(0, stops.indexOf("</radialGradient>"))).toContain('stop-opacity="0"');
-    // Every corner of the polygon is at or beyond that radius, so the light
-    // has already gone to nothing before the outline is reached.
-    const pts = s.match(/class="fp-sunbeam" points=([-\d., ]+)/)![1]!.trim().split(" ")
-      .map((q) => q.split(",").map(Number));
-    const far = pts.map(([x, y]) => Math.hypot(x! - cx, y! - cy)).sort((a, b) => b - a);
-    expect(far[0]).toBeGreaterThanOrEqual(r);
-    expect(far[1]).toBeGreaterThanOrEqual(r);
+    // Both FAR corners are at or beyond that radius, so the light has already
+    // gone to nothing before the outline is reached and what bounds the patch
+    // is the circle.
+    const farCorners = (markup: string) => {
+      const g2 = markup.match(/<radialGradient id=sun-b0[^>]*cx=([\d.]+) cy=([\d.]+) r=([\d.]+)/)!;
+      const [gx, gy, gr] = [Number(g2[1]), Number(g2[2]), Number(g2[3])];
+      const q = markup.match(/class="fp-sunbeam" points=([-\d., ]+)/)![1]!.trim().split(" ")
+        .map((t) => t.split(",").map(Number));
+      // points 0,1 are the mouth (at the gap, correctly full strength);
+      // 2,3 are the far edge.
+      return { r: gr, far: [2, 3].map((i) => Math.hypot(q[i]![0]! - gx, q[i]![1]! - gy)) };
+    };
+    const straight = farCorners(s);
+    expect(Math.min(...straight.far)).toBeGreaterThanOrEqual(straight.r);
+
+    // …and the same for light arriving OBLIQUELY, which is the case that
+    // matters. The falloff ends on a circle; the outline ends on a straight
+    // edge at a constant distance along the beam. They cross, and when the
+    // sun is square-on to the wall they happen to agree — so a fixture using
+    // perpendicular light passes while a real plan shows a hard bright edge
+    // where the near corner stops dead. That is exactly what shipped.
+    const oblique = farCorners(
+      serialize(
+        renderSunlight([wall], [win], 400, 400, "sun", {
+          dir: { x: 0.72, y: 0.69 },
+          openAmount: () => 0,
+          shutterOpen: () => undefined,
+        })
+      )
+    );
+    expect(Math.min(...oblique.far)).toBeGreaterThanOrEqual(oblique.r);
     // …and the two long edges are untouched, so neither side is favoured.
     expect(s).not.toContain("<linearGradient");
   });

@@ -3667,8 +3667,22 @@ export function renderSunlight(
     // How far this beam actually gets. The falloff is measured against this,
     // so a patch is faint by the time a wall ends it however deep the room is.
     const travel = sunTravelDistance(o, dir, walls, reach);
+    // The outline runs PAST that, by the width of the gap it came through.
+    //
+    // The two shapes disagree about what "the end" means: the falloff ends on
+    // a circle centred on the opening, the outline ends on a straight edge at
+    // a constant distance *along* the beam. They cross. Cut both at the same
+    // number and the near corner of that edge is still lit — measured on the
+    // reporter's own card, a corner 131 units out against a falloff reaching
+    // 163, so about a third of full strength, stopping dead. That was the
+    // sharp end; the fade was working the whole time behind it.
+    //
+    // Overshooting puts the entire far edge outside the circle, where the
+    // light has already gone. What bounds the patch is then the falloff
+    // alone, and a falloff bounded by nothing else is round.
+    const span = travel + o.length;
     return {
-      points: polyPoints(sunBeamPolygon(o, dir, reach, clear(o), spread)),
+      points: polyPoints(sunBeamPolygon(o, dir, span, clear(o), spread)),
       cx: o.x,
       cy: o.y,
       travel,
