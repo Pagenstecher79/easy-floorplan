@@ -234,3 +234,34 @@ image: ghcr.io/home-assistant/home-assistant:2026.7
 
 Then `npm run ha:reset` first — a config directory written by a newer Home
 Assistant is not always readable by an older one.
+
+## Moving the sun
+
+Sunlight is only visible while the sun is up, which makes it awkward to work
+on in the evening — and impossible to compare morning against afternoon
+without waiting half a day.
+
+`sun.sun` is computed from the instance's own coordinates and the real clock.
+The clock is not ours to move (the recorder writes against it, and jumping it
+backwards confuses it), but the coordinates are: solar time runs four minutes
+per degree of longitude, so moving the instance east or west is exactly
+equivalent to moving the sun.
+
+```bash
+node docker/sun-at.mjs --show   # where the sun is now
+node docker/sun-at.mjs 9        # mid-morning, long raking patches
+node docker/sun-at.mjs 12       # overhead: short patches at your feet
+node docker/sun-at.mjs 17.5     # low evening sun
+node docker/sun-at.mjs 2        # below the horizon: nothing drawn
+docker restart easy-floorplan-ha
+```
+
+It edits `latitude`/`longitude` in `config/.storage/core.config`, so it changes
+where the instance thinks it is — worth putting back if you care, and harmless
+if you don't, since nothing else here reads the location.
+
+The alternative, when the angle matters more than the hour, is to turn
+**Follow the real sun** off in the card editor and set **Sun from** yourself.
+A stated bearing keeps the light on around the clock by design, so it needs no
+container changes at all — but it pins the elevation at full, so it will not
+show you the dusk ramp or the way reach shortens as the sun climbs.
