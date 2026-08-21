@@ -926,6 +926,11 @@ export function itemBadgeForm(it: FloorItem, badgeSource?: BadgeSourceInfo): For
 
   fields.push(
     {
+      name: "size",
+      label: "Object size",
+      selector: { number: { min: 10, max: 200, step: 2, mode: "slider", unit_of_measurement: "px" } },
+    }, 
+    {
       name: "hideWhenInactive",
       label: "Only when active",
       helper: "Hide on the card while the entity is off/idle (still editable here)",
