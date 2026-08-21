@@ -880,13 +880,7 @@ export function itemLabelForm(it: FloorItem): FormSpec {
   };
 }
 
-/**
- * Group 4: the badge — what it holds, which reading, and how big it is.
- *
- * `badgeSource` is a hass-derived fact resolved at the call site rather than
- * here: what the badge is reading *right now*, so "Badge reads" can open on it
- * instead of on a guess. See {@link BadgeSourceInfo}.
- */
+/** Group 4: the badge — what it holds, which reading, and how big it is. */
 export function itemBadgeForm(it: FloorItem, badgeSource?: BadgeSourceInfo): FormSpec {
   const readings = itemReadings(it);
   const fields: FormField[] = [
@@ -924,114 +918,19 @@ export function itemBadgeForm(it: FloorItem, badgeSource?: BadgeSourceInfo): For
     });
   }
 
-  fields.push(
-    {
-      name: "size",
-      label: "Object size",
-      selector: { number: { min: 10, max: 200, step: 2, mode: "slider", unit_of_measurement: "px" } },
-    }, 
-    {
-      name: "hideWhenInactive",
-      label: "Only when active",
-      helper: "Hide on the card while the entity is off/idle (still editable here)",
-      selector: { boolean: {} },
-    },
-    {
-      name: "enableHideByEntity",
-      label: "Hide by condition",
-      selector: { boolean: {} }
-    }
-  );
-
-  if (it.enableHideByEntity) {
-    fields.push(
-      {
-        name: "hideEntity",
-        label: "Evaluation Entity (Optional)",
-        helper: "Leave empty to use the main object entity",
-        selector: { entity: {} }
-      },
-      {
-        name: "hideMode",
-        label: "Condition Type",
-        selector: { select: { options: [{value: "state", label: "State Match"}, {value: "threshold", label: "Numeric Threshold"}] } }
-      }
-    );
-
-    if (it.hideMode === "threshold") {
-      fields.push(
-        {
-          name: "hideOperator",
-          label: "Operator",
-          selector: { select: { mode: "dropdown", options: [{value: "<", label: "<"}, {value: "<=", label: "<="}, {value: "==", label: "=="}, {value: ">=", label: ">="}, {value: ">", label: ">"}] } }
-        },
-        {
-          name: "hideThreshold",
-          label: "Threshold Value",
-          selector: { number: { mode: "box", step: "any" } }
-        }
-      );
-    } else {
-      fields.push({
-        name: "hideState",
-        label: "Hide State",
-        helper: "Select the state that triggers the hide action",
-        selector: { state: { entity_id: it.hideEntity || it.entity } }
-      });
-    }
-
-    fields.push({
-      name: "hideInvert",
-      label: "Invert condition",
-      helper: "Hide when condition is NOT met",
-      selector: { boolean: {} }
-    });
-  }
-
-  fields.push(
-    { name: "showState", label: "Show state", selector: { boolean: {} } },
-    {
-      name: "showName",
-      label: "Show name",
-      helper: "Adds the device's name to the label line",
-      selector: { boolean: {} },
-    }
-  );
-
-  if (it.showName || (it.showState ?? it.kind === "sensor")) {
-    fields.push({
-      name: "labelSize",
-      label: "Label size",
-      selector: { number: { min: 8, max: 40, step: 1, mode: "slider", unit_of_measurement: "px" } },
-    });
-  };
+  fields.push({
+    name: "size",
+    label: "Object size",
+    selector: { number: { min: 10, max: 200, step: 2, mode: "slider", unit_of_measurement: "px" } },
+  });
 
   return {
     fields,
     data: {
-      entity: it.entity,
-      secondaryEntity: it.secondaryEntity ?? "",
-      attribute: it.attribute ?? "",
-      secondaryAttribute: it.secondaryAttribute ?? "",
-      name: it.name ?? "",
-      size: it.size ?? DEFAULT_ITEM_SIZE,
-      angle: it.angle ?? 0,
       badgeMode: badgeModeOf(it),
       badgeEntity: it.badgeEntity ?? badgeSource?.source ?? "primary",
-      hideWhenInactive: it.hideWhenInactive ?? false,
-      enableHideByEntity: it.enableHideByEntity ?? false,
-      hideEntity: it.hideEntity ?? "",
-      hideMode: it.hideMode ?? "state",
-      hideState: it.hideState ?? "",
-      hideOperator: it.hideOperator ?? ">",
-      hideThreshold: it.hideThreshold ?? 0,
-      hideInvert: it.hideInvert ?? false,
-      showState: it.showState ?? (it.kind === "sensor"),
-      showName: it.showName ?? false,
-      labelSize: it.labelSize ?? DEFAULT_LABEL_SIZE,
-      tap_action: it.tap_action,
-      hold_action: it.hold_action,
-      double_tap_action: it.double_tap_action,
+      size: it.size ?? DEFAULT_ITEM_SIZE,
+
     },
     toPatch: (p) => {
       if (!("badgeMode" in p)) return p;
@@ -1046,7 +945,7 @@ export function itemBadgeForm(it: FloorItem, badgeSource?: BadgeSourceInfo): For
     },
   };
 }
-/** Group 6: ripple and cast light effects. */
+
 /** Group 6: ripple and cast light effects. */
 export function itemEffectsForm(it: FloorItem, deviceClass?: string): FormSpec | null {
   const presence = isPresenceEntity(it.entity, deviceClass);
@@ -1114,37 +1013,175 @@ export function itemEffectsForm(it: FloorItem, deviceClass?: string): FormSpec |
     },
   };
 }
+
 /** Group 7: when the device is drawn at all, and what a press does. */
 export function itemBehaviourForm(it: FloorItem): FormSpec {
+  const fields: FormField[] = [
+    {
+      name: "hideWhenInactive",
+      label: "Only when active",
+      helper: "Hide on the card while the entity is off/idle (still editable here)",
+      selector: { boolean: {} },
+    },
+    {
+      name: "enableHideByEntity",
+      label: "Hide by condition (Entire Object)",
+      selector: { boolean: {} },
+    },
+  ];
+
+  if (it.enableHideByEntity) {
+    fields.push(
+      {
+        name: "hideEntity",
+        label: "Evaluation Entity (Optional)",
+        helper: "Leave empty to use the main object entity",
+        selector: { entity: {} },
+      },
+      {
+        name: "hideAttribute",
+        label: "Evaluation Attribute (Optional)",
+        helper: "Leave empty to use the entity's state instead of an attribute",
+        selector: { attribute: { entity_id: it.hideEntity || it.entity } },
+      },
+      {
+        name: "hideMode",
+        label: "Condition Type",
+        selector: { select: { options: [{ value: "state", label: "State Match" }, { value: "threshold", label: "Numeric Threshold" }] } },
+      }
+    );
+
+    if (it.hideMode === "threshold") {
+      fields.push(
+        {
+          name: "hideOperator",
+          label: "Operator",
+          selector: { select: { mode: "dropdown", options: [{ value: "<", label: "<" }, { value: "<=", label: "<=" }, { value: "==", label: "==" }, { value: ">=", label: ">=" }, { value: ">", label: ">" }] } },
+        },
+        {
+          name: "hideThreshold",
+          label: "Threshold Value",
+          selector: { number: { mode: "box", step: "any" } },
+        }
+      );
+    } else {
+      fields.push({
+        name: "hideState",
+        label: "Hide State",
+        helper: it.hideAttribute
+          ? "Enter the exact attribute value that triggers the hide action"
+          : "Select the state that triggers the hide action",
+        selector: it.hideAttribute
+          ? { text: {} }
+          : { state: { entity_id: it.hideEntity || it.entity } },
+      });
+    }
+
+    fields.push({
+      name: "hideInvert",
+      label: "Invert condition",
+      helper: "Hide when condition is NOT met",
+      selector: { boolean: {} },
+    });
+  }
+
+  // State text hiding condition
+  fields.push({
+    name: "enableHideStateByEntity",
+    label: "Hide State by condition",
+    helper: "Hides only the state text below the icon based on a condition",
+    selector: { boolean: {} },
+  });
+
+  if (it.enableHideStateByEntity) {
+    fields.push(
+      {
+        name: "hideStateEntity",
+        label: "State Eval. Entity (Optional)",
+        helper: "Leave empty to use the main object entity",
+        selector: { entity: {} },
+      },
+      {
+        name: "hideStateAttribute",
+        label: "State Eval. Attribute (Optional)",
+        helper: "Leave empty to use the entity's state instead of an attribute",
+        selector: { attribute: { entity_id: it.hideStateEntity || it.entity } },
+      },
+      {
+        name: "hideStateMode",
+        label: "Condition Type",
+        selector: { select: { options: [{ value: "state", label: "State Match" }, { value: "threshold", label: "Numeric Threshold" }] } },
+      }
+    );
+
+    if (it.hideStateMode === "threshold") {
+      fields.push(
+        {
+          name: "hideStateOperator",
+          label: "Operator",
+          selector: { select: { mode: "dropdown", options: [{ value: "<", label: "<" }, { value: "<=", label: "<=" }, { value: "==", label: "==" }, { value: ">=", label: ">=" }, { value: ">", label: ">" }] } },
+        },
+        {
+          name: "hideStateThreshold",
+          label: "Threshold Value",
+          selector: { number: { mode: "box", step: "any" } },
+        }
+      );
+    } else {
+      fields.push({
+        name: "hideStateMatch",
+        label: "Hide State Match",
+        helper: it.hideStateAttribute
+          ? "Enter the exact attribute value that triggers hiding the text"
+          : "Select the state that triggers hiding the text",
+        selector: it.hideStateAttribute
+          ? { text: {} }
+          : { state: { entity_id: it.hideStateEntity || it.entity } },
+      });
+    }
+
+    fields.push({
+      name: "hideStateInvert",
+      label: "Invert condition",
+      helper: "Hide text when condition is NOT met",
+      selector: { boolean: {} },
+    });
+  }
+
+  fields.push(
+    {
+      name: "tap_action",
+      label: "Tap action",
+      selector: { ui_action: { default_action: defaultItemAction(it.entity).action } },
+    },
+    { name: "hold_action", label: "Hold action", selector: { ui_action: { default_action: "none" } } },
+    {
+      name: "double_tap_action",
+      label: "Double-tap action",
+      selector: { ui_action: { default_action: "none" } },
+    }
+  );
+
   return {
-    fields: [
-      {
-        name: "tap_action",
-        label: "Tap action",
-        selector: { ui_action: { default_action: defaultItemAction(it.entity).action } },
-      },
-      { name: "hold_action", label: "Hold action", selector: { ui_action: { default_action: "none" } } },
-      {
-        name: "double_tap_action",
-        label: "Double-tap action",
-        selector: { ui_action: { default_action: "none" } },
-      },
-    ],
+    fields,
     data: {
       hideWhenInactive: it.hideWhenInactive ?? false,
-      
-      // New data keys
       enableHideByEntity: it.enableHideByEntity ?? false,
-      hideEntity: it.hideEntity,
+      hideEntity: it.hideEntity ?? "",
+      hideAttribute: it.hideAttribute ?? "",
       hideMode: it.hideMode ?? "state",
-      hideState: it.hideState,
+      hideState: it.hideState ?? "",
       hideOperator: it.hideOperator ?? ">",
-      hideThreshold: it.hideThreshold,
+      hideThreshold: it.hideThreshold ?? 0,
       hideInvert: it.hideInvert ?? false,
-      
-      showState: it.showState ?? false,
-      showName: it.showName ?? false,
-      labelSize: it.labelSize ?? DEFAULT_LABEL_SIZE,
+      enableHideStateByEntity: it.enableHideStateByEntity ?? false,
+      hideStateEntity: it.hideStateEntity ?? "",
+      hideStateAttribute: it.hideStateAttribute ?? "",
+      hideStateMode: it.hideStateMode ?? "state",
+      hideStateMatch: it.hideStateMatch ?? "",
+      hideStateOperator: it.hideStateOperator ?? ">",
+      hideStateThreshold: it.hideStateThreshold ?? 0,
+      hideStateInvert: it.hideStateInvert ?? false,
       tap_action: it.tap_action,
       hold_action: it.hold_action,
       double_tap_action: it.double_tap_action,
@@ -1156,7 +1193,7 @@ export function itemBehaviourForm(it: FloorItem): FormSpec {
         ...rest,
         ...badgeModePatch(
           (badgeMode as BadgeMode | undefined) ?? badgeModeOf(it),
-          ring === undefined ? ripple : !!ring
+          ring === undefined ? itemHasRipple(it) : !!ring
         ),
       };
     },

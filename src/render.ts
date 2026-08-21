@@ -109,49 +109,30 @@ export function hassRenderInputsChanged(
 /** Every entity id whose state can change what a plan draws (all floors). */
 export function collectWatchedEntities(c: FloorplanCardConfig): Set<string> {
   const ids = new Set<string>();
-  // Anything that reads the real sun has to watch it. Miss this and the plan
-  // is drawn once and then frozen at whatever the sun was doing when the card
-  // loaded — the same trap entity-bound furniture (#82) and areas (#6) each
-  // fell into, and in its worst form (#145) it is not even frozen: it lurches
-  // forward whenever some *other* watched entity moves, so it reads as
-  // intermittent rather than broken. HA replaces the state object when an
-  // attribute moves, so identity comparison in hassRenderInputsChanged
-  // catches it.
-  //
-  // Sun dimming (#113) reads the elevation. Sunlight reads both halves — the
-  // azimuth for the direction, the elevation for whether there is any light —
-  // but only while it follows the real sun: a pinned sunBearing reads neither
-  // (see sunBearingOf and sunlightStrengthOf), so it needs no subscription.
+  // Anything that reads the real sun has to watch it...
   if (c.sunDimming || (c.sunlight && !sunIsPinned(c))) ids.add("sun.sun");
   for (const f of getFloors(c)) {
     for (const o of f.openings) {
       if (o.entity) ids.add(o.entity);
       if (o.shutterEntity) ids.add(o.shutterEntity);
-      // The opening's second leaf (issues #145, #159). Exactly the trap named
-      // above, and the worst version of it: the leaf is not frozen, it catches
-      // up whenever some *other* watched entity moves, so it reads as
-      // intermittent rather than broken.
       if (o.secondaryEntity) ids.add(o.secondaryEntity);
       if (o.shutterSecondaryEntity) ids.add(o.shutterSecondaryEntity);
     }
     for (const it of f.items) {
       if (it.entity) ids.add(it.entity);
-      // Every reading beyond the device's own state (issue #180), legacy
-      // second entity included — one pool, so one loop. Same trap as the
-      // opening's second leaf above: miss one and that line of the label is
-      // not frozen but *intermittent*, catching up only when some other
-      // watched entity happens to move.
+      
+      // NEU: Damit die Karte sofort reagiert, wenn sich die Bedingung fürs Ausblenden ändert!
+      if ((it as any).hideEntity) ids.add((it as any).hideEntity);
+      if ((it as any).hideStateEntity) ids.add((it as any).hideStateEntity);
+
+      // Every reading beyond the device's own state (issue #180)
       for (const r of itemReadings(it)) if (r.entity) ids.add(r.entity);
     }
-    // Entity-bound furniture (issue #82) — without this the card never
-    // re-renders when the soil sensor moves, and the plant stays its
-    // first-painted color forever.
+    // Entity-bound furniture (issue #82)
     for (const fu of f.furniture) {
       if (fu.entity) ids.add(fu.entity);
     }
-    // Entity-bound areas (issue #6) — same reasoning as furniture above: miss
-    // these and a room's color is painted once and then frozen, because
-    // shouldUpdate drops every hass tick that only moved an unwatched entity.
+    // Entity-bound areas (issue #6)
     for (const a of f.areas) {
       if (a.entity) ids.add(a.entity);
     }
@@ -1048,27 +1029,69 @@ export function itemBadgeLabel(
     showState?: boolean;
     secondaryAttribute?: string;
     readings?: ItemReading[];
+    
+    // Felder für das bedingte Ausblenden des Textes
+    enableHideStateByEntity?: boolean;
+    hideStateEntity?: string;
+    hideStateMode?: string;
+    hideStateMatch?: string;
+    hideStateOperator?: string;
+    hideStateThreshold?: number;
+    hideStateInvert?: boolean;
   },
 ): string {
   const parts: string[] = [];
+  
   if (item.showName) {
     const friendly = hass?.states[item.entity]?.attributes?.friendly_name as string | undefined;
     const name = item.name || friendly || item.entity;
     if (name) parts.push(name);
   }
-  if (!!item.entity && (item.showState ?? item.kind === "sensor"))
-    parts.push(itemStateText(hass, item));
-  // Every other reading (issue #180), deliberately *not* gated on `showState`:
-  // the case they were asked for is a plug that says on/off through its badge
-  // colour and wants "1.2 kW · 84 · 5 min ago" without the word "on" in front
-  // of it. `showState` is about the device's own state, and these are not it.
-  //
-  // Each is added only if it resolves to something, so the blank row the
-  // editor's "+" creates stays invisible until it is filled in.
-  for (const reading of itemReadings(item)) {
-    const text = itemReadingText(hass, item, reading);
-    if (text) parts.push(text);
+
+  // --- PRÜFUNG: Ist die Ausblend-Bedingung für den Text erfüllt? ---
+  let hideStateText = false;
+  if (item.enableHideStateByEntity && hass) {
+    const evalEntity = item.hideStateEntity || item.entity;
+    const stateObj = hass.states[evalEntity];
+    
+    // Holt entweder den Wert des Attributs oder den normalen State
+    const evalValue = item.hideStateAttribute && stateObj?.attributes 
+      ? stateObj.attributes[item.hideStateAttribute] 
+      : stateObj?.state;
+    
+    let conditionMet = false;
+    if (item.hideStateMode === "threshold" && item.hideStateThreshold !== undefined && evalValue !== undefined) {
+      const numValue = Number(evalValue);
+      if (!isNaN(numValue)) {
+        switch (item.hideStateOperator) {
+          case "<": conditionMet = numValue < item.hideStateThreshold; break;
+          case "<=": conditionMet = numValue <= item.hideStateThreshold; break;
+          case "==": conditionMet = numValue === item.hideStateThreshold; break;
+          case ">=": conditionMet = numValue >= item.hideStateThreshold; break;
+          case ">": conditionMet = numValue > item.hideStateThreshold; break;
+        }
+      }
+    } else if (item.hideStateMatch !== undefined && evalValue !== undefined) {
+      conditionMet = String(evalValue).toLowerCase() === String(item.hideStateMatch).toLowerCase();
+    }
+    hideStateText = item.hideStateInvert ? !conditionMet : conditionMet;
   }
+  // -----------------------------------------------------------------
+
+  // Wenn die Bedingung NICHT greift, fügen wir den Haupt-State hinzu
+  if (!!item.entity && (item.showState ?? item.kind === "sensor") && !hideStateText) {
+    parts.push(itemStateText(hass, item));
+  }
+
+  // Alle weiteren Readings/Attribute (itemReadings) ebenfalls nur hinzufügen, 
+  // wenn das Ausblenden für den Text NICHT aktiv ist!
+  if (!hideStateText) {
+    for (const reading of itemReadings(item)) {
+      const text = itemReadingText(hass, item, reading);
+      if (text) parts.push(text);
+    }
+  }
+  
   return parts.join(" · ");
 }
 
