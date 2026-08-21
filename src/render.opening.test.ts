@@ -48,8 +48,7 @@ describe("renderSunlight — the markup, not just the geometry", () => {
 
   it("gives both masks a ground to subtract from, in one piece", () => {
     const s = light();
-    // shade + wall-shadow, plus one edge mask per beam (the soft long edges).
-    expect(s.match(/<mask /g)?.length).toBe(3);
+    expect(s.match(/<mask /g)?.length).toBe(2);
     // Three rects — a ground in each mask, and the shade itself — and every
     // one of them closes. That count is the whole point: a `<rect` with no `>`
     // is exactly the bug this describe exists for, and it leaves the masks
@@ -62,71 +61,13 @@ describe("renderSunlight — the markup, not just the geometry", () => {
 
   it("draws a patch per opening that admits light, and a shadow per wall piece", () => {
     const s = light();
-    // The window splits its wall in two, so two shadow pieces, appearing in
-    // both masks (4). The beam is drawn three times: once inside its own edge
-    // mask, once as a hole in the shade mask, once as the warm patch (3).
-    expect(s.match(/<polygon/g)?.length).toBe(7);
+    // The window splits its wall in two, so two shadow pieces, in both masks
+    // (4). The beam is a hole in the shade mask and the warm patch itself (2).
+    expect(s.match(/<polygon/g)?.length).toBe(6);
     expect(s.match(/fp-sunbeam/g)?.length).toBe(1);
     // Two windows in the same wall: a patch each.
     const two = light([win, { ...win, id: "o2", x: 320 } as Opening]);
     expect(two.match(/fp-sunbeam/g)?.length).toBe(2);
-  });
-
-  it("feathers its long edges from inside the beam (issue #185)", () => {
-    // The fan this replaces was clipped away by the wall the beam came
-    // through — its shadow runs exactly parallel to the beam, so the spread
-    // went straight into it. Measured on a real card the penumbra was
-    // invisible while every test still passed, because they asserted the
-    // bands were emitted, never that they survived compositing.
-    //
-    // Fading inward cannot be clipped: it lives inside the beam's own
-    // polygon, and no light is drawn outside the gap the sun came through.
-    const s = light();
-    const grad = s.match(/<linearGradient id=[^ ]+ [^>]*x1=([-\d.]+) y1=([-\d.]+) x2=([-\d.]+) y2=([-\d.]+)/);
-    expect(grad).not.toBeNull();
-    // Its axis is the gap itself — end to end — so its iso-lines lie along
-    // the beam's long edges and both sides feather at once.
-    const [ , x1, y1, x2, y2 ] = grad!.map(Number);
-    expect(Math.min(x1, x2)).toBeCloseTo(win.x - win.length / 2);
-    expect(Math.max(x1, x2)).toBeCloseTo(win.x + win.length / 2);
-    expect(y1).toBeCloseTo(win.y);
-    expect(y2).toBeCloseTo(win.y);
-    // Dark at both rims, clear through the middle.
-    // Quotes are optional here: the serializer quotes literal attributes and
-    // leaves interpolated ones bare.
-    const grads = s.slice(s.indexOf("<linearGradient"), s.indexOf("</linearGradient>"));
-    const stops = [...grads.matchAll(/<stop offset="?([\d.]+)"? stop-color="?(#[0-9a-f]{3,6})"?/g)]
-      .map((m) => ({ at: Number(m[1]), color: m[2] }));
-    expect(stops.length).toBe(4);
-    expect(stops[0]).toEqual({ at: 0, color: "#000" });
-    expect(stops[3]).toEqual({ at: 1, color: "#000" });
-    // …clear through the middle, and symmetric about it.
-    expect(stops[1]!.color).toBe("#fff");
-    expect(stops[2]!.color).toBe("#fff");
-    expect(stops[1]!.at).toBeCloseTo(1 - stops[2]!.at);
-    expect(stops[1]!.at).toBeGreaterThan(0);
-    // And the beam is drawn through that mask rather than raw.
-    expect(s).toMatch(/<g mask=url\(#[^)]*em0\)>\s*<polygon class="fp-sunbeam"/);
-  });
-
-  it("the softness survives the wall it came through, not just the markup", () => {
-    // The lesson from the fan: it WAS emitted, three bands of it, and every
-    // test passed — and on a real card it was invisible, because the wall
-    // segments beside the gap cast shadows parallel to the beam and clipped
-    // it off. So this asserts containment rather than existence: everything
-    // that softens the beam has to live inside the beam's own polygon, where
-    // no shadow can reach it.
-    const s = light();
-    const beamPts = s.match(/class="fp-sunbeam" points=([-\d., ]+)/)![1]!.trim();
-    // The edge mask is built from exactly the beam polygon — same points, so
-    // it cannot extend past it and cannot be trimmed by a shadow.
-    const maskBlock = s.slice(s.indexOf("<mask id=sun-em0"), s.indexOf("</mask>", s.indexOf("<mask id=sun-em0")));
-    expect(maskBlock).toContain(beamPts);
-    // And no drawn geometry reaches outside the gap the sun came through:
-    // every x in the beam lies within the window's own span.
-    const xs = beamPts.split(" ").map((q) => Number(q.split(",")[0]));
-    expect(Math.min(...xs)).toBeGreaterThanOrEqual(win.x - win.length / 2 - 0.01);
-    expect(Math.max(...xs)).toBeLessThanOrEqual(win.x + win.length / 2 + 0.01);
   });
 
   it("fades over the distance the light really travels, not a share of the plan", () => {
@@ -178,6 +119,32 @@ describe("renderSunlight — the markup, not just the geometry", () => {
       const dangling = referenced.filter((id) => !defined.has(id));
       expect(dangling).toEqual([]);
     }
+  });
+
+  it("ends in the gradient's circle, never in the polygon's straight edge", () => {
+    // What #185 asked for in the first place: "limit the reach of that
+    // sunlight, maybe radially, like we do for light bulbs". The falloff has
+    // to reach zero strictly INSIDE the beam's outline, so what terminates
+    // the visible patch is the gradient's circular arc and not the flat far
+    // edge of the polygon. Two earlier attempts failed here — a fan that the
+    // wall clipped, then a lateral feather whose gradient ran along the gap
+    // and so cut diagonally across obliquely-lit beams, fading one side and
+    // not the other.
+    const s = light();
+    const g = s.match(/<radialGradient id=sun-b0[^>]*cx=([\d.]+) cy=([\d.]+) r=([\d.]+)/)!;
+    const [cx, cy, r] = [Number(g[1]), Number(g[2]), Number(g[3])];
+    // It dies at zero, not at some residual value that would leave an edge.
+    const stops = s.slice(s.indexOf("<radialGradient id=sun-b0"));
+    expect(stops.slice(0, stops.indexOf("</radialGradient>"))).toContain('stop-opacity="0"');
+    // Every corner of the polygon is at or beyond that radius, so the light
+    // has already gone to nothing before the outline is reached.
+    const pts = s.match(/class="fp-sunbeam" points=([-\d., ]+)/)![1]!.trim().split(" ")
+      .map((q) => q.split(",").map(Number));
+    const far = pts.map(([x, y]) => Math.hypot(x! - cx, y! - cy)).sort((a, b) => b - a);
+    expect(far[0]).toBeGreaterThanOrEqual(r);
+    expect(far[1]).toBeGreaterThanOrEqual(r);
+    // …and the two long edges are untouched, so neither side is favoured.
+    expect(s).not.toContain("<linearGradient");
   });
 
   it("a door ajar throws a narrower patch than one standing open", () => {
@@ -313,9 +280,8 @@ describe("renderSunlight — the markup, not just the geometry", () => {
       // and no straight cut survives.
       expect(Number(g[3])).toBeGreaterThan(0);
     }
-    // A linearGradient is present too — it is the edge feather, which runs
-    // across the beam rather than along it.
-    expect(s.match(/<linearGradient/g)?.length).toBeGreaterThanOrEqual(1);
+    // Nothing linear left: the falloff is radial and it is the whole effect.
+    expect(s).not.toContain("<linearGradient");
     expect(s).toContain('stop-opacity="0"');
     // The beam is filled by that gradient rather than by a flat colour.
     expect(s).toMatch(/class="fp-sunbeam"[^>]*fill=url\(#/);
@@ -414,10 +380,7 @@ describe("renderSunlight — the markup, not just the geometry", () => {
     // The patches stay; the shade rect and the mask it needed are simply not
     // built, rather than emitted at zero opacity.
     expect(s).toContain("fp-sunbeam");
-    // The wall-shadow mask and one edge mask per beam survive — the shade's
-    // own mask is the only one that goes. Declining the shade must not take
-    // the softness with it, which is exactly what it used to do.
-    expect(s.match(/<mask /g)?.length).toBe(2);
+    expect(s.match(/<mask /g)?.length).toBe(1);
     expect(s.match(/<rect /g)?.length).toBe(1); // the surviving mask's ground
   });
 

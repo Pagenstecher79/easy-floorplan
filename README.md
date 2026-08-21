@@ -954,9 +954,9 @@ gap moved the same way. So:
   distance the light actually travels before a wall stops it — so it is always faint by
   the time it ends, whatever size the room is. `sunReach` is the ceiling on that
   distance, not a fixed span;
-- its **long edges are feathered** rather than cut, so a patch reads as light rather than
-  as tape. The softness is drawn inside the beam, so no light falls outside the gap the
-  sun came through;
+  What ends a patch is that circle, not the edge of any shape: the beam's outline always
+  extends past the point the light has faded to nothing, so you see the arc and never a
+  straight cut across the room;
 - while the plan follows the real sun, that reach **shortens as the sun climbs** — a patch
   is about as deep as the opening is tall over the tangent of the sun's angle, so a midday
   sun lays a short patch at your feet and an evening one rakes across the room. A pinned
