@@ -2124,6 +2124,28 @@ export class FloorplanCardEditor extends LitElement {
               <ha-icon icon="mdi:close"></ha-icon>
             </button>
           </div>
+          <!-- Under its own entity, because it is about that entity and not
+               about the device: an entity can be bound for the badge to read
+               and kept out of the label text. -->
+          <div class="row wide reading-show">
+            <label for=${`show-reading-${it.id}-${i}`}>Show on label</label>
+            <input
+              id=${`show-reading-${it.id}-${i}`}
+              type="checkbox"
+              title="Off keeps this entity bound — the badge can still read it — without printing it in the label"
+              .checked=${reading.showState !== false}
+              @change=${(e: Event) =>
+                patch(i, {
+                  // `true` is the default, so it stays out of the YAML.
+                  showState: (e.target as HTMLInputElement).checked ? undefined : false,
+                })}
+            />
+            <span class="hint"
+              >${reading.showState === false
+                ? "Bound but not printed — the badge can still read it."
+                : "Its value joins the label line."}</span
+            >
+          </div>
         `
       )}
       <div class="row wide state-color-add">
@@ -5923,6 +5945,17 @@ export class FloorplanCardEditor extends LitElement {
     .item-reading .reading-attr {
       flex: 0 0 130px;
       min-width: 0;
+    }
+    /* The visibility toggle belongs to the entity row above it, so it sits
+       tight under it and the gap goes after the pair instead. */
+    .reading-show {
+      margin-top: -4px;
+      margin-bottom: 12px;
+      padding-left: 4px;
+    }
+    .reading-show label {
+      flex: 0 0 auto;
+      font-size: 12px;
     }
     /* The panel ("Project" config) and the new element-edit area share the
        same boxed look so the two sections below the canvas read as siblings. */

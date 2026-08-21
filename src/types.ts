@@ -346,6 +346,20 @@ export interface ItemReading {
   entity?: string;
   /** Attribute to read instead of the state. */
   attribute?: string;
+  /**
+   * Whether this reading's value joins the label line. Default `true`.
+   *
+   * `false` binds the entity to the device without printing it: the badge can
+   * still be pointed at it with {@link FloorItem.badgeEntity}, and the card
+   * still watches it for changes. That is the case this exists for — a smart
+   * plug that badges `1.2 kW` in its circle has no use for the same number
+   * repeated in text underneath.
+   *
+   * Hiding a reading does **not** renumber the others: `badgeEntity` indexes
+   * the whole list, visible or not, so switching this off cannot silently
+   * repoint the badge at a different entity.
+   */
+  showState?: boolean;
 }
 
 /**
