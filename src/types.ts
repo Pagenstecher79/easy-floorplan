@@ -1163,25 +1163,32 @@ export interface FloorplanCardConfig extends LovelaceCardConfig {
   /**
    * How the HTML overlay (badges, labels, room names, text) is sized.
    *
-   * - **`plan`** (default) — canvas units, so the overlay scales with the
-   *   drawing exactly as the SVG does.
-   * - **`fixed`** — screen pixels, whatever size the card renders at.
+   * - **`plan`** — canvas units, so the overlay scales with the drawing
+   *   exactly as the SVG does. What {@link newPlanConfig} creates a card with.
+   * - **`fixed`** — screen pixels, whatever size the card renders at. What an
+   *   **absent** key means, and so what every plan drawn before this option
+   *   existed keeps rendering as.
    *
-   * `fixed` was the historic behaviour and the historic default, and it is
-   * right only when the card renders at roughly its canvas size — which is not
-   * something a plan gets to decide, since the dashboard hands it whatever
-   * width it has. Below that it comes apart: a plan drawn at 980 wide and
-   * rendered 510 wide draws every wall at half size while a 14px room name
-   * stays 14px, so labels collide with the badges and each other, and a
-   * carefully spaced cluster of badges overlaps (issue #179).
+   * The split is deliberate and is the whole shape of issue #192. `plan` is
+   * the better way to lay a plan out: `fixed` agrees with the drawing only
+   * while the card renders at roughly its canvas size, which is not something
+   * a plan gets to decide, since the dashboard hands it whatever width it has.
+   * Below that the two layers come apart — a plan drawn 980 wide and rendered
+   * 510 wide draws every wall at half size while a 14px room name stays 14px,
+   * so labels collide with the badges and each other and a carefully spaced
+   * cluster of badges overlaps (issue #179).
    *
-   * `plan` makes the two layers shrink together, which is what makes the thing
-   * a drawing rather than a drawing with fixed-size furniture on it. It is now
-   * the default, and that **does** change how an existing card looks: an
-   * overlay that was pinned to px now tracks the plan. The trade runs the other
-   * way at the extremes — see the README's "Where it helps, and where it
-   * costs" — so `fixed` stays a real choice for a card rendered much larger
-   * than its canvas, or a wall tablet that wants a px floor under its text.
+   * None of which makes it safe to *infer*. 1.5.0 made `plan` the answer for a
+   * missing key and resized the overlay of every plan in the field, badges
+   * landing at a third of their size on a card narrower than its canvas — and
+   * nobody could have opted out, because the editor omitted `fixed` as the
+   * default of the day, so a plan that had chosen pixels stored exactly what a
+   * plan that had never been asked stored. A new default belongs in new
+   * configs: see {@link newPlanConfig} and {@link normalizeOverlayScale}.
+   *
+   * `fixed` is also a real choice on its own merits, for a card rendered much
+   * larger than its canvas or a wall tablet that wants a px floor under its
+   * text. See the README's "Where it helps, and where it costs".
    */
   overlayScale?: OverlayScale;
   /** Canvas background color (CSS / hex). Falls back to the skin's paper, then the card background. */
@@ -1529,6 +1536,27 @@ export function emptyConfig(type: string): FloorplanCardConfig {
     trackers: [],
     areas: [],
   };
+}
+
+/**
+ * What a **newly created** card starts as — the config HA's card picker gets
+ * back from `getStubConfig`.
+ *
+ * Deliberately not the same thing as {@link emptyConfig}, which backfills
+ * missing keys on *any* config the editor is handed, existing plans included.
+ * Anything stated here is stated about new plans only; putting it in
+ * `emptyConfig` would apply it to every plan ever drawn, the moment its author
+ * next opened the editor.
+ *
+ * That distinction is the whole point of this function. `overlayScale: plan`
+ * is the better way to lay a plan out (issue #179) and so it is what a new
+ * plan is made with — but it is written into the config rather than inferred
+ * from a missing key, because inference reaches backwards: 1.5.0 changed what
+ * an absent `overlayScale` meant and resized the overlay of every plan in the
+ * field (issue #192). A new default belongs in new configs.
+ */
+export function newPlanConfig(): Partial<FloorplanCardConfig> {
+  return { overlayScale: "plan" };
 }
 
 export function uid(prefix: string): string {

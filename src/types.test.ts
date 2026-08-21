@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
+import { normalizeOverlayScale } from "./render";
 import {
   emptyConfig,
+  newPlanConfig,
   makeFloor,
   getFloors,
   resolveSnap,
@@ -78,6 +80,31 @@ describe("emptyConfig", () => {
     expect(c.openings).toEqual([]);
     expect(c.items).toEqual([]);
     expect(c.trackers).toEqual([]);
+  });
+
+  it("backfills nothing about how the plan is laid out", () => {
+    // It runs over *every* config the editor is handed, existing plans
+    // included, so anything stated here is stated about all of them. The
+    // overlay mode in particular: put it here and every plan ever drawn
+    // acquires the new default the next time its author opened the editor,
+    // which is the shape of issue #192.
+    expect(emptyConfig("t").overlayScale).toBeUndefined();
+  });
+});
+
+describe("newPlanConfig (issue #192)", () => {
+  it("states the new default rather than leaving it to be inferred", () => {
+    // Canvas units are what a plan wants (#179), so a new plan is created with
+    // them — written down, so the choice belongs to that plan.
+    expect(newPlanConfig().overlayScale).toBe("plan");
+  });
+
+  it("reaches new plans and only new plans", () => {
+    // The pair that has to hold: a created plan renders in canvas units, and a
+    // config that predates the option renders in the pixels it was drawn in.
+    // 1.5.0 had one lever for both and moved everybody.
+    expect(normalizeOverlayScale(newPlanConfig().overlayScale)).toBe("plan");
+    expect(normalizeOverlayScale(emptyConfig("t").overlayScale)).toBe("fixed");
   });
 });
 

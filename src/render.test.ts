@@ -1052,16 +1052,18 @@ describe("editorItemLabel (#135)", () => {
 });
 
 describe("overlay scaling", () => {
-  it("normalizes the mode, defaulting anything unrecognized to plan", () => {
-    // The default is canvas units: a plan is shown at whatever width the
-    // dashboard has, so pinning the overlay to px only agrees with the drawing
-    // by luck. `fixed` is now the value you have to ask for by name.
-    expect(normalizeOverlayScale("fixed")).toBe("fixed");
+  it("reads a missing mode as the pixels every older plan was laid out in", () => {
+    // Canvas units are the better answer and new plans are *created* with them
+    // (getStubConfig writes the key). Inferring them from silence is a
+    // different thing entirely: it restyles every plan already in the field on
+    // upgrade, which is what 1.5.0 did (issue #192). Silence means what it has
+    // always meant.
     expect(normalizeOverlayScale("plan")).toBe("plan");
-    expect(normalizeOverlayScale(undefined)).toBe("plan");
-    expect(normalizeOverlayScale("FIXED")).toBe("plan");
-    expect(normalizeOverlayScale(1)).toBe("plan");
-    expect(normalizeOverlayScale("")).toBe("plan");
+    expect(normalizeOverlayScale("fixed")).toBe("fixed");
+    expect(normalizeOverlayScale(undefined)).toBe("fixed");
+    expect(normalizeOverlayScale("PLAN")).toBe("fixed");
+    expect(normalizeOverlayScale(1)).toBe("fixed");
+    expect(normalizeOverlayScale("")).toBe("fixed");
   });
 
   it("emits screen pixels under fixed and canvas units under plan", () => {
@@ -2771,23 +2773,16 @@ describe("sunlight through the openings", () => {
     expect(SUN_REACH).toBeLessThan(0.5);
   });
 
-  it("fans as it travels, symmetrically about the light", () => {
+  it("sweeps the gap straight along the light, at the gap's own width", () => {
+    // No fan. An earlier attempt widened the beam as it travelled, to imitate
+    // scattering; the wall segments either side of the gap cast shadows
+    // exactly parallel to the beam, so the extra width was clipped away every
+    // time. Softness comes from the falloff now, which nothing can clip.
     const o = win();
-    const straight = sunBeamPolygon(o, down, 200, 1, 0);
-    const fanned = sunBeamPolygon(o, down, 200, 1, 1);
-    const widthOf = (p: { x: number }[], i: number, j: number) => Math.abs(p[j]!.x - p[i]!.x);
-    // Same mouth: it still leaves the gap it came through.
-    expect(widthOf(fanned, 0, 1)).toBeCloseTo(widthOf(straight, 0, 1));
-    // …and a wider far edge, which is what scattering looks like.
-    expect(widthOf(fanned, 3, 2)).toBeCloseTo(widthOf(straight, 3, 2) * 2);
-    // Symmetric about the opening's centre, so the fan follows the light
-    // rather than leaning to one side of it.
-    const mid = (o.x * 2) / 2;
-    expect((fanned[2]!.x + fanned[3]!.x) / 2).toBeCloseTo(mid);
-    // It reaches exactly as far as before — wider, not longer.
-    expect(fanned[3]!.y - fanned[0]!.y).toBeCloseTo(straight[3]!.y - straight[0]!.y);
-    // Spread defaults to off, so every existing caller gets the old shape.
-    expect(sunBeamPolygon(o, down, 200, 1)).toEqual(straight);
+    const p = sunBeamPolygon(o, down, 200, 1);
+    const width = (i: number, j: number) => Math.abs(p[j]!.x - p[i]!.x);
+    expect(width(0, 1)).toBeCloseTo(width(3, 2));
+    expect(width(0, 1)).toBeCloseTo(o.length);
   });
 
   it("shortens the patch as the sun climbs, and lengthens it at dusk", () => {

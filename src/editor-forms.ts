@@ -1517,10 +1517,11 @@ export function projectDisplayForm(c: FloorplanCardConfig): FormSpec {
       {
         name: "overlayScale",
         label: "Badge & label size",
-        // The default first, and the helper describes the *exception* now:
-        // canvas units are what a plan wants unless it is being shown bigger
-        // than it was drawn.
-        helper: `Canvas units scale badges and labels with the drawing. Fixed pixels suit a card rendered larger than its ${c.width}-wide canvas, or a wall tablet`,
+        // Canvas units lead because they are what a plan wants and what a new
+        // plan is created with; fixed pixels are what an older plan is still
+        // laid out in, and the right answer for a card shown bigger than its
+        // canvas or a wall tablet that wants a px floor under its text.
+        helper: `Canvas units scale badges and labels with the drawing. Fixed pixels keep their size whatever width the card gets — suits a card rendered larger than its ${c.width}-wide canvas, or a wall tablet`,
         selector: dropdown(opt("plan", "Canvas units"), opt("fixed", "Fixed pixels")),
       },
       {
@@ -1554,10 +1555,13 @@ export function projectDisplayForm(c: FloorplanCardConfig): FormSpec {
       if ("rotation" in out)
         // Stored as a number; 0 means "not rotated", so keep it out of the YAML.
         out = { ...out, rotation: out.rotation === "0" ? undefined : Number(out.rotation) };
-      // Canvas units are the default now, so they are what stays out of the
-      // YAML — and "fixed" is what has to be written down.
-      if ("overlayScale" in out && out.overlayScale === "plan")
-        out = { ...out, overlayScale: undefined };
+      // Both values are written down, which is the one field here that breaks
+      // the "defaults stay out of the YAML" habit — deliberately. Omitting the
+      // default is what let 1.5.0 restyle every existing plan by changing its
+      // mind about what silence meant (issue #192): a plan that had *chosen*
+      // fixed pixels stored nothing, so it could not be told from one that had
+      // never been asked. Recording the answer makes a plan say how it renders,
+      // whatever any future default decides.
       // As are the ordinary header and the dimmed offline device — every
       // default here stays out of the YAML, so a config only ever records the
       // choices someone actually made.

@@ -27,6 +27,7 @@ import {
   PRESS_OUT_MS,
   getFloors,
   trackerPresenceDetected,
+  newPlanConfig,
 } from "./types";
 import {
   WALL_THICKNESS,
@@ -238,7 +239,12 @@ export class FloorplanCard extends LitElement {
   public static getStubConfig(): Partial<FloorplanCardConfig> {
     // Minimal on purpose: the editor migrates to the floors model on first
     // edit, and defaults (width/height/grid) backfill in setConfig.
-    return {};
+    //
+    // …except what a *new* plan is deliberately made with, which is
+    // {@link newPlanConfig}'s to state: written into the config rather than
+    // inferred from a missing key, so it reaches new plans and only new plans
+    // (issue #192).
+    return newPlanConfig();
   }
 
   /**
@@ -1429,9 +1435,17 @@ export class FloorplanCard extends LitElement {
     .fp-sunlight {
       pointer-events: none;
     }
-    .fp-sunbeam {
-      fill: var(--fp-skin-sunlight, #ffd9a0);
-    }
+    /* No fill declaration here, deliberately. CSS beats the presentation attribute — the same rule the
+       wall below relies on — and a patch of sunlight is filled with a
+       *gradient* the renderer builds per opening. A flat colour declared here
+       silently discards it: the markup keeps saying url(#…), the computed
+       style says rgb(…), and the light comes out as a hard slab no matter
+       what shape the falloff is given. That is issue #185, and it survived
+       four rewrites of the falloff because every one of them was correct and
+       none of them was ever used.
+
+       The skin still applies: --fp-skin-sunlight is read by SUN_LIGHT_COLOR
+       and lands on the gradient's own stops. */
     .wall {
       stroke: var(--fp-skin-wall, var(--primary-text-color));
       /* CSS beats the presentation attribute, so the skin sets the wall's
