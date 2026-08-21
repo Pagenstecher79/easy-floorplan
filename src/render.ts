@@ -3252,10 +3252,25 @@ export const SUN_REACH_REF = 30;
  * rather than a blur filter over the whole canvas.
  */
 export const SUN_SPREAD = 0.9;
+/**
+ * The penumbra, as nested fans. All three share the beam's mouth — at the
+ * glass the edge of a sun patch really is sharp — and diverge as they
+ * travel, so the edge softens with distance the way a real patch's does.
+ * Layered same-colour fills compose, so the centre (all three) is brightest
+ * and the rim (the widest alone) faintest: a three-step lateral falloff with
+ * no blur filter, which this card has none of and is not getting one for
+ * cosmetics. Three steps at these opacities read as smooth; the gradient
+ * along the beam's length is doing the rest of the work.
+ */
+export const SUN_PENUMBRA: readonly { spread: number; opacity: number }[] = [
+  { spread: 0, opacity: 0.5 }, // the gap swept straight: the bright core
+  { spread: 0.45, opacity: 0.4 },
+  { spread: SUN_SPREAD, opacity: 0.35 }, // the full fan, faintest
+];
 /** How dark the plan goes where no sunlight lands. */
 export const SUN_SHADE = 0.16;
 /** How strongly the sunlit patches are tinted. */
-export const SUN_PATCH_OPACITY = 0.3;
+export const SUN_PATCH_OPACITY = 0.37;
 /**
  * Default colours: the same warm white a lamp with no colour of its own casts
  * (issue #6), and a plain black for the shade so it darkens whatever is under
@@ -3634,11 +3649,17 @@ export function renderSunlight(
   const beams = openings.map((o, i) => {
     if (!(clear(o) > 0 && sunReachesOpening(o, walls, dir))) return undefined;
     return {
-      points: polyPoints(sunBeamPolygon(o, dir, reach, clear(o), spread)),
-      x1: o.x,
-      y1: o.y,
-      x2: o.x + dir.x * reach,
-      y2: o.y + dir.y * reach,
+      // One polygon per penumbra band, sharing the mouth and fanning apart.
+      // `spread` (the option) scales the whole family, so a plan that asks
+      // for a narrower fan narrows its penumbra with it.
+      bands: SUN_PENUMBRA.map((band) => ({
+        points: polyPoints(
+          sunBeamPolygon(o, dir, reach, clear(o), band.spread * (spread / SUN_SPREAD))
+        ),
+        opacity: band.opacity,
+      })),
+      cx: o.x,
+      cy: o.y,
       lightId: `${id}-b${i}`,
       shadeId: `${id}-s${i}`,
     };
@@ -3663,18 +3684,26 @@ export function renderSunlight(
   // without this the light leaks along both edges of every wall it passes.
   const shadowPoly = (p: string, paint: string) =>
     svg`<polygon points=${p} fill=${paint} stroke=${paint} stroke-width=${WALL_THICKNESS} />`;
-  // A patch is brightest where it comes in and gone by the end of its reach —
-  // the half of issue #185 that geometry alone cannot fix, since a fanned
-  // beam at flat opacity still ends in a straight edge across the room. The
-  // middle stop keeps it from reading as a linear ramp, which looks like a
-  // gradient rather than like light.
-  const fade = (gid: string, x1: number, y1: number, x2: number, y2: number, color: string) =>
-    svg`<linearGradient id=${gid} gradientUnits="userSpaceOnUse"
-                        x1=${x1} y1=${y1} x2=${x2} y2=${y2}>
+  // A patch is brightest at the opening and dies out in EVERY direction from
+  // it — radially, the way a lamp's pool does, which is what issue #185
+  // asked for by name. The first cut at this faded along the beam's length
+  // only, and it was not enough: the sides stayed knife-cuts at full
+  // brightness from mouth to tip, so a beam still read as a stripe laid on
+  // the floor, and wherever a wall's shadow cut one short the end was a hard
+  // diagonal. A radial falloff centred on the opening fixes all three at
+  // once — the far end rounds off before the polygon runs out, the sides dim
+  // with distance, and a shadow cut lands where the light is already faint.
+  // The polygon's job shrinks to bounding the light (the fan, the walls);
+  // the gradient is what says how bright it is. Same construction as
+  // renderGlow, and the same middle stop as before so it does not read as a
+  // textbook radial ramp.
+  const fade = (gid: string, cx: number, cy: number, r: number, color: string) =>
+    svg`<radialGradient id=${gid} gradientUnits="userSpaceOnUse"
+                        cx=${cx} cy=${cy} r=${r}>
           <stop offset="0" stop-color=${color} stop-opacity="1" />
           <stop offset="0.45" stop-color=${color} stop-opacity="0.55" />
           <stop offset="1" stop-color=${color} stop-opacity="0" />
-        </linearGradient>`;
+        </radialGradient>`;
   // Only built when it is going to be used: the shade mask is the one that
   // needs every beam *and* every shadow, so declining the shade halves the
   // shapes this emits rather than hiding them behind an opacity of zero.
@@ -3686,9 +3715,14 @@ export function renderSunlight(
            back wherever a wall stands in one. The order is the whole logic. -->
       <mask id=${shadeId} maskUnits="userSpaceOnUse" x=${x} y=${y} width=${w} height=${h}>
         ${cover("#fff")}
-        ${beams.map((b) => (b ? fade(b.shadeId, b.x1, b.y1, b.x2, b.y2, "#000") : nothing))}
+        ${beams.map((b) => (b ? fade(b.shadeId, b.cx, b.cy, reach, "#000") : nothing))}
         ${beams.map((b) =>
-          b ? svg`<polygon points=${b.points} fill=${`url(#${b.shadeId})`} />` : nothing
+          b
+            ? b.bands.map(
+                (band) => svg`<polygon points=${band.points}
+                  fill=${`url(#${b.shadeId})`} fill-opacity=${band.opacity} />`
+              )
+            : nothing
         )}
         ${shadows.map((p) => shadowPoly(p, "#fff"))}
       </mask>`;
@@ -3712,13 +3746,15 @@ export function renderSunlight(
       <g mask=${`url(#${shadowId})`} opacity=${SUN_PATCH_OPACITY * strength}>
         ${beams.map((b) =>
           b
-            ? fade(b.lightId, b.x1, b.y1, b.x2, b.y2, cssColorOr(paint.light, SUN_LIGHT_COLOR))
+            ? fade(b.lightId, b.cx, b.cy, reach, cssColorOr(paint.light, SUN_LIGHT_COLOR))
             : nothing
         )}
         ${beams.map((b) =>
           b
-            ? svg`<polygon class="fp-sunbeam" points=${b.points}
-                          fill=${`url(#${b.lightId})`} />`
+            ? b.bands.map(
+                (band) => svg`<polygon class="fp-sunbeam" points=${band.points}
+                    fill=${`url(#${b.lightId})`} fill-opacity=${band.opacity} />`
+              )
             : nothing
         )}
       </g>
