@@ -136,16 +136,13 @@ export function collectWatchedEntities(c: FloorplanCardConfig): Set<string> {
     }
     for (const it of f.items) {
       if (it.entity) ids.add(it.entity);
-      
-      // NEU: Damit die Karte sofort reagiert, wenn sich die Bedingung fürs Ausblenden ändert!
-      if ((it as any).hideEntity) ids.add((it as any).hideEntity);
-      if ((it as any).hideStateEntity) ids.add((it as any).hideStateEntity);
-
       // Every reading beyond the device's own state (issue #180), legacy
       // second entity included — one pool, so one loop. Same trap as the
       // opening's second leaf above: miss one and that line of the label is
       // not frozen but *intermittent*, catching up only when some other
       // watched entity happens to move.
+      if ((it as any).hideEntity) ids.add((it as any).hideEntity);
+      if ((it as any).hideStateEntity) ids.add((it as any).hideStateEntity);
       for (const r of itemReadings(it)) if (r.entity) ids.add(r.entity);
     }
     // Entity-bound furniture (issue #82) — without this the card never
@@ -1055,16 +1052,14 @@ export function itemBadgeLabel(
     showState?: boolean;
     secondaryAttribute?: string;
     readings?: ItemReading[];
-    
-    // fields for conditional hiding of the text
     enableHideStateByEntity?: boolean;
     hideStateEntity?: string;
+    hideStateAttribute?: string;
     hideStateMode?: string;
-    hideStateMatch?: string;
-    hideStateOperator?: string;
     hideStateThreshold?: number;
+    hideStateOperator?: string;
+    hideStateMatch?: string;
     hideStateInvert?: boolean;
-    hideStateAttribute?: string; 
   },
 ): string {
   const parts: string[] = [];
@@ -1075,11 +1070,11 @@ export function itemBadgeLabel(
     if (name) parts.push(name);
   }
 
-  // --- CHECK: Is the hiding condition for the text met? ---
+  // Bedingung prüfen
   let hideStateText = false;
   if (item.enableHideStateByEntity && hass) {
     const evalEntity = item.hideStateEntity || item.entity;
-    const stateObj = evalEntity ? hass.states[evalEntity] : undefined;
+    const stateObj = hass.states[evalEntity];
     
     const evalValue = item.hideStateAttribute && stateObj?.attributes 
       ? stateObj.attributes[item.hideStateAttribute] 
@@ -1102,30 +1097,21 @@ export function itemBadgeLabel(
     }
     hideStateText = item.hideStateInvert ? !conditionMet : conditionMet;
   }
-  // -----------------------------------------------------------------
 
-  // if the condition is not met, add the main state
+  // Haupt-Status nur hinzufügen, wenn showState aktiv und Bedingung NICHT erfüllt
   if (!!item.entity && (item.showState ?? item.kind === "sensor") && !hideStateText) {
     parts.push(itemStateText(hass, item));
   }
 
-  // add all other readings/attributes (itemReadings) only if the hiding condition for the text is not active!
+  // Zusätzliche Readings NUR hinzufügen, wenn die Ausblende-Bedingung NICHT zutrifft!
   if (!hideStateText) {
-    // Every other reading (issue #180), deliberately *not* gated on `showState`:
-    // Each is added only if it resolves to something, so the blank row the
-    // editor's "+" creates stays invisible until it is filled in.
     for (const reading of itemReadings(item)) {
-      // `showState: false` binds the entity without printing it — for a device
-      // whose badge shows that number and has no use for it twice. The reading
-      // keeps its place in the list either way, so the badge's index into it
-      // does not move (see ItemReading.showState).
       if (reading.showState === false) continue;
-      
       const text = itemReadingText(hass, item, reading);
       if (text) parts.push(text);
     }
   }
-  
+
   return parts.join(" · ");
 }
 

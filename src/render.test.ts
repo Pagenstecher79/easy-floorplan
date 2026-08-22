@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { html, nothing } from "lit";
-import type { Area, Furniture, FurnitureType, ItemKind } from "./types";
+import type { Area, Furniture, FurnitureType, ItemKind, ItemReading } from "./types";
 import { SKIN_ACCENT, SKIN_WALL, MAX_SKIN_WALL_WIDTH } from "./skins";
 import {
   DEFAULT_GLOW_RADIUS,
@@ -5050,5 +5050,91 @@ describe("actions on rooms (issue #181)", () => {
     expect(areaHasActions(area({ tap_action: { action: "none" } }))).toBe(false);
     expect(areaHasActions(area({ tap_action: { action: "toggle" } }))).toBe(true);
     expect(areaHasActions(area({ double_tap_action: { action: "more-info" } }))).toBe(true);
+  });
+});
+
+describe("a reading can be bound without being printed", () => {
+  const named = () => {
+    const h = livingArea();
+    (h.states[TEMP]!.attributes as Record<string, unknown>).friendly_name = "Living Temp";
+    return h;
+  };
+  const item = (readings: ItemReading[], extra = {}) =>
+    ({ entity: TEMP, kind: "sensor", readings, ...extra }) as Parameters<typeof itemBadgeLabel>[1];
+
+  it("keeps a hidden reading out of the label", () => {
+    expect(itemBadgeLabel(named(), item([{ entity: HUMIDITY }]))).toBe("17.9 °C · 49.3%");
+    expect(itemBadgeLabel(named(), item([{ entity: HUMIDITY, showState: false }]))).toBe("17.9 °C");
+  });
+
+  it("treats unset and true alike — nothing changes for an existing plan", () => {
+    for (const showState of [undefined, true] as const) {
+      expect(itemBadgeLabel(named(), item([{ entity: HUMIDITY, showState }]))).toBe(
+        "17.9 °C · 49.3%",
+      );
+    }
+  });
+
+  it("hides one without hiding the rest", () => {
+    expect(
+      itemBadgeLabel(
+        named(),
+        item([{ entity: HUMIDITY, showState: false }, { entity: TEMP }]),
+      ),
+    ).toBe("17.9 °C · 17.9 °C");
+  });
+
+  it("does NOT renumber the others — the badge's index must not move", () => {
+    // The trap this exists to avoid: hide reading 0 and, if the badge indexed
+    // only the visible ones, `badgeEntity: 1` would silently start reading a
+    // different entity.
+    const plug = fakeHass([
+      { entity_id: "switch.plug", state: "on" },
+      { entity_id: "sensor.power", state: "1200", unit: "W" },
+      { entity_id: "sensor.lqi", state: "84" },
+    ]);
+    const withHidden = {
+      entity: "switch.plug",
+      readings: [{ entity: "sensor.power", showState: false }, { entity: "sensor.lqi" }],
+      badgeEntity: 0 as const,
+    };
+    // Index 0 is still the power sensor, though it prints nothing.
+    expect(badgeReading(plug, withHidden)?.source).toBe(0);
+    expect(badgeReading(plug, withHidden)?.text).toBe("1.2kW");
+    expect(itemReadings(withHidden)).toHaveLength(2);
+    // …and index 1 is still the one it always was.
+    expect(badgeReading(plug, { ...withHidden, badgeEntity: 1 })?.text).toBe("84");
+  });
+
+  it("a device labelled only by hidden readings draws no label", () => {
+    // So the editor does not offer a label's size and position for a label
+    // that is never on screen.
+    expect(itemHasLabel({ kind: "light", readings: [{ entity: HUMIDITY }] })).toBe(true);
+    expect(
+      itemHasLabel({ kind: "light", readings: [{ entity: HUMIDITY, showState: false }] }),
+    ).toBe(false);
+    // One visible among hidden ones is still a label.
+    expect(
+      itemHasLabel({
+        kind: "light",
+        readings: [{ entity: HUMIDITY, showState: false }, { entity: TEMP }],
+      }),
+    ).toBe(true);
+  });
+
+  it("still watches a hidden reading's entity — the badge reads it live", () => {
+    const got = collectWatchedEntities({
+      items: [
+        {
+          id: "i",
+          kind: "sensor",
+          x: 0,
+          y: 0,
+          entity: TEMP,
+          readings: [{ entity: HUMIDITY, showState: false }],
+        },
+      ],
+    } as unknown as FloorplanCardConfig);
+    expect([...got].sort()).toEqual([TEMP, HUMIDITY].sort());
   });
 });

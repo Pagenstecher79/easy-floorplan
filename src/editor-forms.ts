@@ -1050,8 +1050,7 @@ export function itemEffectsForm(it: FloorItem, deviceClass?: string): FormSpec |
     },
   };
 }
-
-/** FormSpec für Gruppe 7a */
+/** FormSpec for Group 7a */
 export function itemGroup7aForm(it: FloorItem): FormSpec {
   const fields: FormField[] = [
     {
@@ -1178,7 +1177,6 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
       selector: { boolean: {} },
     });
   }
-
 
   return {
     fields,

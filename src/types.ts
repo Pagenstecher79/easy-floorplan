@@ -146,6 +146,22 @@ export interface Opening {
    */
   glazed?: boolean;
   /**
+   * Whether this opening takes part in the sunlight at all (default `true`).
+   *
+   * `false` makes it wall as far as the sun is concerned: no patch of its own,
+   * and it stops a beam crossing it like any other stretch of wall. Nothing
+   * else changes — it is still drawn, still tappable, still lets a lamp's pool
+   * through if it is open.
+   *
+   * The case it exists for (issue #177): a **solid front door with no sensor
+   * bound**. The plan draws such a door open, because that is the floor-plan
+   * convention and what makes an unwired door useful, and the light believes
+   * the drawing — so a corridor behind the front door filled with sunshine
+   * that the door has never let in. This is how you say "drawn open, but shut
+   * to the sun".
+   */
+  sunlight?: boolean;
+  /**
    * An external shutter sharing this opening's wall gap (issue #74): a
    * `cover` (roller shutter / tapparella) or a `binary_sensor` contact on a
    * hinged shutter (persiana). `entity` keeps driving the opening itself, so
@@ -330,6 +346,20 @@ export interface ItemReading {
   entity?: string;
   /** Attribute to read instead of the state. */
   attribute?: string;
+  /**
+   * Whether this reading's value joins the label line. Default `true`.
+   *
+   * `false` binds the entity to the device without printing it: the badge can
+   * still be pointed at it with {@link FloorItem.badgeEntity}, and the card
+   * still watches it for changes. That is the case this exists for — a smart
+   * plug that badges `1.2 kW` in its circle has no use for the same number
+   * repeated in text underneath.
+   *
+   * Hiding a reading does **not** renumber the others: `badgeEntity` indexes
+   * the whole list, visible or not, so switching this off cannot silently
+   * repoint the badge at a different entity.
+   */
+  showState?: boolean;
 }
 
 /**
@@ -430,7 +460,9 @@ export interface FloorItem {
    * they show. Resolve with `itemReadings`, never by reading either key
    * directly.
    *
-   * **Shown whether or not `showState` is**, which is the point of them. A plug
+   * **Shown whether or not the *device's* {@link FloorItem.showState} is**,
+   * which is the point of them — a row's own {@link ItemReading.showState} is
+   * the switch for hiding one of these. A plug
    * says on/off through its badge colour, so its owner wants Power · LQI ·
    * Battery and *not* the word "on" (I-G-1-1's case in discussion #173).
    * `showState` is about the device's *own state*; these are not it.
@@ -504,7 +536,7 @@ export interface FloorItem {
   hideAttribute?: string;
   hideStateAttribute?: string;
   /** End of Enable the extended hide logic */
-  
+  /** Badge diameter in pixels. Default 34. */
   size?: number;
   /** Icon rotation in degrees. Default 0. */
   angle?: number;
