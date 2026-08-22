@@ -1105,28 +1105,19 @@ export function itemBadgeLabel(
 
   // Zusätzliche Readings NUR hinzufügen, wenn die Ausblende-Bedingung NICHT zutrifft!
   if (!hideStateText) {
-    // Every other reading (issue #180), deliberately *not* gated on `showState`:
-    // the case they were asked for is a plug that says on/off through its badge
-    // colour and wants "1.2 kW · 84 · 5 min ago" without the word "on" in front
-    // of it. `showState` is about the device's own state, and these are not it.
-    //
-    // Each is added only if it resolves to something, so the blank row the
-    // editor's "+" creates stays invisible until it is filled in.
     for (const reading of itemReadings(item)) {
-      // `showState: false` binds the entity without printing it — for a device
-      // whose badge shows that number and has no use for it twice. The reading
-      // keeps its place in the list either way, so the badge's index into it
-      // does not move (see ItemReading.showState).
       if (reading.showState === false) continue;
-      const text = itemReadingText(hass, item, reading);
-      if (text) parts.push(text);
-    }
-  }
+      
+      // Verhindern, dass die Haupt-Entität/Attribut hier doppelt gepusht wird, 
+      // falls sie bereits oben als Haupt-Status hinzugefügt wurde.
+      const isPrimaryReading = 
+        (!reading.entity || reading.entity === item.entity) && 
+        (reading.attribute === item.attribute);
+      
+      if (isPrimaryReading && (item.showState ?? item.kind === "sensor")) {
+        continue; 
+      }
 
-  // Zusätzliche Readings NUR hinzufügen, wenn die Ausblende-Bedingung NICHT zutrifft!
-  if (!hideStateText) {
-    for (const reading of itemReadings(item)) {
-      if (reading.showState === false) continue;
       const text = itemReadingText(hass, item, reading);
       if (text) parts.push(text);
     }
@@ -1134,7 +1125,6 @@ export function itemBadgeLabel(
 
   return parts.join(" · ");
 }
-
 /**
  * Whether a device draws a label line at all.
  *
