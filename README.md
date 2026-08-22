@@ -486,7 +486,7 @@ distorted anyway.
 | `hideWhenInactive` | boolean                           | `false`      | Hide on the card while the entity is inactive. Always shown, dimmed, in the editor. |
 | `showState`   | boolean                                | sensors only | Show the entity state in the label line. Governs this device's **own** state only — `readings` show regardless. |
 | `showName`    | boolean                                | `false`      | Show the device's name in the label line (`Name · state` when combined). |
-| `readings`    | `{ entity?, attribute? }[]`            | —            | Everything this device reads beyond its own state — a sensor's humidity and pressure, a plug's power, link quality and battery. Shown whether or not `showState` is. See [More readings per device](#more-readings-per-device). |
+| `readings`    | `{ entity?, attribute?, showState? }[]` | —           | Everything this device reads beyond its own state — a sensor's humidity and pressure, a plug's power, link quality and battery. These print whatever the **device's** `showState` says, since that one is about the device's own entity. To hide one of *these*, set its **own** `showState: false`, which keeps it bound (the badge can still read it) without printing it. See [More readings per device](#more-readings-per-device). |
 | `labelPosition` | `below` \| `left` \| `right`         | `below`      | Where the label sits relative to the badge. |
 | `labelSize`   | number                                 | `12`         | Label line font size (px).                             |
 | `tap_action`  | ActionConfig                           | per domain   | Standard Lovelace action. By default `light`, `switch`, `fan` and `input_boolean` toggle and everything else — covers included — opens more-info. |
@@ -1126,8 +1126,8 @@ items:
 
 → `Study · 21.5 °C · 48% · 1013 hPa`, on one line, in the order written.
 
-Each row is `{ entity?, attribute? }`, and between them they say where the number comes
-from:
+Each row is `{ entity?, attribute?, showState? }`. `entity` and `attribute` say where the
+number comes from:
 
 | `entity` | `attribute` | reads |
 | --- | --- | --- |
@@ -1140,7 +1140,30 @@ The third row is what lets one climate entity show four of its own attributes wi
 naming itself four times. The fourth is why the editor's **+ Add entity** can hand you an
 empty row without a `—` appearing on the plan.
 
-### Readings ignore "Show state"
+### Bound, but not printed
+
+`showState: false` on a row keeps the entity bound to the device without putting its value
+in the label:
+
+```yaml
+  - id: desk_plug
+    entity: switch.desk_plug
+    kind: switch
+    badgeContent: value
+    badgeEntity: 0             # the badge shows the power
+    readings:
+      - { entity: sensor.desk_plug_power, showState: false }
+```
+
+The badge reads `1.2 kW` in its circle and the label does not repeat it. The card still
+watches the entity, so the badge stays live.
+
+**Hiding a row does not renumber the others.** `badgeEntity` indexes the whole list,
+visible or not, so switching a row off cannot silently repoint the badge at a different
+entity. A device whose every extra row is hidden draws no label at all, and the editor
+stops offering the label's size and position for it.
+
+### Readings ignore the device's "Show state"
 
 That is the point of them. A smart plug already says on/off through its badge colour, so
 its label should carry the *other* numbers and not the word "on":
@@ -1157,8 +1180,9 @@ its label should carry the *other* numbers and not the word "on":
       - { attribute: battery }
 ```
 
-→ `Desk plug · 1.2 kW · 84 · 84`. `showState` is about the device's **own state**;
-`readings` are their own statement.
+→ `Desk plug · 1.2 kW · 84 · 84`. The device's `showState` is about its **own** entity;
+the readings are their own statement, and each carries its own `showState` for the times
+you want one bound but not printed (above).
 
 ### One list, not two mechanisms
 
