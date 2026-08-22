@@ -486,40 +486,25 @@ export interface FloorItem {
    * ({@link entityIsActive}), so a lock reads unlocked, a vacuum cleaning.
    */
   hideWhenInactive?: boolean;
-  /** Aktiviert die erweiterte Ausblendungslogik */
+  /** Enable the extended hide logic */
   enableHideByEntity?: boolean;
-  /** Optionale Entität, deren Status geprüft werden soll (Standard: Haupt-Entität) */
   hideEntity?: string;
-  /** Art der Bedingung: Text-Status oder numerischer Schwellenwert */
   hideMode?: "state" | "threshold";
-  /** Der Status, bei dem ausgeblendet werden soll (für hideMode: "state") */
   hideState?: string;
-  /** Vergleichsoperator (für hideMode: "threshold") */
   hideOperator?: "<" | "<=" | "==" | ">=" | ">";
-  /** Numerischer Schwellenwert (für hideMode: "threshold") */
   hideThreshold?: number;
-  /** Invertiert die Bedingung (Ausblenden, wenn Bedingung NICHT zutrifft) */
   hideInvert?: boolean;
-  /** Badge diameter in pixels. Default 34. */
-  // --- Felder für das Ausblenden des State-Textes ---
-  /** Aktiviert das bedingte Ausblenden NUR für den State-Text */
   enableHideStateByEntity?: boolean;
-  /** Optionale Entität für das Ausblenden des Textes (Standard: Haupt-Entität) */
   hideStateEntity?: string;
-  /** Art der Bedingung für den Text: Text-Status oder numerischer Schwellenwert */
   hideStateMode?: "state" | "threshold";
-  /** Der Status, bei dem der Text ausgeblendet werden soll */
   hideStateMatch?: string;
-  /** Vergleichsoperator für den Text-Schwellenwert */
   hideStateOperator?: "<" | "<=" | "==" | ">=" | ">";
-  /** Numerischer Schwellenwert für den Text */
   hideStateThreshold?: number;
-  /** Invertiert die Bedingung für den Text */
   hideStateInvert?: boolean;
-  /** Optionales Attribut für die Objekt-Ausblendung */
   hideAttribute?: string;
-  /** Optionales Attribut für die Text-Ausblendung */
   hideStateAttribute?: string;
+  /** End of Enable the extended hide logic */
+  
   size?: number;
   /** Icon rotation in degrees. Default 0. */
   angle?: number;

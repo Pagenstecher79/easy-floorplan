@@ -174,6 +174,7 @@ import {
   textForm,
   trackerForm,
   wallForm,
+  itemGroup7aForm,
   type FormField,
   type FormSpec,
 } from "./editor-forms";
@@ -4464,7 +4465,8 @@ export class FloorplanCardEditor extends LitElement {
                 : nothing
             )
           : nothing}
-        ${this._renderGroup("Behavior", this._renderForm(itemBehaviourForm(it), apply))}
+        ${this._renderGroup("Behavior", this._renderForm(itemBehaviourForm(it), apply))},
+        ${this._renderGroup("Visibility", this._renderForm(itemGroup7aForm(it), apply))}
       `;
     }
 

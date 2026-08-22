@@ -1051,15 +1051,9 @@ export function itemEffectsForm(it: FloorItem, deviceClass?: string): FormSpec |
   };
 }
 
-/** Group 7: when the device is drawn at all, and what a press does. */
-export function itemBehaviourForm(it: FloorItem): FormSpec {
+/** FormSpec für Gruppe 7a */
+export function itemGroup7aForm(it: FloorItem): FormSpec {
   const fields: FormField[] = [
-    {
-      name: "hideWhenInactive",
-      label: "Only when active",
-      helper: "Hide on the card while the entity is off/idle (still editable here)",
-      selector: { boolean: {} },
-    },
     {
       name: "enableHideByEntity",
       label: "Hide by condition (Entire Object)",
@@ -1185,19 +1179,6 @@ export function itemBehaviourForm(it: FloorItem): FormSpec {
     });
   }
 
-  fields.push(
-    {
-      name: "tap_action",
-      label: "Tap action",
-      selector: { ui_action: { default_action: defaultItemAction(it.entity).action } },
-    },
-    { name: "hold_action", label: "Hold action", selector: { ui_action: { default_action: "none" } } },
-    {
-      name: "double_tap_action",
-      label: "Double-tap action",
-      selector: { ui_action: { default_action: "none" } },
-    }
-  );
 
   return {
     fields,
@@ -1219,10 +1200,45 @@ export function itemBehaviourForm(it: FloorItem): FormSpec {
       hideStateOperator: it.hideStateOperator ?? ">",
       hideStateThreshold: it.hideStateThreshold ?? 0,
       hideStateInvert: it.hideStateInvert ?? false,
+    },
+    toPatch: identity,
+  };
+}
+/** Group 7: when the device is drawn at all, and what a press does. */
+export function itemBehaviourForm(it: FloorItem): FormSpec {
+  return {
+    fields: [
+      {
+        name: "tap_action",
+        label: "Tap action",
+        selector: { ui_action: { default_action: defaultItemAction(it.entity).action } },
+      },
+      { name: "hold_action", label: "Hold action", selector: { ui_action: { default_action: "none" } } },
+      {
+        name: "double_tap_action",
+        label: "Double-tap action",
+        selector: { ui_action: { default_action: "none" } },
+      },
+    ],
+    data: {
+      showState: it.showState ?? false,
+      showName: it.showName ?? false,
+      labelSize: it.labelSize ?? DEFAULT_LABEL_SIZE,
       tap_action: it.tap_action,
       hold_action: it.hold_action,
       double_tap_action: it.double_tap_action,
-    }
+    },
+    toPatch: (patch) => {
+      if (!("badgeMode" in patch) && !("ripple" in patch)) return patch;
+      const { badgeMode, ripple: ring, ...rest } = patch;
+      return {
+        ...rest,
+        ...badgeModePatch(
+          (badgeMode as BadgeMode | undefined) ?? badgeModeOf(it),
+          ring === undefined ? ripple : !!ring
+        ),
+      };
+    },
   };
 }
 

@@ -1056,7 +1056,7 @@ export function itemBadgeLabel(
     secondaryAttribute?: string;
     readings?: ItemReading[];
     
-    // Felder für das bedingte Ausblenden des Textes
+    // fields for conditional hiding of the text
     enableHideStateByEntity?: boolean;
     hideStateEntity?: string;
     hideStateMode?: string;
@@ -1064,7 +1064,7 @@ export function itemBadgeLabel(
     hideStateOperator?: string;
     hideStateThreshold?: number;
     hideStateInvert?: boolean;
-    hideStateAttribute?: string; // Hinzugefügt (wird für evalValue benötigt)
+    hideStateAttribute?: string; 
   },
 ): string {
   const parts: string[] = [];
@@ -1075,13 +1075,12 @@ export function itemBadgeLabel(
     if (name) parts.push(name);
   }
 
-  // --- PRÜFUNG: Ist die Ausblend-Bedingung für den Text erfüllt? ---
+  // --- CHECK: Is the hiding condition for the text met? ---
   let hideStateText = false;
   if (item.enableHideStateByEntity && hass) {
     const evalEntity = item.hideStateEntity || item.entity;
-    const stateObj = hass.states[evalEntity];
+    const stateObj = evalEntity ? hass.states[evalEntity] : undefined;
     
-    // Holt entweder den Wert des Attributs oder den normalen State
     const evalValue = item.hideStateAttribute && stateObj?.attributes 
       ? stateObj.attributes[item.hideStateAttribute] 
       : stateObj?.state;
@@ -1105,13 +1104,12 @@ export function itemBadgeLabel(
   }
   // -----------------------------------------------------------------
 
-  // Wenn die Bedingung NICHT greift, fügen wir den Haupt-State hinzu
+  // if the condition is not met, add the main state
   if (!!item.entity && (item.showState ?? item.kind === "sensor") && !hideStateText) {
     parts.push(itemStateText(hass, item));
   }
 
-  // Alle weiteren Readings/Attribute (itemReadings) ebenfalls nur hinzufügen, 
-  // wenn das Ausblenden für den Text NICHT aktiv ist!
+  // add all other readings/attributes (itemReadings) only if the hiding condition for the text is not active!
   if (!hideStateText) {
     // Every other reading (issue #180), deliberately *not* gated on `showState`:
     // Each is added only if it resolves to something, so the blank row the
