@@ -1330,7 +1330,6 @@ This does not replace the floor switcher in the card's corner; the stairs are a 
 up. Set `floors` and you get both.
 
 ## Offline devices
-## Offline devices
 
 An entity that has dropped out no longer looks like one that is simply switched off.
 

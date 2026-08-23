@@ -953,14 +953,21 @@ export class FloorplanCard extends LitElement {
               // offering a control that does nothing.
               const to = furnitureFloorTarget(f, floors, active.id);
               if (!to) return drawn;
+              const name = floors.find((x) => x.id === to)?.name;
               return svg`<g class="fp-furniture-link" role="button" tabindex="0"
-                    title=${`Go to ${floors.find((x) => x.id === to)?.name ?? "the next floor"}`}
-                    @click=${() => this._goToFloor(floors, to)}
-                    @keydown=${(e: KeyboardEvent) => {
-                      if (e.key !== "Enter" && e.key !== " ") return;
-                      e.preventDefault();
-                      this._goToFloor(floors, to);
-                    }}>${drawn}</g>`;
+                    @action=${() => this._goToFloor(floors, to)}
+                    .actionHandler=${actionHandler({
+                      // A staircase has one gesture. Saying so keeps a tap from
+                      // sitting out the hold and double-tap timers before it
+                      // does anything.
+                      hasHold: false,
+                      hasDoubleClick: false,
+                    })}>
+                  <!-- An SVG tooltip is a <title> child, not a title=
+                       attribute: the attribute does nothing here. -->
+                  <title>${name ? `Go to ${name}` : "Go to the next floor"}</title>
+                  ${drawn}
+                </g>`;
             })}
             <!-- Sunlight through the openings. Under the walls on purpose:
                  light lands on the floor, and the walls stay crisp lines over
