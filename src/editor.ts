@@ -143,6 +143,7 @@ import {
   type Sel,
   type SelKind,
 } from "./editor-geometry";
+import { applyCardConfig } from "./editor-save";
 import type { AreaEntityScope } from "./editor-forms";
 import {
   furnitureChoices,
@@ -258,6 +259,8 @@ const WALL_SNAP = 35;
  */
 const PICK_EPS_PX = 8;
 const HISTORY_MAX = 60;
+/** How long Apply stays on "Saved" before returning to its idle label. */
+const APPLY_SAVED_MS = 2000;
 /** Angle (degrees) within which a drawn wall is snapped flat to horizontal/vertical. */
 const WALL_AXIS_SNAP_DEG = 10;
 
@@ -336,6 +339,15 @@ export class FloorplanCardEditor extends LitElement {
    * gets real room and the element/project sections dock beside it.
    */
   @state() private _fullscreen = false;
+  /**
+   * Apply (issue #198): "saving" while the dashboard write is in flight,
+   * "saved" for a moment after, so the click has a visible answer — the card
+   * that changed is on another tab, or behind the fullscreen workspace.
+   */
+  @state() private _applyState: "idle" | "saving" | "saved" = "idle";
+  /** Why the last Apply didn't go through, shown beside the button. */
+  @state() private _applyError = "";
+  private _applyResetTimer: ReturnType<typeof setTimeout> | null = null;
 
   @query(".editor") private _editorEl?: HTMLElement;
   @query("svg") private _svg?: SVGSVGElement;
@@ -400,6 +412,7 @@ export class FloorplanCardEditor extends LitElement {
     window.removeEventListener("keydown", this._onKeyDown, true);
     this.removeEventListener("keydown", this._onHostKeyDown);
     window.removeEventListener("focusin", this._onFocusIn);
+    if (this._applyResetTimer !== null) clearTimeout(this._applyResetTimer);
     this._resetPinch();
     super.disconnectedCallback();
   }
@@ -2853,6 +2866,30 @@ export class FloorplanCardEditor extends LitElement {
             ${this._fullscreen ? "Exit" : "Expand"}
           </button>
 
+          <!-- Apply: save the plan to the dashboard and keep editing (issue
+               #198). HA's own Save closes the dialog, and the preview beside
+               the editor is too small to judge where an icon really lands, so
+               checking one nudge cost a save, a close, a look, then reopening
+               and re-expanding the editor. Next to Expand because that is
+               where the need bites hardest: the fullscreen workspace covers
+               HA's footer, Save included. -->
+          <button
+            class="apply-btn"
+            ?disabled=${this._applyState === "saving"}
+            title="Save to the dashboard without closing the editor — the card behind updates"
+            @click=${this._apply}
+          >
+            <ha-icon
+              icon=${this._applyState === "saved" ? "mdi:check" : "mdi:content-save-outline"}
+            ></ha-icon>
+            ${this._applyState === "saved"
+              ? "Saved"
+              : this._applyState === "saving"
+                ? "Saving…"
+                : "Apply"}
+          </button>
+          ${this._applyError ? html`<span class="apply-error">${this._applyError}</span>` : nothing}
+
           <!-- Labels: declutter a dense plan while editing (issue #52). -->
           <button
             class="icon-btn"
@@ -3548,6 +3585,36 @@ export class FloorplanCardEditor extends LitElement {
     this._addMenuOpen = false;
     this._addQuery = "";
   }
+
+  /**
+   * Save the card to the dashboard and stay in the editor (issue #198).
+   *
+   * The heavy lifting is in `editor-save.ts`; what belongs here is the wait
+   * before it. Our edits reach HA through `config-changed`, which the element
+   * editor between us and the dialog re-fires only after its own render — and
+   * a field committed by the blur *this very click* caused is still in flight
+   * at this point. Letting the microtasks drain first is the difference
+   * between applying the plan and applying it one edit ago.
+   */
+  private _apply = async (): Promise<void> => {
+    if (this._applyState === "saving") return;
+    if (this._applyResetTimer !== null) clearTimeout(this._applyResetTimer);
+    this._applyState = "saving";
+    this._applyError = "";
+    await this.updateComplete;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const result = await applyCardConfig(this);
+    if (!result.ok) {
+      this._applyState = "idle";
+      this._applyError = result.error;
+      return;
+    }
+    this._applyState = "saved";
+    this._applyResetTimer = setTimeout(() => {
+      this._applyResetTimer = null;
+      this._applyState = "idle";
+    }, APPLY_SAVED_MS);
+  };
 
   /**
    * The "+ Add" popover: device, text, then every symbol as its real glyph.
@@ -4880,12 +4947,25 @@ export class FloorplanCardEditor extends LitElement {
       background: var(--card-background-color, #fff);
       overflow: hidden;
     }
-    /* Toolbar-icon button (Expand/Exit) — match the gear button's icon+label
-       alignment so it reads as part of the toolbar. */
-    .expand-toggle {
+    /* Toolbar-icon buttons (Expand/Exit, Apply) — match the gear button's
+       icon+label alignment so they read as part of the toolbar. */
+    .expand-toggle,
+    .apply-btn {
       display: inline-flex;
       align-items: center;
       gap: 5px;
+    }
+    /* Apply writes to the dashboard, unlike everything else in the toolbar —
+       accented so it reads as the one committing action. */
+    .apply-btn {
+      color: var(--primary-color, #03a9f4);
+      border-color: var(--primary-color, #03a9f4);
+    }
+    /* Why the last Apply didn't go through; sits in the toolbar so it is
+       visible in the fullscreen workspace too, where nothing else is. */
+    .apply-error {
+      font-size: 12px;
+      color: var(--error-color, #c62828);
     }
     /* Below the two toolbars: the canvas and the element/project sections.
        Stacked at dialog width; split into canvas + docked side panel when
