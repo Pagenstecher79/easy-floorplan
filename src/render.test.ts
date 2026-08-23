@@ -76,6 +76,7 @@ import {
   defaultIcon,
   renderFurniture,
   furnitureColor,
+  furnitureFloorTarget,
   entityDefaultIcon,
   trackerSensorReading,
   openingInMotion,
@@ -5138,5 +5139,46 @@ describe("a reading can be bound without being printed", () => {
       ],
     } as unknown as FloorplanCardConfig);
     expect([...got].sort()).toEqual([TEMP, HUMIDITY].sort());
+  });
+});
+
+describe("stairs that change floor (issue #121)", () => {
+  const floors = [{ id: "cellar" }, { id: "ground" }, { id: "loft" }];
+  const stairs = (goToFloor?: "up" | "down") => ({ goToFloor }) as Pick<Furniture, "goToFloor">;
+
+  it("reads the floor list bottom-to-top", () => {
+    expect(furnitureFloorTarget(stairs("up"), floors, "ground")).toBe("loft");
+    expect(furnitureFloorTarget(stairs("down"), floors, "ground")).toBe("cellar");
+  });
+
+  it("leads nowhere at the end of the list, so the card draws no button", () => {
+    expect(furnitureFloorTarget(stairs("up"), floors, "loft")).toBeUndefined();
+    expect(furnitureFloorTarget(stairs("down"), floors, "cellar")).toBeUndefined();
+  });
+
+  it("does not wrap — the loft is not above the cellar", () => {
+    // A stair click that teleported you from the top of the building to the
+    // bottom would be a bug report, not a feature.
+    expect(furnitureFloorTarget(stairs("up"), floors, "loft")).not.toBe("cellar");
+    expect(furnitureFloorTarget(stairs("down"), floors, "cellar")).not.toBe("loft");
+  });
+
+  it("is inert on ordinary furniture", () => {
+    expect(furnitureFloorTarget(stairs(), floors, "ground")).toBeUndefined();
+    expect(furnitureFloorTarget({ goToFloor: "sideways" } as never, floors, "ground")).toBeUndefined();
+  });
+
+  it("leads nowhere when the active floor is not in the list", () => {
+    // A stale `_activeFloorId` must not resolve to floors[0] by accident.
+    expect(furnitureFloorTarget(stairs("up"), floors, "gone")).toBeUndefined();
+    expect(furnitureFloorTarget(stairs("up"), floors, undefined)).toBeUndefined();
+    expect(furnitureFloorTarget(stairs("up"), [], "ground")).toBeUndefined();
+  });
+
+  it("works on a two-floor plan, which is the ordinary case", () => {
+    const two = [{ id: "g" }, { id: "up" }];
+    expect(furnitureFloorTarget(stairs("up"), two, "g")).toBe("up");
+    expect(furnitureFloorTarget(stairs("down"), two, "up")).toBe("g");
+    expect(furnitureFloorTarget(stairs("down"), two, "g")).toBeUndefined();
   });
 });
