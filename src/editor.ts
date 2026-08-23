@@ -4607,7 +4607,7 @@ export class FloorplanCardEditor extends LitElement {
                 : nothing
             )
           : nothing}
-        ${this._renderGroup("Behavior", this._renderForm(itemBehaviourForm(it), apply))},
+        ${this._renderGroup("Behaviour", this._renderForm(itemBehaviourForm(it), apply))}
         ${this._renderGroup("Visibility", this._renderForm(itemGroup7aForm(it), apply))}
       `;
     }

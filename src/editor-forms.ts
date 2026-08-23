@@ -1056,12 +1056,6 @@ export function itemEffectsForm(it: FloorItem, deviceClass?: string): FormSpec |
 export function itemGroup7aForm(it: FloorItem): FormSpec {
   const fields: FormField[] = [
     {
-      name: "hideWhenInactive",
-      label: "Only when active",
-      helper: "Hide on the card while the entity is off/idle (still editable here)",
-      selector: { boolean: {} },
-    },
-    {
       name: "enableHideByEntity",
       label: "Hide by condition (Entire Object)",
       selector: { boolean: {} },
@@ -1189,7 +1183,6 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
   return {
     fields,
     data: {
-      hideWhenInactive: it.hideWhenInactive ?? false,
       enableHideByEntity: it.enableHideByEntity ?? false,
       hideEntity: it.hideEntity ?? "",
       hideAttribute: it.hideAttribute ?? "",
