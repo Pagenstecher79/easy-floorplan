@@ -102,7 +102,7 @@ import {
   entityIsActive,
   lightBadgePaint,
   itemRawValue,
-  isPresenceEntity,
+  isRippleEntity,
   badgeContentOf,
   editorItemLabel,
   badgeValue,
@@ -4401,8 +4401,9 @@ export class FloorplanCardEditor extends LitElement {
       const it = this._floor().items.find((x) => x.id === sel.id);
       if (!it) return html`${nothing}`;
       const areaEntities = this._areaEntitiesAt(it.x, it.y);
-      // The entity's device class decides whether this is a presence device,
-      // and so whether the ripple is on offer at all (issue #127).
+      // The entity's device class decides whether this device detects
+      // anything, and so whether the ripple is on offer at all (issues #127,
+      // #202).
       const deviceClass = it.entity
         ? (this.hass?.states[it.entity]?.attributes?.device_class as string | undefined)
         : undefined;
@@ -4482,7 +4483,7 @@ export class FloorplanCardEditor extends LitElement {
               "Effects",
               this._renderForm(effects, apply),
               // The ring's colour belongs with the ring, not with the badge's.
-              isPresenceEntity(it.entity, deviceClass) && itemHasRipple(it)
+              isRippleEntity(it.entity, deviceClass) && itemHasRipple(it)
                 ? this._renderColorRow({
                     label: "Ripple color",
                     value: it.rippleColor,

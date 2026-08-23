@@ -526,8 +526,10 @@ export interface FloorItem {
    * How the device is drawn. Default "badge".
    *
    * The ripple modes render on any entity. The editor only *offers* them on a
-   * presence device (issue #127) — a ring says "someone is there" — so a ring
-   * on anything else is a YAML-only choice.
+   * device that detects something where it sits (issues #127, #202) — a
+   * motion, occupancy, presence or vibration sensor, or a `device_tracker` /
+   * `person`, per {@link isRippleEntity} — so a ring on anything else is a
+   * YAML-only choice.
    */
   display?: ItemDisplay;
   /**

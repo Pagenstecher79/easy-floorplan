@@ -1421,29 +1421,34 @@ export function resolveIconAnimation(
 }
 
 /**
- * Device classes that mean "something is here" — the sensors a ripple ring was
- * drawn for (issue #127). `motion` and `occupancy` are HA's own binary-sensor
- * classes; `presence` is the home/away one.
+ * Device classes a ripple ring is offered for (issue #127). `motion` and
+ * `occupancy` are HA's own binary-sensor classes for someone being there;
+ * `presence` is the home/away one. `vibration` joins them (issue #202,
+ * @GhislainC): a vibration sensor on a door reports the same thing a ring
+ * says — something happened at this spot on the plan — so the ring is as true
+ * of it as of a motion sensor.
  */
-const PRESENCE_DEVICE_CLASSES = new Set(["motion", "occupancy", "presence"]);
+const RIPPLE_DEVICE_CLASSES = new Set(["motion", "occupancy", "presence", "vibration"]);
 
 /**
- * Whether a device detects presence, and so should be offered the ripple ring
- * (issue #127) — the same shape of gate as "Cast light" on a `light`.
+ * Whether a device detects something happening where it sits, and so should be
+ * offered the ripple ring (issue #127) — the same shape of gate as "Cast
+ * light" on a `light`.
  *
  * A `device_tracker` or `person` qualifies on its domain alone; a
  * `binary_sensor` needs the device class to say so, which is what separates a
- * motion sensor from a door contact or a leak detector. A binary sensor with
- * no device class set is therefore *not* presence: it could be anything, and
- * guessing from the entity id would ring doorbells and smoke alarms.
+ * motion or vibration sensor from a door contact or a leak detector. A binary
+ * sensor with no device class set therefore does not qualify: it could be
+ * anything, and guessing from the entity id would ring doorbells and smoke
+ * alarms.
  */
-export function isPresenceEntity(
+export function isRippleEntity(
   entity: string | undefined,
   deviceClass: string | undefined,
 ): boolean {
   const domain = entity?.split(".")[0];
   if (domain === "device_tracker" || domain === "person") return true;
-  return domain === "binary_sensor" && !!deviceClass && PRESENCE_DEVICE_CLASSES.has(deviceClass);
+  return domain === "binary_sensor" && !!deviceClass && RIPPLE_DEVICE_CLASSES.has(deviceClass);
 }
 
 /**
