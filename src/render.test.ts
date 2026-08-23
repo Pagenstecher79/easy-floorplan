@@ -115,7 +115,7 @@ import {
   badgeValueSize,
   resolveIconAnimation,
   domainIconAnimation,
-  isPresenceEntity,
+  isRippleEntity,
   itemIconSize,
   normalizePlanRotation,
   rotatedCanvasSize,
@@ -1692,30 +1692,32 @@ describe("domainIconAnimation (issue #127)", () => {
   });
 });
 
-describe("isPresenceEntity (issue #127)", () => {
-  it("accepts the binary-sensor classes that mean someone is there", () => {
-    for (const dc of ["motion", "occupancy", "presence"]) {
-      expect(isPresenceEntity("binary_sensor.hall", dc)).toBe(true);
+describe("isRippleEntity (issue #127)", () => {
+  it("accepts the binary-sensor classes that mean something happened here", () => {
+    // vibration joins the presence classes: a door sensor that feels a knock
+    // marks a spot the same way a motion sensor does (issue #202).
+    for (const dc of ["motion", "occupancy", "presence", "vibration"]) {
+      expect(isRippleEntity("binary_sensor.hall", dc)).toBe(true);
     }
   });
 
   it("accepts trackers and people on their domain alone", () => {
-    expect(isPresenceEntity("device_tracker.phone", undefined)).toBe(true);
-    expect(isPresenceEntity("person.sam", undefined)).toBe(true);
+    expect(isRippleEntity("device_tracker.phone", undefined)).toBe(true);
+    expect(isRippleEntity("person.sam", undefined)).toBe(true);
   });
 
   it("rejects sensors that detect something else, and an unclassed one", () => {
-    expect(isPresenceEntity("binary_sensor.front_door", "door")).toBe(false);
-    expect(isPresenceEntity("binary_sensor.leak", "moisture")).toBe(false);
+    expect(isRippleEntity("binary_sensor.front_door", "door")).toBe(false);
+    expect(isRippleEntity("binary_sensor.leak", "moisture")).toBe(false);
     // No class at all could be anything — guessing from the name would ring
     // doorbells and smoke alarms.
-    expect(isPresenceEntity("binary_sensor.presence", undefined)).toBe(false);
+    expect(isRippleEntity("binary_sensor.presence", undefined)).toBe(false);
   });
 
   it("rejects other domains, whatever class they carry", () => {
-    expect(isPresenceEntity("light.a", "motion")).toBe(false);
-    expect(isPresenceEntity("sensor.motion", "motion")).toBe(false);
-    expect(isPresenceEntity(undefined, "motion")).toBe(false);
+    expect(isRippleEntity("light.a", "motion")).toBe(false);
+    expect(isRippleEntity("sensor.motion", "motion")).toBe(false);
+    expect(isRippleEntity(undefined, "motion")).toBe(false);
   });
 });
 

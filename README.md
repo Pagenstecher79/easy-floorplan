@@ -25,7 +25,7 @@ screen size.
 ## Features
 - **Visual editor** — draw walls, drop doors and windows that snap onto them, drag, nudge with arrow keys, multi-select, copy/paste, undo/redo, zoom.
 - **Devices** — bind any entity to an icon: tap to toggle or open more-info, live state or attribute label, custom icon, size, rotation.
-  - **Presence ripples** — presence sensors drawn as animated rings instead of a static icon.
+  - **Presence ripples** — presence and vibration sensors drawn as animated rings instead of a static icon.
   - (${\color{red}NEW!}$) **Cast light** — a light pools its own color and brightness onto the plan; overlapping pools mix, so a warm lamp and a cool one blend between them.
   - (${\color{red}NEW!}$) **Conditional text / icon / coloring** — threshold and state rules restyle an element from what its entity reads: the badge color, the label, and the glyph itself, so blinds swap between open and closed icons and a thermostat reddens as it heats. The same rules drive furniture and rooms.
  
@@ -319,17 +319,18 @@ size** are per tracker.
 
 Turn on a device's **Ripple** toggle and it draws animated concentric rings behind the
 badge — set **Badge shows** to *Nothing* for the rings alone. They pulse outward and fade
-while presence is detected, and collapse to a faint dot when it's clear, so the spot stays
-marked without pulling the eye.
+while the device detects something, and collapse to a faint dot when it's clear, so the
+spot stays marked without pulling the eye.
 
 **Ripple color** and **ripple size** are per device (the color follows **Active color**
 and state rules unless you set one).
 
-The toggle appears only on devices that detect presence — a `binary_sensor` whose device
-class is `motion`, `occupancy` or `presence`, or a `device_tracker` / `person` — the same
-way **Cast light** appears only on lights: a ring claims someone is there, so it's offered
-where that claim can be true. The underlying `display` key still works on any entity in
-YAML.
+The toggle appears only on devices that detect something where they sit — a
+`binary_sensor` whose device class is `motion`, `occupancy`, `presence` or `vibration`, or
+a `device_tracker` / `person` — the same way **Cast light** appears only on lights: a ring
+claims something is happening there, so it's offered where that claim can be true. A
+vibration sensor on a door therefore rings like a motion sensor does. The underlying
+`display` key still works on any entity in YAML.
 
 <img width="540" height="304" alt="ripple_demo_gif" src="https://github.com/user-attachments/assets/e43949cf-13a2-48f8-804d-73738299475f" />
 
@@ -472,7 +473,7 @@ distorted anyway.
 | `name`        | string                                 | friendly name| Label / tooltip override.                             |
 | `size`        | number                                 | `34`         | Icon badge diameter (px).                              |
 | `angle`       | number                                 | `0`          | Icon rotation (deg).                                   |
-| `display`     | `badge` \| `ripple` \| `iconRipple`    | `badge`      | How the device is drawn. The editor spells this as the **Ripple** toggle (plus **Badge shows: Nothing** for `ripple`) and offers it on presence devices only; in YAML it works on any entity. |
+| `display`     | `badge` \| `ripple` \| `iconRipple`    | `badge`      | How the device is drawn. The editor spells this as the **Ripple** toggle (plus **Badge shows: Nothing** for `ripple`) and offers it on presence and vibration devices only; in YAML it works on any entity. |
 | `iconAnimation` | `auto` \| `none` \| `spin` \| `pulse` | `auto`       | Animate the icon while active. `auto`: fan spins; media player / vacuum pulse. The editor spells this as the icon options of **Badge shows**, showing `auto` as whatever it resolves to. |
 | `activeColor` | string                                 | theme color  | Badge color while on. Ignored while `stateColor` rules match. |
 | `rippleColor` | string                                 | `activeColor`| Ripple ring color, falling back to `activeColor` then the primary color. |

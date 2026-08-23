@@ -43,7 +43,7 @@ import {
   WALL_THICKNESS,
   badgeContentOf,
   domainIconAnimation,
-  isPresenceEntity,
+  isRippleEntity,
   normalizeOverlayScale,
   normalizePlanRotation,
   openingActionForGesture,
@@ -973,30 +973,32 @@ export function itemBadgeForm(it: FloorItem, badgeSource?: BadgeSourceInfo): For
 
 /**
  * Group 6: the optional visual extras, each offered only where it means
- * something — a ring on a thermostat says "someone is here", which is a lie,
- * and nothing but a light has a colour to cast.
+ * something — a ring on a thermostat says "something is happening here",
+ * which is a lie, and nothing but a light has a colour to cast.
  *
  * Returns `undefined` when this device qualifies for neither, so the editor
  * can leave the whole group out rather than print an empty heading.
  *
  * `deviceClass` is the entity's HA device class, resolved off `hass` at the
  * call site as the openings already do theirs: it is what separates a motion
- * sensor from a door contact, and so decides whether the ring is offered at
- * all (issue #127).
+ * or vibration sensor from a door contact, and so decides whether the ring is
+ * offered at all (issues #127, #202).
  */
 export function itemEffectsForm(it: FloorItem, deviceClass?: string): FormSpec | undefined {
   const ripple = itemHasRipple(it);
-  const presence = isPresenceEntity(it.entity, deviceClass);
+  const canRipple = isRippleEntity(it.entity, deviceClass);
   const lights = it.kind === "light" || it.entity?.startsWith("light.");
-  if (!presence && !lights) return undefined;
+  if (!canRipple && !lights) return undefined;
   const fields: FormField[] = [];
-  if (presence) {
+  if (canRipple) {
     fields.push({
       name: "ripple",
       label: "Ripple",
-      // "Presence detected" rather than "the sensor is on": this is offered to
-      // a device_tracker and a person too, and neither of those is a sensor.
-      helper: "Draws a pulsing ring while presence is detected here",
+      // "Detected" rather than "the sensor is on": this is offered to a
+      // device_tracker and a person too, and neither of those is a sensor.
+      // It stays vague about *what* is detected because a vibration sensor
+      // rings for a knock, not for presence (issue #202).
+      helper: "Draws a pulsing ring while this device detects something",
       selector: { boolean: {} },
     });
     if (ripple) {
