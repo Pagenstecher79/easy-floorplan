@@ -43,7 +43,7 @@ import {
   WALL_THICKNESS,
   badgeContentOf,
   domainIconAnimation,
-  isPresenceEntity,
+  isRippleEntity,
   normalizeOverlayScale,
   normalizePlanRotation,
   openingActionForGesture,
@@ -986,17 +986,19 @@ export function itemBadgeForm(it: FloorItem, badgeSource?: BadgeSourceInfo): For
  */
 export function itemEffectsForm(it: FloorItem, deviceClass?: string): FormSpec | undefined {
   const ripple = itemHasRipple(it);
-  const presence = isPresenceEntity(it.entity, deviceClass);
+  const canRipple = isRippleEntity(it.entity, deviceClass);
   const lights = it.kind === "light" || it.entity?.startsWith("light.");
-  if (!presence && !lights) return undefined;
+  if (!canRipple && !lights) return undefined;
   const fields: FormField[] = [];
-  if (presence) {
+  if (canRipple) {
     fields.push({
       name: "ripple",
       label: "Ripple",
-      // "Presence detected" rather than "the sensor is on": this is offered to
-      // a device_tracker and a person too, and neither of those is a sensor.
-      helper: "Draws a pulsing ring while presence is detected here",
+      // "Detected" rather than "the sensor is on": this is offered to a
+      // device_tracker and a person too, and neither of those is a sensor.
+      // It stays vague about *what* is detected because a vibration sensor
+      // rings for a knock, not for presence (issue #202).
+      helper: "Draws a pulsing ring while this device detects something",
       selector: { boolean: {} },
     });
     if (ripple) {
@@ -1213,6 +1215,12 @@ export function itemBehaviourForm(it: FloorItem): FormSpec {
   return {
     fields: [
       {
+        name: "hideWhenInactive",
+        label: "Only when active",
+        helper: "Hide on the card while the entity is off/idle (still editable here)",
+        selector: { boolean: {} },
+      },
+      {
         name: "tap_action",
         label: "Tap action",
         selector: { ui_action: { default_action: defaultItemAction(it.entity).action } },
@@ -1225,24 +1233,12 @@ export function itemBehaviourForm(it: FloorItem): FormSpec {
       },
     ],
     data: {
-      showState: it.showState ?? false,
-      showName: it.showName ?? false,
-      labelSize: it.labelSize ?? DEFAULT_LABEL_SIZE,
+      hideWhenInactive: it.hideWhenInactive ?? false,
       tap_action: it.tap_action,
       hold_action: it.hold_action,
       double_tap_action: it.double_tap_action,
     },
-    toPatch: (patch) => {
-      if (!("badgeMode" in patch) && !("ripple" in patch)) return patch;
-      const { badgeMode, ripple: ring, ...rest } = patch;
-      return {
-        ...rest,
-        ...badgeModePatch(
-          (badgeMode as BadgeMode | undefined) ?? badgeModeOf(it),
-          ring === undefined ? ripple : !!ring
-        ),
-      };
-    },
+    toPatch: identity,
   };
 }
 
@@ -1312,6 +1308,16 @@ export function furnitureForm(
         helper: areaScopeHelper(areaScope, "Optional — lets the drawing change color with a sensor"),
         selector: areaScopedEntity(areaScope, f.entity),
       },
+      // Clicking it changes floor (issue #121). Offered on any piece rather
+      // than only on the built-in `stairs`, because a plan can draw its own
+      // staircase and a rule keyed on one symbol id would leave those out.
+      // Empty on everything by default, so it is a row and not a nag.
+      {
+        name: "goToFloor",
+        label: "Go to floor",
+        helper: "Clicking this piece changes floor — for a staircase",
+        selector: dropdown(opt("", "Nothing"), opt("up", "Up one floor"), opt("down", "Down one floor")),
+      },
     ],
     data: {
       type: f.type,
@@ -1320,8 +1326,10 @@ export function furnitureForm(
       h: f.h,
       angle: f.angle ?? 0,
       entity: f.entity ?? "",
+      goToFloor: f.goToFloor ?? "",
     },
-    toPatch: identity,
+    // "" is the empty option, and means the piece is ordinary furniture.
+    toPatch: (p) => ("goToFloor" in p && !p.goToFloor ? { ...p, goToFloor: undefined } : p),
   };
 }
 
