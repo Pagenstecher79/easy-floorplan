@@ -146,6 +146,15 @@ its own `percentage` attribute, and its label hung to the **left** of the badge,
 so a device that labels itself *without* its own state and a label that is not
 underneath are both on the plan at once.
 
+The plan has **two floors**, and a staircase on each that you can click to
+change floor (issue #121): the ground floor's is `goToFloor: up`, the one
+upstairs is `goToFloor: down`. The corner switcher is still there — the stairs
+are a second way up, not a replacement for it. Upstairs is deliberately sparse:
+enough to know you changed floor, not a second plan to keep up to date.
+
+Worth trying: move the ground floor's staircase to the top floor in the editor
+and it stops being a button, because there is no floor above it.
+
 The plan also carries one device bound to `light.deleted_by_accident`, which is
 not an entity and never will be. It is what a renamed or deleted binding looks
 like, and the reason it is hard-coded rather than switchable is that no live

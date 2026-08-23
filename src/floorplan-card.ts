@@ -61,6 +61,7 @@ import {
   renderRipple,
   renderFurniture,
   furnitureColor,
+  furnitureFloorTarget,
   renderTracker,
   renderArea,
   renderAreaBorder,
@@ -473,6 +474,19 @@ export class FloorplanCard extends LitElement {
         ></ha-icon>
       </div>
     `;
+  }
+
+  /**
+   * Switch to a floor, from the switcher or from a staircase (issue #121).
+   *
+   * Shared so the two cannot drift apart on the things that are easy to
+   * forget: remembering the choice for the next preview the editor builds, and
+   * dropping a zoom that belonged to the floor being left.
+   */
+  private _goToFloor(floors: readonly Floor[], id: string): void {
+    this._activeFloorId = id;
+    lastViewedFloor.set(floorMemoryKey(floors), id);
+    this._zoomedAreaId = undefined;
   }
 
   /** Tapping a room zooms the plan in to it; tapping the same room again zooms back out. */
@@ -927,13 +941,27 @@ export class FloorplanCard extends LitElement {
                   : nothing;
               })}
             </g>
-            ${active.furniture.map((f) =>
-              renderFurniture(
+            ${active.furniture.map((f) => {
+              const drawn = renderFurniture(
                 f,
                 furnitureColor(f, f.entity ? this.hass?.states[f.entity]?.state : undefined),
                 symbolCatalog(c.symbols)
-              )
-            )}
+              );
+              // Stairs that go somewhere (issue #121). Only when there is a
+              // floor that way: at the top of the building an "up" staircase
+              // is still a staircase, but it takes no clicks rather than
+              // offering a control that does nothing.
+              const to = furnitureFloorTarget(f, floors, active.id);
+              if (!to) return drawn;
+              return svg`<g class="fp-furniture-link" role="button" tabindex="0"
+                    title=${`Go to ${floors.find((x) => x.id === to)?.name ?? "the next floor"}`}
+                    @click=${() => this._goToFloor(floors, to)}
+                    @keydown=${(e: KeyboardEvent) => {
+                      if (e.key !== "Enter" && e.key !== " ") return;
+                      e.preventDefault();
+                      this._goToFloor(floors, to);
+                    }}>${drawn}</g>`;
+            })}
             <!-- Sunlight through the openings. Under the walls on purpose:
                  light lands on the floor, and the walls stay crisp lines over
                  it rather than being tinted by the patches they let in. The
@@ -1185,13 +1213,7 @@ export class FloorplanCard extends LitElement {
               class=${f.id === active.id ? "active" : ""}
               title=${f.name}
               style=${accent ? `background:${accent};border-color:${accent};` : nothing}
-              @click=${() => {
-                this._activeFloorId = f.id;
-                // Remember it for the next element the editor preview builds.
-                lastViewedFloor.set(floorMemoryKey(floors), f.id);
-                // A room on the floor just left is meaningless on the new one.
-                this._zoomedAreaId = undefined;
-              }}
+              @click=${() => this._goToFloor(floors, f.id)}
             >
               ${f.short || f.name}
             </button>
@@ -1421,6 +1443,16 @@ export class FloorplanCard extends LitElement {
     }
     .area-tap-target {
       cursor: pointer;
+    }
+    /* A staircase that changes floor (issue #121). The pointer is the whole
+       affordance — the symbol already draws an arrow saying which way it
+       goes — and it only exists on a piece that has somewhere to lead. */
+    .fp-furniture-link {
+      cursor: pointer;
+    }
+    .fp-furniture-link:focus-visible {
+      outline: 2px solid var(--fp-skin-accent, var(--primary-color, #03a9f4));
+      outline-offset: 2px;
     }
     svg {
       position: absolute;

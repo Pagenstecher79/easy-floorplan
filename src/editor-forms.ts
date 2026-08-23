@@ -1151,6 +1151,16 @@ export function furnitureForm(
         helper: areaScopeHelper(areaScope, "Optional — lets the drawing change color with a sensor"),
         selector: areaScopedEntity(areaScope, f.entity),
       },
+      // Clicking it changes floor (issue #121). Offered on any piece rather
+      // than only on the built-in `stairs`, because a plan can draw its own
+      // staircase and a rule keyed on one symbol id would leave those out.
+      // Empty on everything by default, so it is a row and not a nag.
+      {
+        name: "goToFloor",
+        label: "Go to floor",
+        helper: "Clicking this piece changes floor — for a staircase",
+        selector: dropdown(opt("", "Nothing"), opt("up", "Up one floor"), opt("down", "Down one floor")),
+      },
     ],
     data: {
       type: f.type,
@@ -1159,8 +1169,10 @@ export function furnitureForm(
       h: f.h,
       angle: f.angle ?? 0,
       entity: f.entity ?? "",
+      goToFloor: f.goToFloor ?? "",
     },
-    toPatch: identity,
+    // "" is the empty option, and means the piece is ordinary furniture.
+    toPatch: (p) => ("goToFloor" in p && !p.goToFloor ? { ...p, goToFloor: undefined } : p),
   };
 }
 

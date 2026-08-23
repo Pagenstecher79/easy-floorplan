@@ -47,7 +47,7 @@ screen size.
 <img width="444" height="313" alt="night" src="https://github.com/user-attachments/assets/1590b710-d88f-4a34-986b-b08640a45f4c" />
 
 
-- **Multiple floors** — per-floor elements with a switcher in both the editor and the card.
+- **Multiple floors** — per-floor elements with a switcher in both the editor and the card. (${\color{red}NEW!}$) Give a staircase `goToFloor: up` and clicking it takes you there.
 - **Background image** — trace over a floor-plan scan, per floor, with adjustable opacity.
 - (${\color{red}NEW!}$) **Skins** — restyle the whole plan from one line of config: `default` follows your Home Assistant theme, `odnetnin` is chunky charcoal on cream, `pastel` is soft and low-contrast, `tron` is neon on near-black. Colors you set on an element yourself always win.
   
@@ -559,7 +559,7 @@ without turning into the color of the light. Pools never intercept clicks.
 
 ### Furniture
 
-`{ id, type, x, y, w, h, angle?, hand?, color?, entity?, activeColor?, stateColor? }`
+`{ id, type, x, y, w, h, angle?, hand?, color?, entity?, activeColor?, stateColor?, goToFloor? }`
 
 `type` names a **symbol** — one of the ~26 the card ships with (`table`, `sofa`, `bed`,
 `fridge`, `stairs`, …; the full set is [`furniture/`](furniture/), a file each), or one you
@@ -574,6 +574,9 @@ The editor's **+ Add** picker draws every symbol at its real size and is searcha
 Bind an **entity** and `stateColor` / `activeColor` recolor the whole diagram — a plant
 goes red when its soil sensor says it needs watering, a cabinet highlights while its
 contact sensor is open.
+
+**`goToFloor`** (`up` / `down`) makes clicking the piece change floor — written for the
+`stairs` symbol. See [Stairs that change floor](#stairs-that-change-floor).
 
 ```yaml
 { id: plant1, type: plant, x: 300, y: 220, w: 40, h: 40,
@@ -1294,6 +1297,39 @@ anything.
 A room with an action bound announces itself as a button and takes a tab stop; a room that
 only zooms does not, exactly as before.
 
+## Stairs that change floor
+
+A staircase already draws an arrow saying which way it goes. `goToFloor` makes that a
+promise the card keeps (issue #121):
+
+```yaml
+floors:
+  - id: ground
+    name: Ground floor
+    furniture:
+      - { id: stairs_up, type: stairs, x: 640, y: 300, w: 80, h: 140, goToFloor: up }
+  - id: upstairs
+    name: Upstairs
+    furniture:
+      - { id: stairs_down, type: stairs, x: 640, y: 300, w: 80, h: 140, goToFloor: down }
+```
+
+Click the stairs, change floor. `up` is the next entry in `floors`, `down` the previous —
+the list is read bottom-to-top — and the button's tooltip names the floor it leads to.
+
+**At the end of the list it leads nowhere, and stops being a button.** An `up` staircase
+on the top floor still draws as a staircase; it just takes no clicks, gets no pointer
+cursor and no tab stop. A control that does nothing is worse than no control. It does not
+wrap either: the loft is not above the cellar.
+
+The option is on **furniture generally**, not just the built-in `stairs` symbol — a plan
+can [draw its own](#drawing-your-own) staircase, and a rule keyed on one symbol id would
+leave those out. It sits under **Behavior** in the furniture panel.
+
+This does not replace the floor switcher in the card's corner; the stairs are a second way
+up. Set `floors` and you get both.
+
+## Offline devices
 ## Offline devices
 
 An entity that has dropped out no longer looks like one that is simply switched off.
