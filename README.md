@@ -24,6 +24,7 @@ screen size.
 
 ## Features
 - **Visual editor** — draw walls, drop doors and windows that snap onto them, drag, nudge with arrow keys, multi-select, copy/paste, undo/redo, zoom.
+  - (${\color{red}NEW!}$) **Apply** — save the plan to the dashboard *without* closing the editor, so you can judge a change on the real card (in a second tab, or by collapsing the editor) instead of in the small preview beside it, then carry straight on. Needs Home Assistant 2025.3 or newer; on anything older the button says so and Save still works.
 - **Devices** — bind any entity to an icon: tap to toggle or open more-info, live state or attribute label, custom icon, size, rotation.
   - **Presence ripples** — presence and vibration sensors drawn as animated rings instead of a static icon.
   - (${\color{red}NEW!}$) **Cast light** — a light pools its own color and brightness onto the plan; overlapping pools mix, so a warm lamp and a cool one blend between them.
