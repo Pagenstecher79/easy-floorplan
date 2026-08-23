@@ -462,16 +462,18 @@ describe("itemForm", () => {
     expect(names({ ...item, kind: "sensor", entity: "sensor.temp" } as FloorItem)).not.toContain("glow");
   });
 
-  it("offers Ripple on presence devices only, sized behind the toggle (#127)", () => {
+  it("offers Ripple on detecting devices only, sized behind the toggle (#127, #202)", () => {
     const motion = { ...item, entity: "binary_sensor.hall", kind: "binary_sensor" } as FloorItem;
     const names = (it: FloorItem, dc?: string) => itemForm(it, dc).fields.map((x) => x.name);
-    // A light is not something that detects presence, whatever it can do.
+    // A light is not something that detects anything, whatever it can do.
     expect(names(item)).not.toContain("ripple");
     expect(names(item, "motion")).not.toContain("ripple");
     // Nor is a binary sensor whose class says door / leak / nothing at all.
     expect(names(motion)).not.toContain("ripple");
     expect(names(motion, "door")).not.toContain("ripple");
-    for (const dc of ["motion", "occupancy", "presence"]) {
+    // vibration is offered alongside the presence classes (issue #202): a
+    // vibration sensor on a door marks that spot the way motion marks a room.
+    for (const dc of ["motion", "occupancy", "presence", "vibration"]) {
       expect(names(motion, dc)).toContain("ripple");
     }
     expect(names({ ...item, entity: "device_tracker.phone" } as FloorItem)).toContain("ripple");
