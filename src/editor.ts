@@ -2059,6 +2059,8 @@ export class FloorplanCardEditor extends LitElement {
   private static readonly FURNITURE_GROUPS = [
     ["Shape", ["type", "hand", "w", "h", "angle"]],
     ["What it reads", ["entity"]],
+    // What clicking it does — a staircase that changes floor (issue #121).
+    ["Behavior", ["goToFloor"]],
   ] as const;
 
   private static readonly TRACKER_GROUPS = [

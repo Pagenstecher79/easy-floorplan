@@ -1670,6 +1670,32 @@ export function pressEffectOf(c: { pressEffect?: PressEffect }): PressEffect {
 }
 
 /**
+ * Which floor a piece of furniture's click leads to (issue #121), or
+ * `undefined` when it leads nowhere.
+ *
+ * `floors` is bottom-to-top, so `up` is the next entry and `down` the
+ * previous. Nothing at that end of the list means no target, and the card
+ * draws the piece as ordinary furniture: a staircase on the top floor is still
+ * a staircase, but it is not a button, because a button that does nothing is
+ * worse than no button.
+ *
+ * Deliberately not wrapping. A plan's floors are a building, and the top of a
+ * building is not above the basement — a stair click that teleported you from
+ * the loft to the cellar would be a bug report, not a feature.
+ */
+export function furnitureFloorTarget(
+  f: Pick<Furniture, "goToFloor">,
+  floors: readonly { id: string }[],
+  activeFloorId: string | undefined,
+): string | undefined {
+  if (f.goToFloor !== "up" && f.goToFloor !== "down") return undefined;
+  const i = floors.findIndex((x) => x.id === activeFloorId);
+  if (i < 0) return undefined;
+  const next = floors[i + (f.goToFloor === "up" ? 1 : -1)];
+  return next?.id;
+}
+
+/**
  * Which offline treatment a plan uses (issue #162), resolving anything
  * unrecognised to the default — the value becomes a class name, exactly as
  * {@link pressEffectOf}'s does, so an unchecked string would silently mean
