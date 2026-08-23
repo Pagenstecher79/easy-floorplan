@@ -330,6 +330,23 @@ export class FloorplanCardEditor extends LitElement {
   /** Project section expanded? Collapsed by default — page settings are touched rarely. */
   @state() private _projectOpen = false;
   /**
+   * Which config groups are expanded, by title (issue #205).
+   *
+   * Every group starts collapsed, so selecting a device shows its eight
+   * headings rather than two dozen controls, and the thing you came for is one
+   * click away instead of a scroll away.
+   *
+   * Keyed by title alone, deliberately: the titles are the panels' shared
+   * vocabulary — "Color" means the same thing on a room, a device and a
+   * shutter — so opening one and clicking through several elements keeps the
+   * section you are working in open, instead of re-collapsing on every
+   * selection. Not persisted: it is a view state, not config.
+   *
+   * Replaced rather than mutated on toggle — Lit compares by identity, and a
+   * mutated Set is the same object.
+   */
+  @state() private _openGroups: ReadonlySet<string> = new Set();
+  /**
    * Expanded (fullscreen) editing. HA renders the card config editor in a
    * narrow dialog (~480–560px), which is cramped for a visual canvas editor.
    * When true the `.editor` root is promoted to the top layer so the canvas
@@ -2043,17 +2060,42 @@ export class FloorplanCardEditor extends LitElement {
    * in. Grouping them costs a heading and a hairline each; what it buys is
    * that "where do I set the label position" has an answer you can guess.
    *
+   * The heading is a disclosure button and the group starts collapsed (issue
+   * #205): headings you can skim beat controls you have to scroll past, and
+   * the panel now opens as a table of contents for the element. See
+   * `_openGroups` for why the open set is keyed by title.
+   *
+   * Collapsed means *not rendered*, not hidden — so a closed group's `ha-form`
+   * costs nothing, and reopening it rebuilds from `data` the same way a
+   * selection change does.
+   *
    * Takes the content rather than a field list because a group is rarely all
    * `ha-form` — the readings list, the icon row and the colour pickers are
    * hand-rolled, and they belong *inside* the group whose subject they share.
    */
   private _renderGroup(title: string, ...content: unknown[]): TemplateResult {
+    const open = this._openGroups.has(title);
     return html`
-      <div class="cfg-group">
-        <p class="cfg-group-title">${title}</p>
-        ${content}
+      <div class="cfg-group ${open ? "open" : ""}">
+        <button
+          class="cfg-group-title"
+          type="button"
+          aria-expanded=${open}
+          @click=${() => this._toggleGroup(title)}
+        >
+          <ha-icon icon=${open ? "mdi:chevron-down" : "mdi:chevron-right"}></ha-icon>
+          <span>${title}</span>
+        </button>
+        ${open ? content : nothing}
       </div>
     `;
+  }
+
+  /** Open a collapsed config group, or collapse an open one. */
+  private _toggleGroup(title: string): void {
+    const next = new Set(this._openGroups);
+    if (!next.delete(title)) next.add(title);
+    this._openGroups = next;
   }
 
   /**
@@ -6089,6 +6131,15 @@ export class FloorplanCardEditor extends LitElement {
       padding-top: 14px;
       margin-top: 18px;
     }
+    /* A collapsed group is one line, and a column of one-line headings wants
+       to read as a list rather than as eight things with a gap each. */
+    .cfg-group:not(.open) {
+      padding-top: 8px;
+      margin-top: 8px;
+    }
+    /* Ties with the rule above on specificity, so it has to stay below it:
+       the first group leads the panel and takes no space above it whether it
+       is open or shut. */
     .cfg-group:first-of-type {
       border-top: none;
       padding-top: 0;
@@ -6096,13 +6147,38 @@ export class FloorplanCardEditor extends LitElement {
     }
     /* The heading names the group without competing with the field labels
        beneath it: same size, but the primary ink and a little letter-spacing,
-       so it reads as a heading rather than as one more row label. */
+       so it reads as a heading rather than as one more row label.
+
+       It is also the group's disclosure control, so it undoes the panel's
+       generic button look (border, chip padding, capitalize — which would
+       print "What it reads" as "What It Reads") and keeps the heading's own
+       type. Full width so the whole line is the hit target, not just the
+       glyph. */
     .cfg-group-title {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      width: 100%;
       margin: 0 0 10px;
+      padding: 2px 0;
+      border: none;
+      border-radius: 0;
+      background: none;
+      cursor: pointer;
+      text-align: left;
+      text-transform: none;
+      font: inherit;
       font-size: 13px;
       font-weight: 500;
       letter-spacing: 0.02em;
       color: var(--primary-text-color);
+    }
+    /* The chevron is the affordance, so it stays quieter than the title it
+       points at. */
+    .cfg-group-title ha-icon {
+      --mdc-icon-size: 18px;
+      flex: none;
+      color: var(--secondary-text-color);
     }
     /* ha-form packs its own fields tightly; the last one in a group should not
        sit flush against the next group's rule. */
