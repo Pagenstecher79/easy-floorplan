@@ -43,7 +43,7 @@ import {
   WALL_THICKNESS,
   badgeContentOf,
   domainIconAnimation,
-  isRippleEntity,
+  isPresenceEntity,
   normalizeOverlayScale,
   normalizePlanRotation,
   openingActionForGesture,
@@ -973,32 +973,30 @@ export function itemBadgeForm(it: FloorItem, badgeSource?: BadgeSourceInfo): For
 
 /**
  * Group 6: the optional visual extras, each offered only where it means
- * something — a ring on a thermostat says "something is happening here",
- * which is a lie, and nothing but a light has a colour to cast.
+ * something — a ring on a thermostat says "someone is here", which is a lie,
+ * and nothing but a light has a colour to cast.
  *
  * Returns `undefined` when this device qualifies for neither, so the editor
  * can leave the whole group out rather than print an empty heading.
  *
  * `deviceClass` is the entity's HA device class, resolved off `hass` at the
  * call site as the openings already do theirs: it is what separates a motion
- * or vibration sensor from a door contact, and so decides whether the ring is
- * offered at all (issues #127, #202).
+ * sensor from a door contact, and so decides whether the ring is offered at
+ * all (issue #127).
  */
 export function itemEffectsForm(it: FloorItem, deviceClass?: string): FormSpec | undefined {
   const ripple = itemHasRipple(it);
-  const canRipple = isRippleEntity(it.entity, deviceClass);
+  const presence = isPresenceEntity(it.entity, deviceClass);
   const lights = it.kind === "light" || it.entity?.startsWith("light.");
-  if (!canRipple && !lights) return undefined;
+  if (!presence && !lights) return undefined;
   const fields: FormField[] = [];
-  if (canRipple) {
+  if (presence) {
     fields.push({
       name: "ripple",
       label: "Ripple",
-      // "Detected" rather than "the sensor is on": this is offered to a
-      // device_tracker and a person too, and neither of those is a sensor.
-      // It stays vague about *what* is detected because a vibration sensor
-      // rings for a knock, not for presence (issue #202).
-      helper: "Draws a pulsing ring while this device detects something",
+      // "Presence detected" rather than "the sensor is on": this is offered to
+      // a device_tracker and a person too, and neither of those is a sensor.
+      helper: "Draws a pulsing ring while presence is detected here",
       selector: { boolean: {} },
     });
     if (ripple) {
@@ -1314,16 +1312,6 @@ export function furnitureForm(
         helper: areaScopeHelper(areaScope, "Optional — lets the drawing change color with a sensor"),
         selector: areaScopedEntity(areaScope, f.entity),
       },
-      // Clicking it changes floor (issue #121). Offered on any piece rather
-      // than only on the built-in `stairs`, because a plan can draw its own
-      // staircase and a rule keyed on one symbol id would leave those out.
-      // Empty on everything by default, so it is a row and not a nag.
-      {
-        name: "goToFloor",
-        label: "Go to floor",
-        helper: "Clicking this piece changes floor — for a staircase",
-        selector: dropdown(opt("", "Nothing"), opt("up", "Up one floor"), opt("down", "Down one floor")),
-      },
     ],
     data: {
       type: f.type,
@@ -1332,10 +1320,8 @@ export function furnitureForm(
       h: f.h,
       angle: f.angle ?? 0,
       entity: f.entity ?? "",
-      goToFloor: f.goToFloor ?? "",
     },
-    // "" is the empty option, and means the piece is ordinary furniture.
-    toPatch: (p) => ("goToFloor" in p && !p.goToFloor ? { ...p, goToFloor: undefined } : p),
+    toPatch: identity,
   };
 }
 

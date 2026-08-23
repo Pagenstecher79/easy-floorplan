@@ -544,10 +544,8 @@ export interface FloorItem {
    * How the device is drawn. Default "badge".
    *
    * The ripple modes render on any entity. The editor only *offers* them on a
-   * device that detects something where it sits (issues #127, #202) — a
-   * motion, occupancy, presence or vibration sensor, or a `device_tracker` /
-   * `person`, per {@link isRippleEntity} — so a ring on anything else is a
-   * YAML-only choice.
+   * presence device (issue #127) — a ring says "someone is there" — so a ring
+   * on anything else is a YAML-only choice.
    */
   display?: ItemDisplay;
   /**
@@ -749,23 +747,6 @@ export interface Furniture {
   angle?: number;
   /** Stroke/fill color. Defaults to gray so it reads differently from walls. */
   color?: string;
-  /**
-   * Clicking this changes floor (issue #121) — `up` for the next floor in
-   * `floors`, `down` for the previous one.
-   *
-   * Written for the **stairs** symbol, which is where a plan already draws the
-   * thing people expect to click: the arrow on a staircase is a promise that
-   * it goes somewhere. It is not restricted to that symbol, because a plan can
-   * define its own staircase (see "Drawing your own") and a rule keyed on one
-   * built-in id would leave those out.
-   *
-   * `floors` is read bottom-to-top, so `up` is the next entry and `down` the
-   * previous. At the end of the list the direction has nowhere to go: the
-   * piece draws as ordinary furniture and takes no clicks, rather than
-   * offering a control that does nothing. It does not wrap — a staircase on
-   * the top floor does not lead to the basement.
-   */
-  goToFloor?: "up" | "down";
   /**
    * Optional entity that makes the drawing live (issue #82) — a soil sensor on
    * a plant, a water temperature sensor on a fish tank, a contact sensor on a

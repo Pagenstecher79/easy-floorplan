@@ -1497,34 +1497,29 @@ export function resolveIconAnimation(
 }
 
 /**
- * Device classes a ripple ring is offered for (issue #127). `motion` and
- * `occupancy` are HA's own binary-sensor classes for someone being there;
- * `presence` is the home/away one. `vibration` joins them (issue #202,
- * @GhislainC): a vibration sensor on a door reports the same thing a ring
- * says — something happened at this spot on the plan — so the ring is as true
- * of it as of a motion sensor.
+ * Device classes that mean "something is here" — the sensors a ripple ring was
+ * drawn for (issue #127). `motion` and `occupancy` are HA's own binary-sensor
+ * classes; `presence` is the home/away one.
  */
-const RIPPLE_DEVICE_CLASSES = new Set(["motion", "occupancy", "presence", "vibration"]);
+const PRESENCE_DEVICE_CLASSES = new Set(["motion", "occupancy", "presence"]);
 
 /**
- * Whether a device detects something happening where it sits, and so should be
- * offered the ripple ring (issue #127) — the same shape of gate as "Cast
- * light" on a `light`.
+ * Whether a device detects presence, and so should be offered the ripple ring
+ * (issue #127) — the same shape of gate as "Cast light" on a `light`.
  *
  * A `device_tracker` or `person` qualifies on its domain alone; a
  * `binary_sensor` needs the device class to say so, which is what separates a
- * motion or vibration sensor from a door contact or a leak detector. A binary
- * sensor with no device class set therefore does not qualify: it could be
- * anything, and guessing from the entity id would ring doorbells and smoke
- * alarms.
+ * motion sensor from a door contact or a leak detector. A binary sensor with
+ * no device class set is therefore *not* presence: it could be anything, and
+ * guessing from the entity id would ring doorbells and smoke alarms.
  */
-export function isRippleEntity(
+export function isPresenceEntity(
   entity: string | undefined,
   deviceClass: string | undefined,
 ): boolean {
   const domain = entity?.split(".")[0];
   if (domain === "device_tracker" || domain === "person") return true;
-  return domain === "binary_sensor" && !!deviceClass && RIPPLE_DEVICE_CLASSES.has(deviceClass);
+  return domain === "binary_sensor" && !!deviceClass && PRESENCE_DEVICE_CLASSES.has(deviceClass);
 }
 
 /**
@@ -1667,32 +1662,6 @@ export function pressEffectOf(c: { pressEffect?: PressEffect }): PressEffect {
   return v === "scale" || v === "ripple" || v === "flash" || v === "none"
     ? v
     : DEFAULT_PRESS_EFFECT;
-}
-
-/**
- * Which floor a piece of furniture's click leads to (issue #121), or
- * `undefined` when it leads nowhere.
- *
- * `floors` is bottom-to-top, so `up` is the next entry and `down` the
- * previous. Nothing at that end of the list means no target, and the card
- * draws the piece as ordinary furniture: a staircase on the top floor is still
- * a staircase, but it is not a button, because a button that does nothing is
- * worse than no button.
- *
- * Deliberately not wrapping. A plan's floors are a building, and the top of a
- * building is not above the basement — a stair click that teleported you from
- * the loft to the cellar would be a bug report, not a feature.
- */
-export function furnitureFloorTarget(
-  f: Pick<Furniture, "goToFloor">,
-  floors: readonly { id: string }[],
-  activeFloorId: string | undefined,
-): string | undefined {
-  if (f.goToFloor !== "up" && f.goToFloor !== "down") return undefined;
-  const i = floors.findIndex((x) => x.id === activeFloorId);
-  if (i < 0) return undefined;
-  const next = floors[i + (f.goToFloor === "up" ? 1 : -1)];
-  return next?.id;
 }
 
 /**

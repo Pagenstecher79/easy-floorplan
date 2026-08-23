@@ -102,7 +102,7 @@ import {
   entityIsActive,
   lightBadgePaint,
   itemRawValue,
-  isRippleEntity,
+  isPresenceEntity,
   badgeContentOf,
   editorItemLabel,
   badgeValue,
@@ -143,7 +143,6 @@ import {
   type Sel,
   type SelKind,
 } from "./editor-geometry";
-import { applyCardConfig } from "./editor-save";
 import type { AreaEntityScope } from "./editor-forms";
 import {
   furnitureChoices,
@@ -260,8 +259,6 @@ const WALL_SNAP = 35;
  */
 const PICK_EPS_PX = 8;
 const HISTORY_MAX = 60;
-/** How long Apply stays on "Saved" before returning to its idle label. */
-const APPLY_SAVED_MS = 2000;
 /** Angle (degrees) within which a drawn wall is snapped flat to horizontal/vertical. */
 const WALL_AXIS_SNAP_DEG = 10;
 
@@ -334,38 +331,12 @@ export class FloorplanCardEditor extends LitElement {
   /** Project section expanded? Collapsed by default — page settings are touched rarely. */
   @state() private _projectOpen = false;
   /**
-   * Which config groups are expanded, by title (issue #205).
-   *
-   * Every group starts collapsed, so selecting a device shows its eight
-   * headings rather than two dozen controls, and the thing you came for is one
-   * click away instead of a scroll away.
-   *
-   * Keyed by title alone, deliberately: the titles are the panels' shared
-   * vocabulary — "Color" means the same thing on a room, a device and a
-   * shutter — so opening one and clicking through several elements keeps the
-   * section you are working in open, instead of re-collapsing on every
-   * selection. Not persisted: it is a view state, not config.
-   *
-   * Replaced rather than mutated on toggle — Lit compares by identity, and a
-   * mutated Set is the same object.
-   */
-  @state() private _openGroups: ReadonlySet<string> = new Set();
-  /**
    * Expanded (fullscreen) editing. HA renders the card config editor in a
    * narrow dialog (~480–560px), which is cramped for a visual canvas editor.
    * When true the `.editor` root is promoted to the top layer so the canvas
    * gets real room and the element/project sections dock beside it.
    */
   @state() private _fullscreen = false;
-  /**
-   * Apply (issue #198): "saving" while the dashboard write is in flight,
-   * "saved" for a moment after, so the click has a visible answer — the card
-   * that changed is on another tab, or behind the fullscreen workspace.
-   */
-  @state() private _applyState: "idle" | "saving" | "saved" = "idle";
-  /** Why the last Apply didn't go through, shown beside the button. */
-  @state() private _applyError = "";
-  private _applyResetTimer: ReturnType<typeof setTimeout> | null = null;
 
   @query(".editor") private _editorEl?: HTMLElement;
   @query("svg") private _svg?: SVGSVGElement;
@@ -430,7 +401,6 @@ export class FloorplanCardEditor extends LitElement {
     window.removeEventListener("keydown", this._onKeyDown, true);
     this.removeEventListener("keydown", this._onHostKeyDown);
     window.removeEventListener("focusin", this._onFocusIn);
-    if (this._applyResetTimer !== null) clearTimeout(this._applyResetTimer);
     this._resetPinch();
     super.disconnectedCallback();
   }
@@ -2059,8 +2029,6 @@ export class FloorplanCardEditor extends LitElement {
   private static readonly FURNITURE_GROUPS = [
     ["Shape", ["type", "hand", "w", "h", "angle"]],
     ["What it reads", ["entity"]],
-    // What clicking it does — a staircase that changes floor (issue #121).
-    ["Behavior", ["goToFloor"]],
   ] as const;
 
   private static readonly TRACKER_GROUPS = [
@@ -2076,42 +2044,17 @@ export class FloorplanCardEditor extends LitElement {
    * in. Grouping them costs a heading and a hairline each; what it buys is
    * that "where do I set the label position" has an answer you can guess.
    *
-   * The heading is a disclosure button and the group starts collapsed (issue
-   * #205): headings you can skim beat controls you have to scroll past, and
-   * the panel now opens as a table of contents for the element. See
-   * `_openGroups` for why the open set is keyed by title.
-   *
-   * Collapsed means *not rendered*, not hidden — so a closed group's `ha-form`
-   * costs nothing, and reopening it rebuilds from `data` the same way a
-   * selection change does.
-   *
    * Takes the content rather than a field list because a group is rarely all
    * `ha-form` — the readings list, the icon row and the colour pickers are
    * hand-rolled, and they belong *inside* the group whose subject they share.
    */
   private _renderGroup(title: string, ...content: unknown[]): TemplateResult {
-    const open = this._openGroups.has(title);
     return html`
-      <div class="cfg-group ${open ? "open" : ""}">
-        <button
-          class="cfg-group-title"
-          type="button"
-          aria-expanded=${open}
-          @click=${() => this._toggleGroup(title)}
-        >
-          <ha-icon icon=${open ? "mdi:chevron-down" : "mdi:chevron-right"}></ha-icon>
-          <span>${title}</span>
-        </button>
-        ${open ? content : nothing}
+      <div class="cfg-group">
+        <p class="cfg-group-title">${title}</p>
+        ${content}
       </div>
     `;
-  }
-
-  /** Open a collapsed config group, or collapse an open one. */
-  private _toggleGroup(title: string): void {
-    const next = new Set(this._openGroups);
-    if (!next.delete(title)) next.add(title);
-    this._openGroups = next;
   }
 
   /**
@@ -2911,30 +2854,6 @@ export class FloorplanCardEditor extends LitElement {
             ${this._fullscreen ? "Exit" : "Expand"}
           </button>
 
-          <!-- Apply: save the plan to the dashboard and keep editing (issue
-               #198). HA's own Save closes the dialog, and the preview beside
-               the editor is too small to judge where an icon really lands, so
-               checking one nudge cost a save, a close, a look, then reopening
-               and re-expanding the editor. Next to Expand because that is
-               where the need bites hardest: the fullscreen workspace covers
-               HA's footer, Save included. -->
-          <button
-            class="apply-btn"
-            ?disabled=${this._applyState === "saving"}
-            title="Save to the dashboard without closing the editor — the card behind updates"
-            @click=${this._apply}
-          >
-            <ha-icon
-              icon=${this._applyState === "saved" ? "mdi:check" : "mdi:content-save-outline"}
-            ></ha-icon>
-            ${this._applyState === "saved"
-              ? "Saved"
-              : this._applyState === "saving"
-                ? "Saving…"
-                : "Apply"}
-          </button>
-          ${this._applyError ? html`<span class="apply-error">${this._applyError}</span>` : nothing}
-
           <!-- Labels: declutter a dense plan while editing (issue #52). -->
           <button
             class="icon-btn"
@@ -3630,36 +3549,6 @@ export class FloorplanCardEditor extends LitElement {
     this._addMenuOpen = false;
     this._addQuery = "";
   }
-
-  /**
-   * Save the card to the dashboard and stay in the editor (issue #198).
-   *
-   * The heavy lifting is in `editor-save.ts`; what belongs here is the wait
-   * before it. Our edits reach HA through `config-changed`, which the element
-   * editor between us and the dialog re-fires only after its own render — and
-   * a field committed by the blur *this very click* caused is still in flight
-   * at this point. Letting the microtasks drain first is the difference
-   * between applying the plan and applying it one edit ago.
-   */
-  private _apply = async (): Promise<void> => {
-    if (this._applyState === "saving") return;
-    if (this._applyResetTimer !== null) clearTimeout(this._applyResetTimer);
-    this._applyState = "saving";
-    this._applyError = "";
-    await this.updateComplete;
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    const result = await applyCardConfig(this);
-    if (!result.ok) {
-      this._applyState = "idle";
-      this._applyError = result.error;
-      return;
-    }
-    this._applyState = "saved";
-    this._applyResetTimer = setTimeout(() => {
-      this._applyResetTimer = null;
-      this._applyState = "idle";
-    }, APPLY_SAVED_MS);
-  };
 
   /**
    * The "+ Add" popover: device, text, then every symbol as its real glyph.
@@ -4513,9 +4402,8 @@ export class FloorplanCardEditor extends LitElement {
       const it = this._floor().items.find((x) => x.id === sel.id);
       if (!it) return html`${nothing}`;
       const areaEntities = this._areaEntitiesAt(it.x, it.y);
-      // The entity's device class decides whether this device detects
-      // anything, and so whether the ripple is on offer at all (issues #127,
-      // #202).
+      // The entity's device class decides whether this is a presence device,
+      // and so whether the ripple is on offer at all (issue #127).
       const deviceClass = it.entity
         ? (this.hass?.states[it.entity]?.attributes?.device_class as string | undefined)
         : undefined;
@@ -4595,7 +4483,7 @@ export class FloorplanCardEditor extends LitElement {
               "Effects",
               this._renderForm(effects, apply),
               // The ring's colour belongs with the ring, not with the badge's.
-              isRippleEntity(it.entity, deviceClass) && itemHasRipple(it)
+              isPresenceEntity(it.entity, deviceClass) && itemHasRipple(it)
                 ? this._renderColorRow({
                     label: "Ripple color",
                     value: it.rippleColor,
@@ -4994,25 +4882,12 @@ export class FloorplanCardEditor extends LitElement {
       background: var(--card-background-color, #fff);
       overflow: hidden;
     }
-    /* Toolbar-icon buttons (Expand/Exit, Apply) — match the gear button's
-       icon+label alignment so they read as part of the toolbar. */
-    .expand-toggle,
-    .apply-btn {
+    /* Toolbar-icon button (Expand/Exit) — match the gear button's icon+label
+       alignment so it reads as part of the toolbar. */
+    .expand-toggle {
       display: inline-flex;
       align-items: center;
       gap: 5px;
-    }
-    /* Apply writes to the dashboard, unlike everything else in the toolbar —
-       accented so it reads as the one committing action. */
-    .apply-btn {
-      color: var(--primary-color, #03a9f4);
-      border-color: var(--primary-color, #03a9f4);
-    }
-    /* Why the last Apply didn't go through; sits in the toolbar so it is
-       visible in the fullscreen workspace too, where nothing else is. */
-    .apply-error {
-      font-size: 12px;
-      color: var(--error-color, #c62828);
     }
     /* Below the two toolbars: the canvas and the element/project sections.
        Stacked at dialog width; split into canvas + docked side panel when
@@ -6216,15 +6091,6 @@ export class FloorplanCardEditor extends LitElement {
       padding-top: 14px;
       margin-top: 18px;
     }
-    /* A collapsed group is one line, and a column of one-line headings wants
-       to read as a list rather than as eight things with a gap each. */
-    .cfg-group:not(.open) {
-      padding-top: 8px;
-      margin-top: 8px;
-    }
-    /* Ties with the rule above on specificity, so it has to stay below it:
-       the first group leads the panel and takes no space above it whether it
-       is open or shut. */
     .cfg-group:first-of-type {
       border-top: none;
       padding-top: 0;
@@ -6232,38 +6098,13 @@ export class FloorplanCardEditor extends LitElement {
     }
     /* The heading names the group without competing with the field labels
        beneath it: same size, but the primary ink and a little letter-spacing,
-       so it reads as a heading rather than as one more row label.
-
-       It is also the group's disclosure control, so it undoes the panel's
-       generic button look (border, chip padding, capitalize — which would
-       print "What it reads" as "What It Reads") and keeps the heading's own
-       type. Full width so the whole line is the hit target, not just the
-       glyph. */
+       so it reads as a heading rather than as one more row label. */
     .cfg-group-title {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      width: 100%;
       margin: 0 0 10px;
-      padding: 2px 0;
-      border: none;
-      border-radius: 0;
-      background: none;
-      cursor: pointer;
-      text-align: left;
-      text-transform: none;
-      font: inherit;
       font-size: 13px;
       font-weight: 500;
       letter-spacing: 0.02em;
       color: var(--primary-text-color);
-    }
-    /* The chevron is the affordance, so it stays quieter than the title it
-       points at. */
-    .cfg-group-title ha-icon {
-      --mdc-icon-size: 18px;
-      flex: none;
-      color: var(--secondary-text-color);
     }
     /* ha-form packs its own fields tightly; the last one in a group should not
        sit flush against the next group's rule. */
