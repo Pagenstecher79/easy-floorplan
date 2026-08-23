@@ -527,7 +527,8 @@ export interface FloorItem {
    *
    * The ripple modes render on any entity. The editor only *offers* them on a
    * device that detects something where it sits (issues #127, #202) — a
-   * presence sensor, or a vibration one — so a ring on anything else is a
+   * motion, occupancy, presence or vibration sensor, or a `device_tracker` /
+   * `person`, per {@link isRippleEntity} — so a ring on anything else is a
    * YAML-only choice.
    */
   display?: ItemDisplay;

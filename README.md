@@ -473,7 +473,7 @@ distorted anyway.
 | `name`        | string                                 | friendly name| Label / tooltip override.                             |
 | `size`        | number                                 | `34`         | Icon badge diameter (px).                              |
 | `angle`       | number                                 | `0`          | Icon rotation (deg).                                   |
-| `display`     | `badge` \| `ripple` \| `iconRipple`    | `badge`      | How the device is drawn. The editor spells this as the **Ripple** toggle (plus **Badge shows: Nothing** for `ripple`) and offers it on presence and vibration devices only; in YAML it works on any entity. |
+| `display`     | `badge` \| `ripple` \| `iconRipple`    | `badge`      | How the device is drawn. The editor spells this as the **Ripple** toggle (plus **Badge shows: Nothing** for `ripple`) and offers it only on devices that detect something where they sit (see [Presence ripples](#presence-ripples)); in YAML it works on any entity. |
 | `iconAnimation` | `auto` \| `none` \| `spin` \| `pulse` | `auto`       | Animate the icon while active. `auto`: fan spins; media player / vacuum pulse. The editor spells this as the icon options of **Badge shows**, showing `auto` as whatever it resolves to. |
 | `activeColor` | string                                 | theme color  | Badge color while on. Ignored while `stateColor` rules match. |
 | `rippleColor` | string                                 | `activeColor`| Ripple ring color, falling back to `activeColor` then the primary color. |
