@@ -57,34 +57,48 @@ describe("the wall neon sits outside the doorway mask (#203)", () => {
     });
   }
 
-  it("the card nests the mask INSIDE the neon group, not the other way round", () => {
-    const open = cardSource.indexOf(`<g class="fp-wall-neon">`);
-    expect(open, "neon group not found in the card template").toBeGreaterThan(-1);
-    const wallLine = cardSource.indexOf("class=\"wall fp-wall\"", open);
-    expect(wallLine).toBeGreaterThan(open);
-    // between the neon group opening and the wall itself there must be a mask
-    expect(cardSource.slice(open, wallLine)).toMatch(/mask=\$\{`url\(#\$\{this\._wallMaskId\}\)`\}/);
-  });
+  for (const [name, source] of [
+    ["card", cardSource],
+    ["editor", editorSource],
+  ] as const) {
+    it(`${name}: every masked wall opens its own neon group immediately before it`, () => {
+      // Per wall, not one group around the collection. Wrapping them together
+      // composites the strokes before filtering, so walls meeting at a corner
+      // glow once instead of twice and every joint dims — a silent change to
+      // how a plan looks, on top of the fix this is actually for.
+      const masked = [...source.matchAll(/<line[^>]*class="wall[^"]*"[^>]*mask=/gs)];
+      expect(masked.length, `no masked wall lines found in the ${name}`).toBeGreaterThan(0);
+      for (const m of masked) {
+        const before = source.slice(Math.max(0, m.index! - 160), m.index!);
+        expect(before, `unwrapped masked wall in the ${name} at index ${m.index}`).toMatch(
+          /<g class="fp-wall-neon">\s*$/,
+        );
+      }
+    });
+  }
 
-  it("every masked wall in the editor is wrapped by the neon group", () => {
-    // each editor wall <line class="wall ..."> carrying the doorway mask must
-    // have the neon group opened immediately before it
-    const masked = [...editorSource.matchAll(/<line[^>]*class="wall[^"]*"[^>]*mask=/g)];
-    expect(masked.length, "no masked wall lines found in the editor").toBeGreaterThan(0);
-    for (const m of masked) {
-      const before = editorSource.slice(Math.max(0, m.index! - 120), m.index!);
-      expect(before, `unwrapped masked wall near index ${m.index}`).toMatch(
-        /<g class="fp-wall-neon">\s*$/,
-      );
+  it("no neon group wraps the whole wall collection", () => {
+    // the shape that regressed joints: a neon group whose body is a .map(...)
+    for (const [name, source] of [["card", cardSource], ["editor", editorSource]] as const) {
+      const collectionWrap = /<g class="fp-wall-neon">\s*(<g mask|\$\{[a-zA-Z.?]*walls)/;
+      expect(collectionWrap.test(source), `${name} wraps the collection, not each wall`).toBe(false);
     }
   });
 
   it("says why, so the next person does not move it back onto the wall", () => {
     for (const source of [cardSource, editorSource]) {
       const at = source.indexOf(".fp-wall-neon {");
-      const nearby = source.slice(Math.max(0, at - 900), at);
+      const nearby = source.slice(Math.max(0, at - 2000), at);
       expect(nearby).toMatch(/filter before mask/i);
       expect(nearby).toMatch(/#203/);
+    }
+    // and the card must say why it is per wall, since that is the part a
+    // future tidy-up would most plausibly "simplify" back into one group
+    {
+      const at = cardSource.indexOf(".fp-wall-neon {");
+      const nearby = cardSource.slice(Math.max(0, at - 2000), at);
+      expect(nearby).toMatch(/per wall/i);
+      expect(nearby).toMatch(/joint/i);
     }
   });
 });
