@@ -102,7 +102,7 @@ import {
   entityIsActive,
   lightBadgePaint,
   itemRawValue,
-  isPresenceEntity,
+  isRippleEntity,
   badgeContentOf,
   editorItemLabel,
   badgeValue,

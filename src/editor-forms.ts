@@ -1063,6 +1063,8 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
   ];
 
   if (it.enableHideByEntity) {
+    const evalEntity = it.hideEntity || it.entity;
+    
     fields.push(
       {
         name: "hideEntity",
@@ -1074,12 +1076,12 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
         name: "hideAttribute",
         label: "Evaluation Attribute (Optional)",
         helper: "Leave empty to use the entity's state instead of an attribute",
-        selector: { attribute: { entity_id: it.hideEntity || it.entity } },
+        selector: { attribute: { entity_id: evalEntity } },
       },
       {
         name: "hideMode",
         label: "Condition Type",
-        selector: { select: { options: [{ value: "state", label: "State Match" }, { value: "threshold", label: "Numeric Threshold" }] } },
+        selector: { select: { mode: "dropdown", options: [{ value: "state", label: "State Match" }, { value: "threshold", label: "Numeric Threshold" }] } },
       }
     );
 
@@ -1103,9 +1105,9 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
         helper: it.hideAttribute
           ? "Enter the exact attribute value that triggers the hide action"
           : "Select the state that triggers the hide action",
-        selector: it.hideAttribute
+        selector: (it.hideAttribute || !evalEntity)
           ? { text: {} }
-          : { state: { entity_id: it.hideEntity || it.entity } },
+          : { state: { entity_id: evalEntity } },
       });
     }
 
@@ -1126,6 +1128,8 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
   });
 
   if (it.enableHideStateByEntity) {
+    const evalStateEntity = it.hideStateEntity || it.entity;
+    
     fields.push(
       {
         name: "hideStateEntity",
@@ -1137,12 +1141,12 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
         name: "hideStateAttribute",
         label: "State Eval. Attribute (Optional)",
         helper: "Leave empty to use the entity's state instead of an attribute",
-        selector: { attribute: { entity_id: it.hideStateEntity || it.entity } },
+        selector: { attribute: { entity_id: evalStateEntity } },
       },
       {
         name: "hideStateMode",
         label: "Condition Type",
-        selector: { select: { options: [{ value: "state", label: "State Match" }, { value: "threshold", label: "Numeric Threshold" }] } },
+        selector: { select: { mode: "dropdown", options: [{ value: "state", label: "State Match" }, { value: "threshold", label: "Numeric Threshold" }] } },
       }
     );
 
@@ -1166,9 +1170,9 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
         helper: it.hideStateAttribute
           ? "Enter the exact attribute value that triggers hiding the text"
           : "Select the state that triggers hiding the text",
-        selector: it.hideStateAttribute
+        selector: (it.hideStateAttribute || !evalStateEntity)
           ? { text: {} }
-          : { state: { entity_id: it.hideStateEntity || it.entity } },
+          : { state: { entity_id: evalStateEntity } },
       });
     }
 
@@ -1200,6 +1204,8 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
       hideStateThreshold: it.hideStateThreshold ?? 0,
       hideStateInvert: it.hideStateInvert ?? false,
     },
+    // WICHTIG: Hier muss identity oder ein sicherer Patch verwendet werden,
+    // damit allgemeine Editor-Änderungen (wie x/y beim Verschieben) nicht verschluckt werden!
     toPatch: identity,
   };
 }
