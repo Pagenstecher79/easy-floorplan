@@ -1038,13 +1038,15 @@ export class FloorplanCard extends LitElement {
                 : nothing
             }
             ${renderWallMask(active.openings, c.width, c.height, this._wallMaskId)}
-            <g mask=${`url(#${this._wallMaskId})`}>
-              ${active.walls.map(
-                (w) => svg`
-                <line x1=${w.x1} y1=${w.y1} x2=${w.x2} y2=${w.y2}
-                      class="wall fp-wall" data-id=${cssIdent(w.id) ?? nothing}
-                      style=${wallStrokeStyle(w.thickness)} stroke-linecap="round" />`
-              )}
+            <g class="fp-wall-neon">
+              <g mask=${`url(#${this._wallMaskId})`}>
+                ${active.walls.map(
+                  (w) => svg`
+                  <line x1=${w.x1} y1=${w.y1} x2=${w.x2} y2=${w.y2}
+                        class="wall fp-wall" data-id=${cssIdent(w.id) ?? nothing}
+                        style=${wallStrokeStyle(w.thickness)} stroke-linecap="round" />`
+                )}
+              </g>
             </g>
             <!-- Room outlines, above the walls they trace. An area polygon runs
                  down the centerline of the room's walls, so an outline drawn
@@ -1491,8 +1493,20 @@ export class FloorplanCard extends LitElement {
          mask and the opening symbols are cut from. Capped at 10 for that
          reason — see MAX_SKIN_WALL_WIDTH. */
       stroke-width: var(--fp-skin-wall-width, 8);
-      /* Neon, for the skins that want it. Everyone else gets none, which
-         costs nothing. */
+    }
+    /* Neon, for the skins that want it. Everyone else gets none, which costs
+       nothing.
+
+       This lives on a group *outside* the doorway mask, and must stay there.
+       CSS applies filter before mask, so a filter on the wall itself is
+       computed from the uncut wall: the mask then removes the wall body but
+       not the outer halo, and the leftover fringe runs straight through every
+       opening. The doorway cut clears WALL_THICKNESS + 4 (12 units, so +-6
+       from the centreline) while a drop-shadow of blur 4 reaches about +-8.5,
+       and that difference is exactly what leaked. Measured on a Tron render:
+       35.6 luminance inside an opening against a 7.8 background, versus 7.8
+       with the filter out here. See issue #203. */
+    .fp-wall-neon {
       filter: var(--fp-skin-wall-filter, none);
     }
     /* Dead-space hatching (issue #88). It spans whole regions of the plan, so
