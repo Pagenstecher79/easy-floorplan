@@ -143,6 +143,7 @@ export function collectWatchedEntities(c: FloorplanCardConfig): Set<string> {
       // watched entity happens to move.
       if ((it as any).hideEntity) ids.add((it as any).hideEntity);
       if ((it as any).hideStateEntity) ids.add((it as any).hideStateEntity);
+      if ((it as any).hideBadgeEntity) ids.add((it as any).hideBadgeEntity);
       for (const r of itemReadings(it)) if (r.entity) ids.add(r.entity);
     }
     // Entity-bound furniture (issue #82) — without this the card never
@@ -1031,6 +1032,42 @@ export function itemHiddenWhenInactive(
   return !entityIsActive(item.entity, state);
 }
 
+export function itemBadgeHidden(
+  item: any,
+  state: string | undefined,
+  hass?: RenderHass
+): boolean {
+  if (!item.enableHideBadgeByEntity) return false;
+
+  let evalState = state;
+  if (hass) {
+    const evalEntity = item.hideBadgeEntity || item.entity;
+    const stateObj = hass.states[evalEntity];
+    
+    evalState = item.hideBadgeAttribute && stateObj?.attributes 
+      ? String(stateObj.attributes[item.hideBadgeAttribute]) 
+      : stateObj?.state;
+  }
+
+  let conditionMet = false;
+  
+  if (item.hideBadgeMode === "threshold" && item.hideBadgeThreshold !== undefined && evalState !== undefined) {
+    const numValue = Number(evalState);
+    if (!isNaN(numValue)) {
+      switch (item.hideBadgeOperator) {
+        case "<": conditionMet = numValue < item.hideBadgeThreshold; break;
+        case "<=": conditionMet = numValue <= item.hideBadgeThreshold; break;
+        case "==": conditionMet = numValue === item.hideBadgeThreshold; break;
+        case ">=": conditionMet = numValue >= item.hideBadgeThreshold; break;
+        case ">": conditionMet = numValue > item.hideBadgeThreshold; break;
+      }
+    }
+  } else if (item.hideBadgeMatch !== undefined && evalState !== undefined) {
+    conditionMet = String(evalState).toLowerCase() === String(item.hideBadgeMatch).toLowerCase();
+  }
+
+  return item.hideBadgeInvert ? !conditionMet : conditionMet;
+}
 /** Default label font size (px) for an item's name/state line. */
 export const DEFAULT_LABEL_SIZE = 12;
 

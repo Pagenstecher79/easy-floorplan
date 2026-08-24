@@ -518,23 +518,36 @@ export interface FloorItem {
    * ({@link entityIsActive}), so a lock reads unlocked, a vacuum cleaning.
    */
   hideWhenInactive?: boolean;
-  /** Enable the extended hide logic */
+  
+  /** Enable the extended hide logic (Entire Object) */
   enableHideByEntity?: boolean;
   hideEntity?: string;
+  hideAttribute?: string;
   hideMode?: "state" | "threshold";
   hideState?: string;
   hideOperator?: "<" | "<=" | "==" | ">=" | ">";
   hideThreshold?: number;
   hideInvert?: boolean;
+  
+  /** Enable hide logic for State Text */
   enableHideStateByEntity?: boolean;
   hideStateEntity?: string;
+  hideStateAttribute?: string;
   hideStateMode?: "state" | "threshold";
   hideStateMatch?: string;
   hideStateOperator?: "<" | "<=" | "==" | ">=" | ">";
   hideStateThreshold?: number;
   hideStateInvert?: boolean;
-  hideAttribute?: string;
-  hideStateAttribute?: string;
+
+  /** Enable hide logic for the Badge (Icon/Bubble) */
+  enableHideBadgeByEntity?: boolean;
+  hideBadgeEntity?: string;
+  hideBadgeAttribute?: string;
+  hideBadgeMode?: "state" | "threshold";
+  hideBadgeMatch?: string;
+  hideBadgeOperator?: "<" | "<=" | "==" | ">=" | ">";
+  hideBadgeThreshold?: number;
+  hideBadgeInvert?: boolean;
   /** End of Enable the extended hide logic */
   /** Badge diameter in pixels. Default 34. */
   size?: number;

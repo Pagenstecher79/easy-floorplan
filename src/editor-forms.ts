@@ -1052,6 +1052,7 @@ export function itemEffectsForm(it: FloorItem, deviceClass?: string): FormSpec |
     },
   };
 }
+
 /** FormSpec for Group 7a */
 export function itemGroup7aForm(it: FloorItem): FormSpec {
   const fields: FormField[] = [
@@ -1062,6 +1063,7 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
     },
   ];
 
+  // 1. Gesamtes Objekt verstecken
   if (it.enableHideByEntity) {
     const evalEntity = it.hideEntity || it.entity;
     
@@ -1119,7 +1121,7 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
     });
   }
 
-  // State text hiding condition
+  // 2. Statustext verstecken
   fields.push({
     name: "enableHideStateByEntity",
     label: "Hide State by condition",
@@ -1184,6 +1186,71 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
     });
   }
 
+  // 3. Badge (Icon/Bubble) verstecken
+  fields.push({
+    name: "enableHideBadgeByEntity",
+    label: "Hide Badge by condition",
+    helper: "Hides only the badge (icon/bubble) based on a condition",
+    selector: { boolean: {} },
+  });
+
+  if (it.enableHideBadgeByEntity) {
+    const evalBadgeEntity = it.hideBadgeEntity || it.entity;
+
+    fields.push(
+      {
+        name: "hideBadgeEntity",
+        label: "Badge Eval. Entity (Optional)",
+        helper: "Leave empty to use the main object entity",
+        selector: { entity: {} },
+      },
+      {
+        name: "hideBadgeAttribute",
+        label: "Badge Eval. Attribute (Optional)",
+        helper: "Leave empty to use the entity's state instead of an attribute",
+        selector: { attribute: { entity_id: evalBadgeEntity } },
+      },
+      {
+        name: "hideBadgeMode",
+        label: "Condition Type",
+        selector: { select: { mode: "dropdown", options: [{ value: "state", label: "State Match" }, { value: "threshold", label: "Numeric Threshold" }] } },
+      }
+    );
+
+    if (it.hideBadgeMode === "threshold") {
+      fields.push(
+        {
+          name: "hideBadgeOperator",
+          label: "Operator",
+          selector: { select: { mode: "dropdown", options: [{ value: "<", label: "<" }, { value: "<=", label: "<=" }, { value: "==", label: "==" }, { value: ">=", label: ">=" }, { value: ">", label: ">" }] } },
+        },
+        {
+          name: "hideBadgeThreshold",
+          label: "Threshold Value",
+          selector: { number: { mode: "box", step: "any" } },
+        }
+      );
+    } else {
+      fields.push({
+        name: "hideBadgeMatch",
+        label: "Hide Badge Match",
+        helper: it.hideBadgeAttribute
+          ? "Enter the exact attribute value that triggers hiding the badge"
+          : "Select the state that triggers hiding the badge",
+        selector: (it.hideBadgeAttribute || !evalBadgeEntity)
+          ? { text: {} }
+          : { state: { entity_id: evalBadgeEntity } },
+      });
+    }
+
+    fields.push({
+      name: "hideBadgeInvert",
+      label: "Invert condition",
+      helper: "Hide badge when condition is NOT met",
+      selector: { boolean: {} },
+    });
+  }
+
   return {
     fields,
     data: {
@@ -1195,6 +1262,7 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
       hideOperator: it.hideOperator ?? ">",
       hideThreshold: it.hideThreshold ?? 0,
       hideInvert: it.hideInvert ?? false,
+
       enableHideStateByEntity: it.enableHideStateByEntity ?? false,
       hideStateEntity: it.hideStateEntity ?? "",
       hideStateAttribute: it.hideStateAttribute ?? "",
@@ -1203,9 +1271,16 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
       hideStateOperator: it.hideStateOperator ?? ">",
       hideStateThreshold: it.hideStateThreshold ?? 0,
       hideStateInvert: it.hideStateInvert ?? false,
+
+      enableHideBadgeByEntity: it.enableHideBadgeByEntity ?? false,
+      hideBadgeEntity: it.hideBadgeEntity ?? "",
+      hideBadgeAttribute: it.hideBadgeAttribute ?? "",
+      hideBadgeMode: it.hideBadgeMode ?? "state",
+      hideBadgeMatch: it.hideBadgeMatch ?? "",
+      hideBadgeOperator: it.hideBadgeOperator ?? ">",
+      hideBadgeThreshold: it.hideBadgeThreshold ?? 0,
+      hideBadgeInvert: it.hideBadgeInvert ?? false,
     },
-    // WICHTIG: Hier muss identity oder ein sicherer Patch verwendet werden,
-    // damit allgemeine Editor-Änderungen (wie x/y beim Verschieben) nicht verschluckt werden!
     toPatch: identity,
   };
 }
@@ -1240,7 +1315,6 @@ export function itemBehaviourForm(it: FloorItem): FormSpec {
     toPatch: identity,
   };
 }
-
 
 export function textForm(t: FloorText): FormSpec {
   return {
