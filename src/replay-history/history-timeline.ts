@@ -51,9 +51,17 @@ export class HistoryTimeline extends LitElement {
     return events.map((event) => this._formatEventTitle(event)).join("\n");
   }
 
+  private _visibleEvents(): HistoryEventInput[] {
+    if (!this.events.length) return [];
+    const start = this.startTime;
+    const end = this.endTime;
+    return this.events.filter((event) => event.timestamp >= start && event.timestamp <= end);
+  }
+
   private _groupEventsByTimestamp(): Array<{ timestamp: number; events: HistoryEventInput[]; left: string; passed: boolean }> {
+    const visibleEvents = this._visibleEvents();
     const grouped = new Map<number, HistoryEventInput[]>();
-    for (const event of this.events) {
+    for (const event of visibleEvents) {
       const bucket = grouped.get(event.timestamp);
       if (bucket) {
         bucket.push(event);
@@ -91,26 +99,72 @@ export class HistoryTimeline extends LitElement {
     this._seekFromClientX(ev.clientX);
   }
 
+  private _handleKeyDown(ev: KeyboardEvent): void {
+    const span = Math.max(1, this.endTime - this.startTime);
+    const step = Math.max(1, Math.round(span / 100));
+    switch (ev.key) {
+      case "ArrowLeft":
+      case "ArrowDown":
+        this._seek(Math.max(this.startTime, this.currentTime - step));
+        ev.preventDefault();
+        break;
+      case "ArrowRight":
+      case "ArrowUp":
+        this._seek(Math.min(this.endTime, this.currentTime + step));
+        ev.preventDefault();
+        break;
+      case "Home":
+        this._seek(this.startTime);
+        ev.preventDefault();
+        break;
+      case "End":
+        this._seek(this.endTime);
+        ev.preventDefault();
+        break;
+      default:
+        break;
+    }
+  }
+
   private _renderExpandedTimeline(span: number) {
-    const entities = Array.from(new Set(this.events.map((event) => event.entityId)));
+    const visibleEvents = this._visibleEvents();
+    const entityGroups = new Map<string, HistoryEventInput[]>();
+    for (const event of visibleEvents) {
+      const bucket = entityGroups.get(event.entityId);
+      if (bucket) {
+        bucket.push(event);
+      } else {
+        entityGroups.set(event.entityId, [event]);
+      }
+    }
+    const entities = Array.from(entityGroups.keys());
     const playheadLeft = ((this.currentTime - this.startTime) / span) * 100;
     return html`
       <div
         class="timeline-expanded timeline-interactive"
+        role="slider"
+        tabindex="0"
+        aria-label="Replay timeline"
+        aria-valuemin=${this.startTime}
+        aria-valuemax=${this.endTime}
+        aria-valuenow=${this.currentTime}
+        aria-valuetext=${this._formatTimestamp(this.currentTime)}
         @click=${(ev: MouseEvent) => this._handleTimelineClick(ev)}
         @pointerdown=${(ev: PointerEvent) => this._handlePointerDown(ev)}
         @pointermove=${(ev: PointerEvent) => this._handlePointerMove(ev)}
         @pointerup=${(ev: PointerEvent) => this._handlePointerUp(ev)}
         @pointerleave=${(ev: PointerEvent) => this._handlePointerUp(ev)}
+        @keydown=${this._handleKeyDown}
       >
         <div class="timeline-track-overlay" style="grid-row:1 / span ${entities.length};" aria-hidden="true">
           <div class="playhead playhead-expanded" style="left:${playheadLeft}%"></div>
         </div>
         ${entities.map((entityId, index) => {
-          const laneEvents = this.events.filter((event) => event.entityId === entityId);
+          const laneEvents = entityGroups.get(entityId) ?? [];
           const row = index + 1;
+          const label = this._getEntityLabel(laneEvents[0]);
           return html`
-            <div class="lane-label" style="grid-row:${row};">${this._getEntityLabel(this.events.find((event) => event.entityId === entityId)!)}</div>
+            <div class="lane-label" style="grid-row:${row};">${label}</div>
             <div class="lane lane-track" style="grid-row:${row};">
               ${laneEvents.map((event) => {
                 const color = resolveReplayEventColor(event);
@@ -156,20 +210,37 @@ export class HistoryTimeline extends LitElement {
   }
 
   protected render() {
-    if (!this.events.length) return html`<div class="timeline-empty">No history available.</div>`;
+    if (!this.events.length) {
+      console.log("[easy-floorplan] Replay timeline empty", {
+        eventsLength: this.events.length,
+        startTime: this.startTime,
+        endTime: this.endTime,
+        currentTime: this.currentTime,
+      });
+      return html`<div class="timeline-empty">No history available.</div>`;
+    }
     const span = Math.max(1, this.endTime - this.startTime);
     const markerGroups = this._groupEventsByTimestamp();
     if (this.expanded) {
       return this._renderExpandedTimeline(span);
     }
+
     return html`
       <div
         class="timeline timeline-interactive"
+        role="slider"
+        tabindex="0"
+        aria-label="Replay timeline"
+        aria-valuemin=${this.startTime}
+        aria-valuemax=${this.endTime}
+        aria-valuenow=${this.currentTime}
+        aria-valuetext=${this._formatTimestamp(this.currentTime)}
         @click=${(ev: MouseEvent) => this._handleTimelineClick(ev)}
         @pointerdown=${(ev: PointerEvent) => this._handlePointerDown(ev)}
         @pointermove=${(ev: PointerEvent) => this._handlePointerMove(ev)}
         @pointerup=${(ev: PointerEvent) => this._handlePointerUp(ev)}
         @pointerleave=${(ev: PointerEvent) => this._handlePointerUp(ev)}
+        @keydown=${this._handleKeyDown}
       >
         <div class="track"></div>
         <div class="playhead" style="left:${((this.currentTime - this.startTime) / span) * 100}%"></div>

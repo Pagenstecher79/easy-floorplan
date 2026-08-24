@@ -26,7 +26,14 @@ export class PlaybackController {
     this._startTime = options.startTime ?? 0;
     this._endTime = options.endTime ?? Number.MAX_SAFE_INTEGER;
     this.currentTime = this._startTime;
-    this.speed = options.initialSpeed ?? 1;
+    this.speed = this._normalizeSpeed(options.initialSpeed ?? 1);
+  }
+
+  private _normalizeSpeed(value: number): number {
+    if (!Number.isFinite(value)) {
+      return Number.isNaN(value) ? 1 : PlaybackController._MAX_SPEED;
+    }
+    return Math.min(PlaybackController._MAX_SPEED, Math.max(PlaybackController._MIN_SPEED, value));
   }
 
   public play(): void {

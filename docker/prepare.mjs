@@ -76,7 +76,6 @@ const resourceFile = join(storageDir, "lovelace_resources");
 const URL_PATH = "/local/easy-floorplan-card.js";
 const distCardFile = join(here, "..", "dist", "easy-floorplan-card.js");
 const cacheBust = existsSync(distCardFile) ? String(Math.trunc(statSync(distCardFile).mtimeMs)) : String(Date.now());
-const RESOURCE_URL = `${URL_PATH}?v=${cacheBust}`;
 const RESOURCE_ID = "easyfloorplandevresource01";
 
 // The URL carries a hash of the bundle, because Home Assistant serves /local/
@@ -94,6 +93,7 @@ const version = existsSync(bundle)
   ? createHash("sha256").update(readFileSync(bundle)).digest("hex").slice(0, 12)
   : null;
 const resourceUrl = version ? `${URL_PATH}?v=${version}` : URL_PATH;
+const resourceUrlFromBuild = version ? resourceUrl : `${URL_PATH}?v=${cacheBust}`;
 
 let store = {
   version: 1,
@@ -118,7 +118,8 @@ if (existsSync(resourceFile)) {
 // second one would leave the frontend loading both, and two modules defining
 // <easy-floorplan-card> means the second registration throws.
 const existing = store.data.items.find((item) => item?.url?.split("?")[0] === URL_PATH);
-if (existing?.url === resourceUrl) {
+const desiredResourceUrl = resourceUrlFromBuild;
+if (existing?.url === desiredResourceUrl) {
   console.log("Resource already registered at this build; leaving it alone.");
 } else {
   const prevItems = Array.isArray(store.data.items) ? store.data.items : [];
@@ -131,10 +132,10 @@ if (existing?.url === resourceUrl) {
       ...existing,
       id: existing.id ?? RESOURCE_ID,
       type: existing.type ?? "module",
-      url: resourceUrl,
+      url: desiredResourceUrl,
     });
   } else {
-    nextItems.push({ id: RESOURCE_ID, type: "module", url: RESOURCE_URL });
+    nextItems.push({ id: RESOURCE_ID, type: "module", url: desiredResourceUrl });
   }
 
   const resourcesChanged =
@@ -145,9 +146,9 @@ if (existing?.url === resourceUrl) {
     store.data.items = nextItems;
     mkdirSync(storageDir, { recursive: true });
     writeFileSync(resourceFile, JSON.stringify(store, null, 2));
-    console.log(`Registered ${resourceUrl} as a Lovelace resource.`);
+    console.log(`Registered ${desiredResourceUrl} as a Lovelace resource.`);
   } else {
-    console.log(`Lovelace resource already current (${RESOURCE_URL}).`);
+    console.log(`Lovelace resource already current (${desiredResourceUrl}).`);
   }
 }
 

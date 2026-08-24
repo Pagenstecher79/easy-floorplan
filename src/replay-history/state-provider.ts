@@ -1,4 +1,4 @@
-import type { HomeAssistant, HassEntity } from "./types";
+import type { HomeAssistant, HassEntity } from "../types";
 import { HistoryService } from "./history-service";
 
 export interface StateProvider {
@@ -14,14 +14,21 @@ export class LiveStateProvider implements StateProvider {
 }
 
 export class HistoryStateProvider implements StateProvider {
+  private readonly _historicalStates: Map<string, HassEntity>;
+
   constructor(
     private readonly _historyService: HistoryService,
     private readonly _fallback: StateProvider,
     private readonly _timestamp: number,
-  ) {}
+  ) {
+    this._historicalStates = this._historyService.getStateAt(this._timestamp);
+  }
 
   public getEntityState(entityId: string): HassEntity | undefined {
-    const historical = this._historyService.getStateAt(this._timestamp).get(entityId);
-    return historical ?? this._fallback.getEntityState(entityId);
+    const historical = this._historicalStates.get(entityId);
+    if (historical) return historical;
+
+    const fallback = this._fallback.getEntityState(entityId);
+    return fallback ? { ...fallback, attributes: { ...(fallback.attributes ?? {}) } } : undefined;
   }
 }

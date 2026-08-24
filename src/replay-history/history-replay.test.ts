@@ -1,13 +1,14 @@
+// @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PlaybackController } from "./playback-controller";
 import { HistoryService, type HistoryEventInput } from "./history-service";
 import { HistoryStateProvider, LiveStateProvider } from "./state-provider";
 import { HistoryTimeline } from "./history-timeline";
-import { FloorplanCard } from "./floorplan-card";
-import type { HomeAssistant, HassEntity } from "./types";
+import { FloorplanCard } from "../floorplan-card";
+import type { HomeAssistant, HassEntity } from "../types";
 
 import "./history-timeline";
-import "./floorplan-card";
+import "../floorplan-card";
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -69,6 +70,14 @@ describe("PlaybackController", () => {
     controller.setPlaybackSpeed(5000);
     expect(controller.speed).toBe(1000);
   });
+
+  it("validates the initial speed through the same clamp logic as runtime updates", () => {
+    const controller = new PlaybackController({ startTime: 0, endTime: 100, initialSpeed: Number.POSITIVE_INFINITY });
+    expect(controller.speed).toBe(1000);
+
+    const controller2 = new PlaybackController({ startTime: 0, endTime: 100, initialSpeed: 0.0001 });
+    expect(controller2.speed).toBe(0.01);
+  });
 });
 
 describe("HistoryService", () => {
@@ -115,6 +124,102 @@ describe("HistoryService", () => {
     await service.loadHistory(0, 2000);
 
     expect(loader).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps cache entries separated by scope key", async () => {
+    const loader = vi.fn(async (): Promise<HistoryEventInput[]> => [
+      {
+        timestamp: 1000,
+        entityId: "sensor.temp",
+        oldState: "20",
+        newState: "21",
+        attributes: { friendly_name: "Temperature" },
+      },
+    ]);
+
+    const service = new HistoryService({ loader });
+    await service.loadHistory(0, 2000, { scopeKey: "light.kitchen" });
+    await service.loadHistory(0, 2000, { scopeKey: "binary_sensor.front_door" });
+
+    expect(loader).toHaveBeenCalledTimes(2);
+  });
+
+  it("supports explicit cache clearing", async () => {
+    const loader = vi.fn(async (): Promise<HistoryEventInput[]> => [
+      {
+        timestamp: 1000,
+        entityId: "sensor.temp",
+        oldState: "20",
+        newState: "21",
+        attributes: { friendly_name: "Temperature" },
+      },
+    ]);
+
+    const service = new HistoryService({ loader });
+    await service.loadHistory(0, 2000, { scopeKey: "scope-a" });
+    service.clearCache();
+    await service.loadHistory(0, 2000, { scopeKey: "scope-a" });
+
+    expect(loader).toHaveBeenCalledTimes(2);
+  });
+
+  it("retains a historical baseline for entities with no transitions in the selected window", async () => {
+    const loader = vi.fn(async (): Promise<HistoryEventInput[]> => [
+      {
+        timestamp: 1500,
+        entityId: "light.kitchen",
+        oldState: "off",
+        newState: "on",
+        attributes: { friendly_name: "Kitchen Light" },
+      },
+    ]);
+
+    const service = new HistoryService({ loader });
+    await service.loadHistory(0, 3000);
+    const stateAt = service.getStateAt(1000);
+
+    expect(stateAt.get("light.kitchen")?.state).toBe("off");
+    expect(stateAt.get("light.kitchen")?.attributes.friendly_name).toBe("Kitchen Light");
+  });
+
+  it("reconstructs the latest state for each entity from that entity's ordered history", async () => {
+    const loader = vi.fn(async (): Promise<HistoryEventInput[]> => [
+      {
+        timestamp: 1000,
+        entityId: "light.kitchen",
+        oldState: "off",
+        newState: "on",
+        attributes: { friendly_name: "Kitchen Light" },
+      },
+      {
+        timestamp: 1500,
+        entityId: "light.kitchen",
+        oldState: "on",
+        newState: "off",
+        attributes: { friendly_name: "Kitchen Light" },
+      },
+      {
+        timestamp: 2000,
+        entityId: "binary_sensor.front_door",
+        oldState: "closed",
+        newState: "open",
+        attributes: { friendly_name: "Front Door" },
+      },
+      {
+        timestamp: 2500,
+        entityId: "light.kitchen",
+        oldState: "off",
+        newState: "on",
+        attributes: { friendly_name: "Kitchen Light" },
+      },
+    ]);
+
+    const service = new HistoryService({ loader });
+    await service.loadHistory(0, 3000);
+
+    expect(service.getStateAt(1750).get("light.kitchen")?.state).toBe("off");
+    expect(service.getStateAt(1750).get("binary_sensor.front_door")?.state).toBe("closed");
+    expect(service.getStateAt(2600).get("light.kitchen")?.state).toBe("on");
   });
 
   it("steps to the nearest event on either side of a timestamp", async () => {
@@ -333,10 +438,48 @@ describe("HistoryTimeline", () => {
     const overlay = timeline.shadowRoot!.querySelector(".timeline-track-overlay") as HTMLElement | null;
     expect(overlay?.getAttribute("style") ?? "").toContain("grid-row:1 / span 2");
   });
+
+  it("ignores events outside the active replay window when rendering the timeline", async () => {
+    const timeline = document.createElement("easy-floorplan-history-timeline") as HistoryTimeline;
+    timeline.events = [
+      {
+        timestamp: 200,
+        entityId: "light.kitchen",
+        oldState: "off",
+        newState: "on",
+        attributes: { friendly_name: "Kitchen Light" },
+      },
+      {
+        timestamp: 1200,
+        entityId: "light.kitchen",
+        oldState: "on",
+        newState: "off",
+        attributes: { friendly_name: "Kitchen Light" },
+      },
+      {
+        timestamp: 3500,
+        entityId: "sensor.temperature",
+        oldState: "20",
+        newState: "21",
+        attributes: { friendly_name: "Temperature" },
+      },
+    ];
+    timeline.startTime = 1000;
+    timeline.endTime = 2000;
+    timeline.currentTime = 1500;
+    timeline.expanded = true;
+    document.body.appendChild(timeline);
+
+    await Promise.resolve();
+
+    expect(timeline.shadowRoot!.querySelectorAll(".marker")).toHaveLength(1);
+    expect(timeline.shadowRoot!.textContent).toContain("Kitchen Light");
+    expect(timeline.shadowRoot!.textContent).not.toContain("Temperature");
+  });
 });
 
 describe("FloorplanCard replay", () => {
-  it("derives a 30-second default playback speed from the selected replay window", () => {
+  it("treats historyReplay.defaultSpeed as a real-time multiplier", () => {
     const card = document.createElement("easy-floorplan-card") as FloorplanCard;
     card.setConfig({
       type: "easy-floorplan-card",
@@ -347,7 +490,7 @@ describe("FloorplanCard replay", () => {
     });
 
     const replaySpeed = (card as unknown as { _getReplaySpeedForRange(start: number, end: number): number })._getReplaySpeedForRange(1000, 3700);
-    expect(replaySpeed).toBe(90);
+    expect(replaySpeed).toBe(1);
   });
 
   it("maps logarithmic slider values to replay speed and back", () => {
@@ -364,7 +507,7 @@ describe("FloorplanCard replay", () => {
     expect(speedToSlider(1000)).toBeCloseTo(3, 3);
   });
 
-  it("renders a ripple fallback for active items without an explicit display setting", async () => {
+  it("keeps badge as the default item display when display is unset", async () => {
     const card = document.createElement("easy-floorplan-card") as FloorplanCard;
     const hass = {
       states: {
@@ -396,7 +539,7 @@ describe("FloorplanCard replay", () => {
     });
 
     await Promise.resolve();
-    expect(card.shadowRoot?.querySelector(".item .ripple")).not.toBeNull();
+    expect(card.shadowRoot?.querySelector(".item .badge")).not.toBeNull();
   });
 
   it("renders an event log when replay history is loaded", async () => {
@@ -454,6 +597,100 @@ describe("FloorplanCard replay", () => {
     expect(card.shadowRoot?.querySelector(".replay-event-log")).not.toBeNull();
   });
 
+  it("accepts Home Assistant history_during_period array payloads", async () => {
+    const card = document.createElement("easy-floorplan-card") as FloorplanCard;
+    const now = new Date();
+    const recent = new Date(now.getTime() - 10 * 60 * 1000).toISOString();
+    const older = new Date(now.getTime() - 20 * 60 * 1000).toISOString();
+    const hass = {
+      states: {
+        "light.kitchen": {
+          entity_id: "light.kitchen",
+          state: "off",
+          attributes: { friendly_name: "Kitchen" },
+        },
+      },
+      callApi: vi.fn(async () => [
+        {
+          entity_id: "light.kitchen",
+          states: [
+            { state: "off", last_updated: older },
+            { state: "on", last_updated: recent },
+          ],
+        },
+      ]),
+      callService: vi.fn(),
+      formatEntityState: (state: HassEntity) => state.state,
+      entities: {},
+      devices: {},
+      locale: { language: "en" },
+      themes: { darkMode: false },
+      floors: {},
+      areas: {},
+      localize: (k: string) => k,
+    } as unknown as HomeAssistant;
+
+    card.hass = hass;
+    card.setConfig({
+      type: "easy-floorplan-card",
+      width: 1000,
+      height: 600,
+      floors: [{ id: "f1", name: "Floor 1", walls: [], openings: [], items: [{ id: "kitchen-light", entity: "light.kitchen", kind: "light", x: 20, y: 20 }], texts: [], furniture: [], trackers: [], areas: [] }],
+    });
+
+    const start = Math.floor((Date.now() - 3 * 60 * 60 * 1000) / 1000);
+    const end = Math.floor(Date.now() / 1000);
+    const events = await (card as any)._loadHistoryEvents(start, end);
+
+    expect(events.some((event: { entityId: string }) => event.entityId === "light.kitchen")).toBe(true);
+  });
+
+  it("accepts compact Home Assistant history rows with s/a/lu/lc keys", async () => {
+    const card = document.createElement("easy-floorplan-card") as FloorplanCard;
+    const now = new Date();
+    const recent = new Date(now.getTime() - 10 * 60 * 1000).toISOString();
+    const older = new Date(now.getTime() - 20 * 60 * 1000).toISOString();
+    const hass = {
+      states: {
+        "binary_sensor.front_door": {
+          entity_id: "binary_sensor.front_door",
+          state: "off",
+          attributes: { friendly_name: "Front door" },
+        },
+      },
+      callApi: vi.fn(async () => [{
+        entity_id: "binary_sensor.front_door",
+        states: [
+          { s: "off", a: { friendly_name: "Front door" }, lu: older },
+          { s: "on", a: { friendly_name: "Front door" }, lu: recent },
+        ],
+      }]),
+      callService: vi.fn(),
+      formatEntityState: (state: HassEntity) => state.state,
+      entities: {},
+      devices: {},
+      locale: { language: "en" },
+      themes: { darkMode: false },
+      floors: {},
+      areas: {},
+      localize: (k: string) => k,
+    } as unknown as HomeAssistant;
+
+    card.hass = hass;
+    card.setConfig({
+      type: "easy-floorplan-card",
+      width: 1000,
+      height: 600,
+      floors: [{ id: "f1", name: "Floor 1", walls: [], openings: [], items: [{ id: "door", entity: "binary_sensor.front_door", kind: "sensor", x: 20, y: 20 }], texts: [], furniture: [], trackers: [], areas: [] }],
+    });
+
+    const start = Math.floor((Date.now() - 3 * 60 * 60 * 1000) / 1000);
+    const end = Math.floor(Date.now() / 1000);
+    const events = await (card as any)._loadHistoryEvents(start, end);
+
+    expect(events.some((event: { entityId: string; oldState: string; newState: string }) => event.entityId === "binary_sensor.front_door" && event.oldState === "off" && event.newState === "on")).toBe(true);
+  });
+
   it("starts loading history automatically when replay is enabled", async () => {
     const card = document.createElement("easy-floorplan-card") as FloorplanCard;
     const now = new Date();
@@ -495,7 +732,17 @@ describe("FloorplanCard replay", () => {
       width: 1000,
       height: 600,
       historyReplay: { enabled: true, lookbackSeconds: 3600, defaultSpeed: 1 },
-      floors: [{ id: "f1", name: "Floor 1", walls: [], openings: [], items: [], texts: [], furniture: [], trackers: [], areas: [] }],
+      floors: [{
+        id: "f1",
+        name: "Floor 1",
+        walls: [],
+        openings: [],
+        items: [{ id: "kitchen-light", entity: "light.kitchen", x: 20, y: 20, kind: "light", icon: "mdi:lightbulb" }],
+        texts: [],
+        furniture: [],
+        trackers: [],
+        areas: [],
+      }],
     });
 
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -543,7 +790,17 @@ describe("FloorplanCard replay", () => {
       width: 1000,
       height: 600,
       historyReplay: { enabled: true, lookbackSeconds: 3600, defaultSpeed: 1 },
-      floors: [{ id: "f1", name: "Floor 1", walls: [], openings: [], items: [], texts: [], furniture: [], trackers: [], areas: [] }],
+      floors: [{
+        id: "f1",
+        name: "Floor 1",
+        walls: [],
+        openings: [],
+        items: [{ id: "kitchen-light", entity: "light.kitchen", x: 20, y: 20, kind: "light", icon: "mdi:lightbulb" }],
+        texts: [],
+        furniture: [],
+        trackers: [],
+        areas: [],
+      }],
     });
 
     (card as unknown as { _historyEvents: Array<{ timestamp: number; entityId: string; oldState: string; newState: string; attributes?: Record<string, unknown> }> })._historyEvents = [
@@ -596,7 +853,17 @@ describe("FloorplanCard replay", () => {
       width: 1000,
       height: 600,
       historyReplay: { enabled: true, lookbackSeconds: 3600, defaultSpeed: 1 },
-      floors: [{ id: "f1", name: "Floor 1", walls: [], openings: [], items: [], texts: [], furniture: [], trackers: [], areas: [] }],
+      floors: [{
+        id: "f1",
+        name: "Floor 1",
+        walls: [],
+        openings: [],
+        items: [{ id: "kitchen-light", entity: "light.kitchen", x: 20, y: 20, kind: "light", icon: "mdi:lightbulb" }],
+        texts: [],
+        furniture: [],
+        trackers: [],
+        areas: [],
+      }],
     });
 
     (card as unknown as { _historyEvents: Array<{ timestamp: number; entityId: string; oldState: string; newState: string; attributes?: Record<string, unknown> }> })._historyEvents = [
@@ -667,6 +934,93 @@ describe("FloorplanCard replay", () => {
     const hideButton = card.shadowRoot?.querySelector(".replay-hide-toggle") as HTMLButtonElement | null;
     expect(hideButton).not.toBeNull();
     expect(hideButton?.textContent).toContain("hide");
+  });
+
+  it("filters replay history to entities that are mapped on the floorplan", async () => {
+    const card = document.createElement("easy-floorplan-card") as FloorplanCard;
+    const now = new Date();
+    const older = new Date(now.getTime() - 20 * 60 * 1000).toISOString();
+    const recent = new Date(now.getTime() - 10 * 60 * 1000).toISOString();
+    const callApi = vi.fn(async () => [
+      {
+        entity_id: "light.kitchen",
+        states: [
+          { state: "off", last_updated: older },
+          { state: "on", last_updated: recent },
+        ],
+      },
+      {
+        entity_id: "sensor.unmapped",
+        states: [
+          { state: "0", last_updated: older },
+          { state: "1", last_updated: recent },
+        ],
+      },
+    ]);
+    const hass = {
+      states: {
+        "light.kitchen": {
+          entity_id: "light.kitchen",
+          state: "off",
+          attributes: { friendly_name: "Kitchen" },
+        },
+      },
+      callApi,
+      callService: vi.fn(),
+      formatEntityState: (state: HassEntity) => state.state,
+      entities: {},
+      devices: {},
+      locale: { language: "en" },
+      themes: { darkMode: false },
+      floors: {},
+      areas: {},
+      localize: (k: string) => k,
+    } as unknown as HomeAssistant;
+
+    document.body.appendChild(card);
+    card.hass = hass;
+    card.setConfig({
+      type: "easy-floorplan-card",
+      width: 1000,
+      height: 600,
+      historyReplay: { enabled: true, lookbackSeconds: 3600, defaultSpeed: 1 },
+      floors: [{
+        id: "f1",
+        name: "Floor 1",
+        walls: [],
+        openings: [],
+        texts: [],
+        furniture: [],
+        trackers: [],
+        areas: [],
+        items: [
+          {
+            id: "kitchen-light",
+            entity: "light.kitchen",
+            x: 20,
+            y: 20,
+            kind: "light",
+            icon: "mdi:lightbulb",
+          },
+        ],
+      }],
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const showButton = card.shadowRoot?.querySelector(".replay-show-toggle") as HTMLButtonElement | null;
+    showButton?.click();
+    await card.updateComplete;
+
+    const logToggle = card.shadowRoot?.querySelector(".replay-log-toggle") as HTMLButtonElement | null;
+    logToggle?.click();
+    await card.updateComplete;
+
+    const entityLabels = Array.from(card.shadowRoot?.querySelectorAll(".replay-event-entity") ?? []).map((el) => el.textContent?.trim());
+    expect(entityLabels).toContain("light.kitchen");
+    expect(entityLabels).not.toContain("sensor.unmapped");
   });
 });
 

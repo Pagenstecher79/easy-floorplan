@@ -14,10 +14,10 @@ import type {
   HassEntity,
   RenderHass,
 } from "./types";
-import { HistoryService, type HistoryEventInput } from "./history-service";
-import { HistoryStateProvider, LiveStateProvider, type StateProvider } from "./state-provider";
-import { PlaybackController } from "./playback-controller";
-import "./history-timeline";
+import { HistoryService, resolveReplayEventColor, type HistoryEventInput } from "./replay-history/history-service";
+import { HistoryStateProvider, LiveStateProvider, type StateProvider } from "./replay-history/state-provider";
+import { PlaybackController } from "./replay-history/playback-controller";
+import "./replay-history/history-timeline";
 import { cssColor, cssColorOr, cssNumber, cssIdent, cssEntityId, contrastText } from "./css-safe";
 import {
   DEFAULT_WIDTH,
@@ -156,13 +156,17 @@ function floorMemoryKey(floors: readonly Floor[]): string {
   return floors.map((f) => f.id).join("|");
 }
 
+const REPLAY_DEBUG_LOGS = false;
+
 @customElement("easy-floorplan-card")
 export class FloorplanCard extends LitElement {
   private static readonly _REPLAY_SPEED_LOG_MIN = -2;
   private static readonly _REPLAY_SPEED_LOG_MAX = 3;
+  private static readonly _REPLAY_UI_UPDATE_INTERVAL_MS = 50;
 
   private static _nextWallMaskId = 0;
   private static _nextGlowId = 0;
+  private static _nextReplayPanelId = 0;
 
   @property({ attribute: false }) public hass?: HomeAssistant;
   @state() private _config?: FloorplanCardConfig;
@@ -184,6 +188,12 @@ export class FloorplanCard extends LitElement {
   private _replayReady = false;
   private _replayError?: string;
   private _historyEvents: HistoryEventInput[] = [];
+  private readonly _replayConfiguredColorCache = new Map<string, string | undefined>();
+  private readonly _replayTimeFormatter = new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+  });
   private _replayLoopId?: number;
   private _lastReplayFrame?: number;
   private _replayLoadRequested = false;
@@ -194,8 +204,15 @@ export class FloorplanCard extends LitElement {
   private _replayTimelineExpanded = false;
   private _replaySpeedExpanded = false;
   private _replayHistoryVisible = false;
+  private _replayRangeWarning?: string;
+  private _replayLastSyncedEventTs?: number;
+  private _replayLoadToken = 0;
+  private _replayManuallyDisabled = false;
+  private _replayUiLastUpdateFrameMs = 0;
+  private readonly _replayPanelId = `fp-replay-panel-${FloorplanCard._nextReplayPanelId++}`;
 
   public setConfig(config: FloorplanCardConfig): void {
+    console.log("plk setConfig called");
     // Cheap shape assertions so malformed YAML surfaces as HA's error card
     // instead of a render crash deep inside the SVG.
     if (!config || typeof config !== "object") throw new Error("Invalid configuration");
@@ -222,11 +239,17 @@ export class FloorplanCard extends LitElement {
     };
     this._watchedEntities = collectWatchedEntities(this._config);
     this._replayConfigured = Boolean(config.historyReplay?.enabled);
+    this._replayLoadToken += 1;
+    this._replayManuallyDisabled = false;
     this._replayEnabled = false;
     this._replayError = undefined;
     this._replayReady = false;
     this._replayLoadRequested = false;
     this._historyEvents = [];
+    this._replayConfiguredColorCache.clear();
+    this._historyService.clearCache();
+    this._replayRangeWarning = undefined;
+    this._replayLastSyncedEventTs = undefined;
     const defaultWindow = this._getDefaultReplayWindow();
     this._replayStartTime = defaultWindow.start;
     this._replayEndTime = defaultWindow.end;
@@ -252,14 +275,13 @@ export class FloorplanCard extends LitElement {
    * HA pushes a fresh `hass` on every state change anywhere in the instance —
    * for most updates nothing on this plan moved. Skip those renders entirely.
    */
-  protected shouldUpdate(changed: PropertyValues): boolean {
+    protected shouldUpdate(changed: PropertyValues): boolean {
     // Anything but a pure hass tick (config change, floor switch, first render).
     if (!(changed.size === 1 && changed.has("hass"))) return true;
     const prev = changed.get("hass") as HomeAssistant | undefined;
     if (!prev || !this.hass) return true;
     return hassRenderInputsChanged(prev, this.hass, this._watchedEntities);
   }
-
   /**
    * Carry the skin as an attribute on the host, where `skinPalettes` picks it
    * up (issue #155). It has to be the host and not the template, because the
@@ -276,10 +298,19 @@ export class FloorplanCard extends LitElement {
 
   protected updated(changed: PropertyValues): void {
     super.updated(changed);
-    if (changed.has("hass") && this.hass && this._config?.historyReplay?.enabled && !this._replayLoadRequested && !this._replayEnabled) {
+    if (
+      changed.has("hass")
+      && this.hass
+      && this._config?.historyReplay?.enabled
+      && !this._replayLoadRequested
+      && !this._replayEnabled
+      && !this._replayManuallyDisabled
+    ) {
       this._ensureReplayStarted();
     }
-    if (this._config?.historyReplay?.enabled && this._historyEvents.length) {
+    // REVIEW: auto-scroll can become noisy during playback on very large logs.
+    // Keep it constrained to when the replay panel and log are both visible.
+    if (this._config?.historyReplay?.enabled && this._historyEvents.length && this._replayHistoryVisible && this._replayLogExpanded) {
       this._syncReplayLogToCurrentEvent();
     }
   }
@@ -336,10 +367,10 @@ export class FloorplanCard extends LitElement {
    * `undefined` — no second sensor, or a shape with only one leaf — leaves both
    * on the first entity, so nothing about a single-sensor opening changes.
    */
-  private _openingSecond(o: Opening): { amount: number; active: boolean } | undefined {
+  private _openingSecond(o: Opening, renderHass?: RenderHass): { amount: number; active: boolean } | undefined {
     if (!o.secondaryEntity || !openingHasTwoLeaves(o)) return undefined;
     const leaf = secondLeafOf(o);
-    const state = this.hass?.states[o.secondaryEntity];
+    const state = renderHass?.states[o.secondaryEntity];
     return { amount: resolveOpeningAmount(leaf, state), active: openingIsActive(leaf, state) };
   }
 
@@ -349,9 +380,9 @@ export class FloorplanCard extends LitElement {
    * is drawn from `shutterAmount` / `shutterActive`, not the sash's — and only
    * for a `swing` shutter, since a roll curtain has no second panel to drive.
    */
-  private _shutterSecond(o: Opening): { amount: number; active: boolean } | undefined {
+  private _shutterSecond(o: Opening, renderHass?: RenderHass): { amount: number; active: boolean } | undefined {
     if (!o.shutterSecondaryEntity || shutterStyleOf(o) !== "swing") return undefined;
-    const state = this.hass?.states[o.shutterSecondaryEntity];
+    const state = renderHass?.states[o.shutterSecondaryEntity];
     return {
       amount: shutterAmount(state, o.shutterInvert),
       active: shutterActive(state, o.shutterInvert),
@@ -382,6 +413,7 @@ export class FloorplanCard extends LitElement {
 
   private _buildRenderHass(): RenderHass | undefined {
     if (!this.hass) return undefined;
+    console.log("plk Building renderHass with watched entities");
     const provider = this._getStateProvider();
     const states: Record<string, HassEntity | undefined> = {};
     for (const entityId of this._watchedEntities) {
@@ -395,7 +427,11 @@ export class FloorplanCard extends LitElement {
 
   private _getDefaultReplayWindow(): { start: number; end: number } {
     const now = Date.now() / 1000;
-    const lookback = this._config?.historyReplay?.lookbackSeconds ?? 3600;
+    const configuredLookback = this._config?.historyReplay?.lookbackSeconds;
+    const lookback =
+      typeof configuredLookback === "number" && Number.isFinite(configuredLookback) && configuredLookback > 0
+        ? configuredLookback
+        : 3600;
     return {
       start: Math.max(0, now - lookback),
       end: now,
@@ -411,11 +447,20 @@ export class FloorplanCard extends LitElement {
     };
   }
 
+  private _getReplayWatchedEntities(): string[] {
+    return Array.from(this._watchedEntities).sort();
+  }
+
+  private _getReplayScopeKey(): string {
+    const watched = this._getReplayWatchedEntities();
+    return watched.length ? watched.join("|") : "none";
+  }
+
   private _getReplaySpeedForRange(start: number, end: number): number {
     const duration = Math.max(1, end - start);
     const baselineSpeed = duration / 30;
     const configuredSpeed = this._config?.historyReplay?.defaultSpeed;
-    const derivedSpeed = configuredSpeed != null ? configuredSpeed * baselineSpeed : baselineSpeed;
+    const derivedSpeed = configuredSpeed != null ? configuredSpeed : baselineSpeed;
     return Math.max(0.25, derivedSpeed);
   }
 
@@ -448,6 +493,8 @@ export class FloorplanCard extends LitElement {
 
   private _updateReplayWindow(start: number, end: number): void {
     const { start: replayStart, end: replayEnd } = this._normalizeReplayWindow(start, end);
+    const span = replayEnd - replayStart;
+    this._replayRangeWarning = span < 60 ? "Very small replay window may hide expected transitions." : undefined;
     const wasPlaying = this._playbackController.playing;
     this._replayStartTime = replayStart;
     this._replayEndTime = replayEnd;
@@ -469,22 +516,45 @@ export class FloorplanCard extends LitElement {
   }
 
   private _ensureReplayStarted(): void {
-    if (!this.hass || !this._config?.historyReplay?.enabled || this._replayLoadRequested || this._replayEnabled) return;
+    if (
+      !this.hass
+      || !this._config?.historyReplay?.enabled
+      || this._replayLoadRequested
+      || this._replayEnabled
+      || this._replayManuallyDisabled
+    ) return;
     void this._startReplay();
   }
 
   private async _toggleReplay(): Promise<void> {
     if (!this.hass || !this._config?.historyReplay) return;
     if (!this._replayEnabled) {
+      this._replayManuallyDisabled = false;
       await this._startReplay();
       return;
     }
+    // REVIEW: clearing transient replay artifacts when disabled keeps
+    // live-mode transitions deterministic.
     this._replayEnabled = false;
+    this._replayManuallyDisabled = true;
+    this._replayLoadToken += 1;
     this._replayReady = false;
     this._replayLoadRequested = false;
+    this._replayError = undefined;
+    this._historyEvents = [];
+    this._replayLastSyncedEventTs = undefined;
     this._playbackController.pause();
     this._stopReplayLoop();
     this.requestUpdate();
+  }
+
+  private _logReplay(message: string, data?: Record<string, unknown>): void {
+    if (!REPLAY_DEBUG_LOGS) return;
+    if (data) {
+      console.info(message, data);
+      return;
+    }
+    console.info(message);
   }
 
   private async _startReplay(options: { preserveCurrentTime?: boolean; keepPlaying?: boolean } = {}): Promise<void> {
@@ -494,6 +564,7 @@ export class FloorplanCard extends LitElement {
     const { start: replayStart, end: replayEnd } = this._normalizeReplayWindow(start, end);
     this._replayStartTime = replayStart;
     this._replayEndTime = replayEnd;
+    this._replayManuallyDisabled = false;
     this._replayEnabled = true;
     this._replayLoadRequested = true;
     this._replayError = undefined;
@@ -511,23 +582,41 @@ export class FloorplanCard extends LitElement {
       this._playbackController.play();
     }
     this._historyEvents = [];
-    console.info("[easy-floorplan] Starting replay", { start: replayStart, end: replayEnd, lookback: replayEnd - replayStart });
-    await this._loadReplayRange(replayStart, replayEnd);
+    this._replayLastSyncedEventTs = undefined;
+    const loadToken = ++this._replayLoadToken;
+    this._logReplay("[easy-floorplan] Starting replay", { start: replayStart, end: replayEnd, lookback: replayEnd - replayStart });
+    await this._loadReplayRange(replayStart, replayEnd, loadToken);
+    if (options.keepPlaying && this._replayEnabled && this._playbackController.playing) {
+      this._startReplayLoop();
+    }
     this.requestUpdate();
   }
 
-  private async _loadReplayRange(start: number, end: number): Promise<void> {
+  private async _loadReplayRange(start: number, end: number, loadToken: number): Promise<void> {
     try {
-      await this._historyService.loadHistory(start, end);
-      this._historyEvents = this._historyService.getEvents().map((event) => ({
+      const scopeKey = this._getReplayScopeKey();
+      await this._historyService.loadHistory(start, end, { scopeKey });
+      if (loadToken !== this._replayLoadToken) return;
+      const watched = new Set(this._getReplayWatchedEntities());
+      const loadedEvents = this._historyService.getEvents();
+      console.log("[easy-floorplan] Replay history service result", {
+        scopeKey,
+        watched: Array.from(watched),
+        rawCount: loadedEvents.length,
+        filteredCount: loadedEvents.filter((event) => watched.has(event.entityId)).length,
+        sample: loadedEvents.slice(0, 5),
+      });
+      this._historyEvents = loadedEvents.filter((event) => watched.has(event.entityId)).map((event) => ({
         ...event,
         color: this._getReplayEventColor(event),
       }));
       this._replayReady = true;
+      this._replayLoadRequested = false;
       this._replayError = undefined;
-      console.info("[easy-floorplan] Replay history loaded", { eventCount: this._historyEvents.length });
+      this._logReplay("[easy-floorplan] Replay history loaded", { eventCount: this._historyEvents.length });
       this.requestUpdate();
     } catch (error) {
+      if (loadToken !== this._replayLoadToken) return;
       this._replayReady = false;
       this._replayLoadRequested = false;
       this._replayError = error instanceof Error ? error.message : "Unable to load history.";
@@ -535,14 +624,53 @@ export class FloorplanCard extends LitElement {
     }
   }
 
+  private static _attributesEqual(a: unknown, b: unknown): boolean {
+    if (a === b) return true;
+    if (!a || !b) return !a && !b;
+    if (typeof a !== typeof b) return false;
+    if (Array.isArray(a) || Array.isArray(b)) {
+      if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+      for (let index = 0; index < a.length; index += 1) {
+        if (!FloorplanCard._attributesEqual(a[index], b[index])) return false;
+      }
+      return true;
+    }
+    if (typeof a !== "object") return false;
+    const aObj = a as Record<string, unknown>;
+    const bObj = b as Record<string, unknown>;
+    const aKeys = Object.keys(aObj);
+    const bKeys = Object.keys(bObj);
+    if (aKeys.length !== bKeys.length) return false;
+    for (const key of aKeys) {
+      if (!(key in bObj)) return false;
+      if (!FloorplanCard._attributesEqual(aObj[key], bObj[key])) return false;
+    }
+    return true;
+  }
+
   private async _loadHistoryEvents(start: number, end: number): Promise<HistoryEventInput[]> {
     if (!this.hass) return [];
     const ws = (this.hass as HomeAssistant & { callWS?: (msg: Record<string, unknown>) => Promise<unknown> }).callWS;
-    const api = (this.hass as HomeAssistant & { callApi?: (api: string, data?: Record<string, unknown>) => Promise<unknown> }).callApi;
+    const api = (this.hass as HomeAssistant & {
+      callApi?: (method: string, path: string, parameters?: Record<string, unknown>) => Promise<unknown>
+    }).callApi;
     const startTime = new Date(start * 1000).toISOString();
     const endTime = new Date(end * 1000).toISOString();
     const watchedFromConfig = this._config ? collectWatchedEntities(this._config) : new Set<string>();
-    const watched = Array.from(this._watchedEntities.size ? this._watchedEntities : watchedFromConfig);
+    const watched = Array.from(this._watchedEntities.size ? this._watchedEntities : watchedFromConfig).sort();
+    // REVIEW: replay should remain scoped to mapped entities only; this guard
+    // prevents accidental all-entity history fetches and UI noise.
+    if (!watched.length) {
+      console.log("[easy-floorplan] Replay history skipped: no mapped entities to query", {
+        watched,
+        watchedFromConfig: Array.from(watchedFromConfig),
+        _watchedEntities: Array.from(this._watchedEntities),
+        configFloorCount: this._config?.floors?.length ?? 0,
+      });
+      this._logReplay("[easy-floorplan] Replay history skipped: no mapped entities to query");
+      return [];
+    }
+    const watchedSet = new Set(watched);
     const request = {
       type: "history/history_during_period",
       start_time: startTime,
@@ -550,19 +678,17 @@ export class FloorplanCard extends LitElement {
       minimal_response: false,
       no_attributes: false,
       significant_changes_only: false,
-      ...(watched.length ? { entity_ids: watched } : {}),
+      entity_ids: watched,
     };
-    if (!watched.length) {
-      console.info("[easy-floorplan] Replay history fetch without entity filter", {
-        transport: "all",
-        startTime,
-        endTime,
-        watchedCount: 0,
-      });
-    }
+    console.log("[easy-floorplan] Replay history request", {
+      startTime,
+      endTime,
+      watched,
+      request,
+    });
     let history: unknown;
     if (typeof ws === "function") {
-      console.info("[easy-floorplan] Replay history fetch", {
+      this._logReplay("[easy-floorplan] Replay history fetch", {
         transport: "websocket",
         startTime,
         endTime,
@@ -581,7 +707,7 @@ export class FloorplanCard extends LitElement {
       }
     }
     if (!history && typeof api === "function") {
-      console.info("[easy-floorplan] Replay history fetch", {
+      this._logReplay("[easy-floorplan] Replay history fetch", {
         transport: "rest",
         startTime,
         endTime,
@@ -589,7 +715,13 @@ export class FloorplanCard extends LitElement {
         watchedEntities: watched,
       });
       try {
-        history = await api("history/history_during_period", request);
+        history = await api("GET", `history/period/${encodeURIComponent(startTime)}`, {
+          end_time: endTime,
+          filter_entity_id: watched.join(","),
+          minimal_response: false,
+          no_attributes: false,
+          significant_changes_only: false,
+        });
       } catch (error) {
         console.warn("[easy-floorplan] Replay REST history query failed", {
           startTime,
@@ -601,200 +733,57 @@ export class FloorplanCard extends LitElement {
     }
 
     if (!history) {
+      console.log("[easy-floorplan] Replay history fetch returned no payload", {
+        wsAvailable: typeof ws === "function",
+        apiAvailable: typeof api === "function",
+        watched,
+        startTime,
+        endTime,
+      });
       throw new Error(`Unable to load history via websocket or REST API (ws:${typeof ws === "function" ? "yes" : "no"}, api:${typeof api === "function" ? "yes" : "no"}).`);
     }
 
-    console.info("[easy-floorplan] Replay history raw payload", history);
+    console.log("[easy-floorplan] Replay raw history payload", {
+      transport: typeof ws === "function" && history !== undefined ? "websocket" : "rest",
+      watched,
+      payload: history,
+    });
+
+    // REVIEW: keep logs bounded to summaries to reduce payload noise/risk.
     if (Array.isArray(history)) {
-      console.info("[easy-floorplan] Replay history payload summary", {
+      this._logReplay("[easy-floorplan] Replay history payload summary", {
         kind: "array",
         rows: history.length,
         rowKinds: history.slice(0, 8).map((row) => (Array.isArray(row) ? "array" : typeof row)),
+        preview: history.slice(0, 2).map((row) => {
+          if (!row || typeof row !== "object") return row;
+          const entry = row as Record<string, unknown>;
+          return {
+            entity_id: entry.entity_id,
+            stateCount: Array.isArray(entry.states) ? entry.states.length : 0,
+            keys: Object.keys(entry).slice(0, 10),
+          };
+        }),
       });
     } else if (history && typeof history === "object") {
-      console.info("[easy-floorplan] Replay history payload summary", {
+      this._logReplay("[easy-floorplan] Replay history payload summary", {
         kind: "object",
         keys: Object.keys(history as Record<string, unknown>).slice(0, 20),
       });
     } else {
-      console.info("[easy-floorplan] Replay history payload summary", {
+      this._logReplay("[easy-floorplan] Replay history payload summary", {
         kind: typeof history,
       });
     }
 
     type HistoryStateRow = {
-      entity_id?: string;
       state?: string;
       attributes?: Record<string, unknown>;
       last_updated?: string | number;
       last_changed?: string | number;
     };
 
-    type CompactHistoryStateRow = {
-      e?: string;
-      s?: string;
-      a?: Record<string, unknown>;
-      lu?: string | number;
-      lc?: string | number;
-    };
-
-    const buckets: Array<{
-      entity_id?: string;
-      states: HistoryStateRow[];
-    }> = [];
-
-    const bucketByEntityId = new Map<string, { entity_id?: string; states: HistoryStateRow[] }>();
-
-    const pushStateRow = (entityId: string | undefined, row: HistoryStateRow): void => {
-      if (!entityId) return;
-      let bucket = bucketByEntityId.get(entityId);
-      if (!bucket) {
-        bucket = { entity_id: entityId, states: [] };
-        buckets.push(bucket);
-        bucketByEntityId.set(entityId, bucket);
-      }
-      bucket.states.push(row);
-    };
-
-    const isStateRow = (value: unknown): value is HistoryStateRow => {
-      if (!value || typeof value !== "object") return false;
-      const row = value as Record<string, unknown>;
-      return (
-        "entity_id" in row ||
-        "state" in row ||
-        "attributes" in row ||
-        "last_updated" in row ||
-        "last_changed" in row ||
-        "e" in row ||
-        "s" in row ||
-        "a" in row ||
-        "lu" in row ||
-        "lc" in row
-      );
-    };
-
-    const normalizeStateRow = (row: unknown, fallbackEntityId?: string): HistoryStateRow | undefined => {
-      if (!row || typeof row !== "object") return undefined;
-      const input = row as Record<string, unknown>;
-      const compact = row as CompactHistoryStateRow;
-      const entityId =
-        typeof input.entity_id === "string"
-          ? input.entity_id
-          : typeof compact.e === "string"
-            ? compact.e
-            : fallbackEntityId;
-      const state =
-        typeof input.state === "string"
-          ? input.state
-          : typeof compact.s === "string"
-            ? compact.s
-            : undefined;
-      const attributes =
-        input.attributes && typeof input.attributes === "object"
-          ? (input.attributes as Record<string, unknown>)
-          : compact.a && typeof compact.a === "object"
-            ? compact.a
-            : undefined;
-      const lastUpdated =
-        typeof input.last_updated === "string" || typeof input.last_updated === "number"
-          ? input.last_updated
-          : compact.lu;
-      const lastChanged =
-        typeof input.last_changed === "string" || typeof input.last_changed === "number"
-          ? input.last_changed
-          : compact.lc;
-      return {
-        entity_id: entityId,
-        state,
-        attributes,
-        last_updated: lastUpdated,
-        last_changed: lastChanged,
-      };
-    };
-
-    const appendNormalizedRows = (entityId: string | undefined, rows: unknown[]): void => {
-      const normalizedStates = rows
-        .map((row) => normalizeStateRow(row, entityId))
-        .filter((row): row is HistoryStateRow => Boolean(row));
-      if (!normalizedStates.length) return;
-      const resolvedEntityId =
-        entityId ?? normalizedStates.find((row) => typeof row.entity_id === "string")?.entity_id;
-      if (resolvedEntityId) {
-        for (const row of normalizedStates) {
-          pushStateRow(resolvedEntityId, {
-            ...row,
-            entity_id: resolvedEntityId,
-          });
-        }
-      } else {
-        buckets.push({
-          entity_id: undefined,
-          states: normalizedStates,
-        });
-      }
-    };
-
-    if (history && typeof history === "object" && !Array.isArray(history)) {
-      // Preferred HA websocket shape: { "entity.id": [stateRow, ...], ... }
-      for (const [entityId, entityRows] of Object.entries(history as Record<string, unknown>)) {
-        if (Array.isArray(entityRows)) {
-          appendNormalizedRows(entityId, entityRows);
-          continue;
-        }
-        if (entityRows && typeof entityRows === "object") {
-          const objectRow = entityRows as { states?: unknown };
-          if (Array.isArray(objectRow.states)) {
-            appendNormalizedRows(entityId, objectRow.states);
-            continue;
-          }
-          if (isStateRow(entityRows)) {
-            appendNormalizedRows(entityId, [entityRows]);
-          }
-        }
-      }
-    } else if (Array.isArray(history)) {
-      // Legacy/alternate shape: array of buckets or array of state rows.
-      for (const row of history) {
-        if (!row) continue;
-        if (Array.isArray(row)) {
-          appendNormalizedRows(undefined, row);
-          continue;
-        }
-        if (typeof row === "object") {
-          const objectRow = row as {
-            entity_id?: string;
-            states?: unknown;
-          };
-          if (Array.isArray(objectRow.states)) {
-            appendNormalizedRows(objectRow.entity_id, objectRow.states);
-            continue;
-          }
-          if (isStateRow(objectRow)) {
-            appendNormalizedRows(objectRow.entity_id, [objectRow]);
-          }
-        }
-      }
-    }
-
-    console.info("[easy-floorplan] Replay history buckets", {
-      bucketCount: buckets.length,
-      buckets: buckets.slice(0, 20).map((bucket) => ({
-        entity_id: bucket.entity_id,
-        states: bucket.states.length,
-        first: bucket.states[0]?.last_updated ?? bucket.states[0]?.last_changed,
-        last:
-          bucket.states.length > 0
-            ? (bucket.states[bucket.states.length - 1]?.last_updated ?? bucket.states[bucket.states.length - 1]?.last_changed)
-            : undefined,
-      })),
-    });
-
-    const normalized: HistoryEventInput[] = [];
-    let droppedTooShort = 0;
-    let droppedNoEntityId = 0;
-    let droppedBadTimestamp = 0;
-    let droppedOutOfRange = 0;
-    let droppedNoChange = 0;
+    const buckets = new Map<string, HistoryStateRow[]>();
     const parseHistoryTimestamp = (value: string | number | undefined, fallbackIsoTime: string): number => {
       if (typeof value === "number") {
         if (!Number.isFinite(value)) return Number.NaN;
@@ -809,17 +798,130 @@ export class FloorplanCard extends LitElement {
       return Date.parse(fallbackIsoTime) / 1000;
     };
 
-    for (const entity of buckets) {
-      if (!Array.isArray(entity.states) || entity.states.length < 2) {
+    const pickValue = (row: Record<string, unknown>, keys: string[]): unknown => {
+      for (const key of keys) {
+        const value = row[key];
+        if (value !== undefined) return value;
+      }
+      return undefined;
+    };
+
+    const pushStateRows = (entityId: string, entityRows: unknown[]) => {
+      const rows = entityRows.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object");
+      if (!rows.length) return;
+      buckets.set(entityId, rows.map((row) => {
+        const state = pickValue(row, ["state", "s"]);
+        const attributes = pickValue(row, ["attributes", "a"]);
+        const lastUpdated = pickValue(row, ["last_updated", "lu"]);
+        const lastChanged = pickValue(row, ["last_changed", "lc"]);
+        return {
+          state: typeof state === "string" || typeof state === "number" || typeof state === "boolean" ? String(state) : undefined,
+          attributes: attributes && typeof attributes === "object" ? (attributes as Record<string, unknown>) : undefined,
+          last_updated: typeof lastUpdated === "string" || typeof lastUpdated === "number" ? lastUpdated : undefined,
+          last_changed: typeof lastChanged === "string" || typeof lastChanged === "number" ? lastChanged : undefined,
+        };
+      }));
+    };
+
+    if (Array.isArray(history)) {
+      for (const entry of history) {
+        if (!entry || typeof entry !== "object") continue;
+        const record = entry as Record<string, unknown>;
+        const entityId = typeof record.entity_id === "string" ? record.entity_id : undefined;
+        const states = Array.isArray(record.states) ? record.states : Array.isArray(record.history) ? record.history : [];
+        if (entityId && states.length) {
+          pushStateRows(entityId, states);
+        }
+      }
+    } else if (history && typeof history === "object") {
+      for (const [entityId, entityRows] of Object.entries(history as Record<string, unknown>)) {
+        if (Array.isArray(entityRows) && entityRows.length) {
+          pushStateRows(entityId, entityRows);
+          continue;
+        }
+        if (entityRows && typeof entityRows === "object") {
+          const nested = entityRows as Record<string, unknown>;
+          if (Array.isArray(nested.states) && nested.states.length) {
+            pushStateRows(entityId, nested.states);
+          }
+        }
+      }
+    }
+
+    if (buckets.size) {
+      this._logReplay("[easy-floorplan] Replay history buckets parsed", {
+        bucketCount: buckets.size,
+        sample: Array.from(buckets.entries()).slice(0, 5).map(([entityId, states]) => ({
+          entity_id: entityId,
+          stateCount: states.length,
+          first: states[0]?.last_updated ?? states[0]?.last_changed,
+          last: states[states.length - 1]?.last_updated ?? states[states.length - 1]?.last_changed,
+        })),
+      });
+    }
+
+    if (!buckets.size) {
+      console.log("[easy-floorplan] Replay parser produced zero buckets", {
+        watched,
+        history,
+        keys: history && typeof history === "object" ? Object.keys(history as Record<string, unknown>).slice(0, 20) : undefined,
+        arrayLength: Array.isArray(history) ? history.length : undefined,
+      });
+      throw new Error("History payload contained no parseable state rows.");
+    }
+
+    this._logReplay("[easy-floorplan] Replay history buckets", {
+      bucketCount: buckets.size,
+      buckets: Array.from(buckets.entries()).slice(0, 20).map(([entityId, states]) => ({
+        entity_id: entityId,
+        states: states.length,
+        first: states[0]?.last_updated ?? states[0]?.last_changed,
+        last: states.length > 0 ? (states[states.length - 1]?.last_updated ?? states[states.length - 1]?.last_changed) : undefined,
+      })),
+    });
+
+    const normalized: HistoryEventInput[] = [];
+    let droppedTooShort = 0;
+    let droppedBadTimestamp = 0;
+    let droppedOutOfRange = 0;
+    let droppedNoChange = 0;
+
+    for (const [entityId, states] of buckets.entries()) {
+      if (!states.length) {
         droppedTooShort += 1;
         continue;
       }
-      for (let index = 1; index < entity.states.length; index += 1) {
-        const prev = entity.states[index - 1];
-        const next = entity.states[index];
-        const entityId = entity.entity_id ?? next.entity_id ?? prev.entity_id;
-        if (!entityId) {
-          droppedNoEntityId += 1;
+
+      if (states.length === 1) {
+        const only = states[0];
+        if (!watchedSet.has(entityId)) {
+          droppedOutOfRange += 1;
+          continue;
+        }
+        const ts = parseHistoryTimestamp(only.last_updated ?? only.last_changed, endTime);
+        if (!Number.isFinite(ts)) {
+          droppedBadTimestamp += 1;
+          continue;
+        }
+        if (ts < start || ts > end) {
+          droppedOutOfRange += 1;
+          continue;
+        }
+        normalized.push({
+          timestamp: ts,
+          entityId,
+          oldState: only.state ?? "unknown",
+          newState: only.state ?? "unknown",
+          attributes: only.attributes ?? {},
+        });
+        continue;
+      }
+
+      for (let index = 1; index < states.length; index += 1) {
+        const prev = states[index - 1];
+        const next = states[index];
+        if (!watchedSet.has(entityId)) {
+          droppedOutOfRange += 1;
           continue;
         }
         const prevTs = parseHistoryTimestamp(prev.last_updated ?? prev.last_changed, endTime);
@@ -833,7 +935,7 @@ export class FloorplanCard extends LitElement {
           continue;
         }
         const stateChanged = prev.state !== next.state;
-        const attrsChanged = JSON.stringify(prev.attributes ?? {}) !== JSON.stringify(next.attributes ?? {});
+        const attrsChanged = !FloorplanCard._attributesEqual(prev.attributes ?? {}, next.attributes ?? {});
         if (!stateChanged && !attrsChanged) {
           droppedNoChange += 1;
           continue;
@@ -843,51 +945,53 @@ export class FloorplanCard extends LitElement {
           entityId,
           oldState: prev.state ?? "unknown",
           newState: next.state ?? "unknown",
-          attributes: (next.attributes as Record<string, unknown> | undefined) ?? {},
+          attributes: {
+            ...(prev.attributes ?? {}),
+            ...(next.attributes ?? {}),
+          },
         });
       }
     }
-    console.info("[easy-floorplan] Replay history normalization summary", {
+    this._logReplay("[easy-floorplan] Replay history normalization summary", {
       normalizedCount: normalized.length,
       droppedTooShort,
-      droppedNoEntityId,
       droppedBadTimestamp,
       droppedOutOfRange,
       droppedNoChange,
-      sample: normalized.slice(0, 20),
     });
     return normalized.sort((a, b) => a.timestamp - b.timestamp);
   }
 
   private _seekReplay(timestamp: number): void {
     this._playbackController.seek(timestamp);
-    console.info("[easy-floorplan] Replay seek", { timestamp });
+    this._logReplay("[easy-floorplan] Replay seek", { timestamp });
     this.requestUpdate();
   }
 
   private _jumpReplay(seconds: number): void {
     this._playbackController.seek(this._playbackController.currentTime + seconds);
-    console.info("[easy-floorplan] Replay jump", { seconds });
+    this._logReplay("[easy-floorplan] Replay jump", { seconds });
     this.requestUpdate();
   }
 
   private _stepReplay(direction: 1 | -1): void {
     if (!this._historyEvents.length) return;
-    const target = this._playbackController.currentTime + direction * 5;
+    const currentTime = this._playbackController.currentTime;
+    const epsilon = 0.0001;
     const candidate = direction > 0
-      ? this._historyService.getEventAfter(target)
-      : this._historyService.getEventBefore(target);
+      ? this._historyService.getEventAfter(currentTime + epsilon)
+      : this._historyService.getEventBefore(currentTime - epsilon);
     if (candidate) {
       this._playbackController.seek(candidate.timestamp);
     } else {
-      this._playbackController.seek(target);
+      this._playbackController.seek(direction > 0 ? this._playbackController.endTime : this._playbackController.startTime);
     }
     this.requestUpdate();
   }
 
   private _setReplaySpeed(speed: number): void {
     this._playbackController.setPlaybackSpeed(speed);
-    console.info("[easy-floorplan] Replay speed", { speed });
+    this._logReplay("[easy-floorplan] Replay speed", { speed });
     this.requestUpdate();
   }
 
@@ -908,7 +1012,6 @@ export class FloorplanCard extends LitElement {
     if (speed >= 1) return `${speed.toFixed(2)}x`;
     return `${speed.toFixed(3)}x`;
   }
-
   private _handleReplaySpeedSliderInput(ev: Event): void {
     const slider = ev.target as HTMLInputElement;
     const value = Number(slider.value);
@@ -917,28 +1020,35 @@ export class FloorplanCard extends LitElement {
   }
 
   private _playReplay(): void {
+    if (!this._replayEnabled) {
+      void this._startReplay({ preserveCurrentTime: true, keepPlaying: true });
+      return;
+    }
     if (!this._replayReady) {
-      void this._loadReplayRange(this._playbackController.currentTime - 3600, this._playbackController.currentTime);
+      const replayStart = this._replayStartTime || this._playbackController.startTime;
+      const replayEnd = this._replayEndTime || this._playbackController.endTime;
+      void this._loadReplayRange(replayStart, replayEnd, ++this._replayLoadToken);
     }
     if (this._playbackController.currentTime >= this._playbackController.endTime) {
       this._playbackController.seek(this._playbackController.startTime);
     }
     this._playbackController.play();
     this._startReplayLoop();
-    console.info("[easy-floorplan] Replay play", { currentTime: this._playbackController.currentTime });
+    this._logReplay("[easy-floorplan] Replay play", { currentTime: this._playbackController.currentTime });
     this.requestUpdate();
   }
 
   private _pauseReplay(): void {
     this._playbackController.pause();
     this._stopReplayLoop();
-    console.info("[easy-floorplan] Replay pause", { currentTime: this._playbackController.currentTime });
+    this._logReplay("[easy-floorplan] Replay pause", { currentTime: this._playbackController.currentTime });
     this.requestUpdate();
   }
 
   private _startReplayLoop(): void {
     if (this._replayLoopId) return;
     this._lastReplayFrame = undefined;
+    this._replayUiLastUpdateFrameMs = 0;
     const tick = (timestamp: number): void => {
       if (this._playbackController.playing) {
         if (this._lastReplayFrame === undefined) {
@@ -946,7 +1056,10 @@ export class FloorplanCard extends LitElement {
         } else {
           this._playbackController.tick(timestamp - this._lastReplayFrame);
           this._lastReplayFrame = timestamp;
-          this.requestUpdate();
+          if (this._replayUiLastUpdateFrameMs === 0 || timestamp - this._replayUiLastUpdateFrameMs >= FloorplanCard._REPLAY_UI_UPDATE_INTERVAL_MS) {
+            this._replayUiLastUpdateFrameMs = timestamp;
+            this.requestUpdate();
+          }
         }
         if (this._playbackController.currentTime >= this._playbackController.endTime) {
           this._pauseReplay();
@@ -1030,10 +1143,11 @@ export class FloorplanCard extends LitElement {
     o: Opening,
     c: FloorplanCardConfig,
     rot: PlanRotation,
-    scale: OverlayScale
+    scale: OverlayScale,
+    renderHass?: RenderHass
   ): TemplateResult {
     const id = o.shutterEntity!;
-    const st = this.hass?.states[id];
+    const st = renderHass?.states[id];
     const open = shutterAmount(st, o.shutterInvert) > 0;
     const active = shutterActive(st, o.shutterInvert);
     const icon = shutterMarkIcon(o, st, open, this.hass?.entities?.[id]?.icon);
@@ -1050,7 +1164,7 @@ export class FloorplanCard extends LitElement {
     const push = `translate(calc(${n.x} * ${step}), calc(${n.y} * ${step}))`;
     const box = overlayLength(SHUTTER_MARK_SIZE, scale);
     const name =
-      (this.hass?.states[id]?.attributes?.friendly_name as string | undefined) ?? id;
+      (renderHass?.states[id]?.attributes?.friendly_name as string | undefined) ?? id;
     return html`
       <div
         class="shutter-mark ${active ? "on" : "off"}"
@@ -1058,7 +1172,7 @@ export class FloorplanCard extends LitElement {
         style="left:${(p.x / d.w) * 100}%; top:${(p.y / d.h) * 100}%;
                width:${box};height:${box};
                transform:translate(-50%,-50%) ${push};--fp-active:${accent};"
-        title="${name} · ${entityStateText(this.hass, id)}"
+        title="${name} · ${entityStateText(renderHass, id)}"
         role="button"
         tabindex="0"
         @action=${() => {
@@ -1091,12 +1205,13 @@ export class FloorplanCard extends LitElement {
     o: Opening,
     c: FloorplanCardConfig,
     rot: PlanRotation,
-    scale: OverlayScale
+    scale: OverlayScale,
+    renderHass?: RenderHass
   ): TemplateResult {
     const id = o.entity!;
-    const st = this.hass?.states[id];
-    const open = this._openingAmount(o) > 0;
-    const active = this._openingActive(o);
+    const st = renderHass?.states[id];
+    const open = this._openingAmount(o, renderHass) > 0;
+    const active = this._openingActive(o, renderHass);
     const icon = openingMarkIcon(o, st, open, this.hass?.entities?.[id]?.icon);
     const accent = cssColor(o.activeColor) ?? SKIN_ACCENT;
     const at = openingMarkPoint(o);
@@ -1107,7 +1222,7 @@ export class FloorplanCard extends LitElement {
     const push = `translate(calc(${n.x} * ${step}), calc(${n.y} * ${step}))`;
     const box = overlayLength(SHUTTER_MARK_SIZE, scale);
     const name =
-      (this.hass?.states[id]?.attributes?.friendly_name as string | undefined) ?? id;
+      (renderHass?.states[id]?.attributes?.friendly_name as string | undefined) ?? id;
     return html`
       <div
         class="shutter-mark ${active ? "on" : "off"}"
@@ -1115,7 +1230,7 @@ export class FloorplanCard extends LitElement {
         style="left:${(p.x / d.w) * 100}%; top:${(p.y / d.h) * 100}%;
                width:${box};height:${box};
                transform:translate(-50%,-50%) ${push};--fp-active:${accent};"
-        title="${name} · ${entityStateText(this.hass, id)}"
+        title="${name} · ${entityStateText(renderHass, id)}"
         role="button"
         tabindex="0"
         @action=${() => {
@@ -1183,7 +1298,7 @@ export class FloorplanCard extends LitElement {
     // "Show the reading, not a picture" (issue #106). Same badge — size, angle,
     // state colour, ripple stacking all unchanged — with the glyph swapped for
     // the number. A device with nothing numeric to show keeps its icon.
-    const value = badgeContentOf(item) === "value" ? badgeValue(this.hass, item) : undefined;
+    const value = badgeContentOf(item) === "value" ? badgeValue(renderHass, item) : undefined;
     return html`
       <div
         class="badge"
@@ -1275,7 +1390,7 @@ export class FloorplanCard extends LitElement {
     // var()/color-mix()/gradient keeps the theme ink, exactly as before.
     const badgeInk = contrastText(stateColor ?? activeColor);
     const rippleSize = item.rippleSize ?? DEFAULT_RIPPLE_SIZE;
-    const displayMode = item.display ?? (on && !["sensor", "binary_sensor"].includes(item.kind) ? "iconRipple" : "badge");
+    const displayMode = item.display ?? "badge";
 
     let visual: TemplateResult | typeof nothing = nothing;
     if (displayMode === "ripple") {
@@ -1413,11 +1528,11 @@ export class FloorplanCard extends LitElement {
     // Overlay sizing mode. --fp-plan-w is the canvas width *as displayed*, so a
     // rotated plan divides by the dimension 100cqw actually measures.
     const scale = normalizeOverlayScale(c.overlayScale);
-    // Follow the real sun (issue #113). Elevation comes from the HA instance,
-    // so every viewer sees the same picture regardless of their own timezone.
+    // Follow the real sun (issue #113). Elevation comes from the active render
+    // state source, so replay and live rendering stay consistent.
     const sunLevel = c.sunDimming
       ? sunBrightness(
-          this.hass?.states["sun.sun"]?.attributes?.elevation,
+          renderHass?.states["sun.sun"]?.attributes?.elevation,
           cssNumber(c.sunBrightnessMin, DEFAULT_SUN_MIN),
           cssNumber(c.sunBrightnessMax, DEFAULT_SUN_MAX)
         )
@@ -1460,7 +1575,7 @@ export class FloorplanCard extends LitElement {
     const sunDimMask = c.sunDimming
       ? renderSunDimMask(
           active.items,
-          this.hass?.states,
+          renderHass?.states,
           c.width,
           c.height,
           sunDimMaskId,
@@ -1573,7 +1688,7 @@ export class FloorplanCard extends LitElement {
                       hasHold: hasAction(areaActionForGesture(a, "hold")?.config),
                       hasDoubleClick: hasAction(areaActionForGesture(a, "double_tap")?.config),
                     })}>
-                  ${renderArea(a, areaColor(a, a.entity ? this.hass?.states[a.entity]?.state : undefined))}
+                  ${renderArea(a, areaColor(a, a.entity ? renderHass?.states[a.entity]?.state : undefined))}
                 </g>`;
             })}
             <!-- Dead spaces (issue #88): the regions the walls seal off that no
@@ -1601,7 +1716,7 @@ export class FloorplanCard extends LitElement {
                mask=${active.furniture.length ? `url(#${this._glowIdBase}-mask)` : nothing}>
               ${active.items.map((it, i) => {
                 if (!it.glow) return nothing;
-                const paint = glowPaint(it, this.hass?.states[it.entity]);
+                const paint = glowPaint(it, renderHass?.states[it.entity]);
                 // Walls block the pool (issue #108) — light stops at the room.
                 return paint
                   ? renderGlow(it, paint, `${this._glowIdBase}-${i}`, lightWalls)
@@ -1657,11 +1772,11 @@ export class FloorplanCard extends LitElement {
                       // see sunlightStrengthOf.
                       dir: sunLightDirection(
                         c,
-                        this.hass?.states["sun.sun"]?.attributes?.azimuth
+                        renderHass?.states["sun.sun"]?.attributes?.azimuth
                       ),
                       strength: sunlightStrengthOf(
                         c,
-                        this.hass?.states["sun.sun"]?.attributes?.elevation
+                        renderHass?.states["sun.sun"]?.attributes?.elevation
                       ),
                       // How far a patch carries, shortened as the sun climbs
                       // (issue #185): a midday sun drops its light almost
@@ -1677,7 +1792,7 @@ export class FloorplanCard extends LitElement {
                         cssNumber(c.sunReach, SUN_REACH) *
                         (sunIsPinned(c)
                           ? 1
-                          : sunReachScale(this.hass?.states["sun.sun"]?.attributes?.elevation)),
+                          : sunReachScale(renderHass?.states["sun.sun"]?.attributes?.elevation)),
                       // The gap each style actually clears, both leaves
                       // included — the same reading the lamps get above, and
                       // for the same reason (#145): `entity` alone leaves a
@@ -1688,15 +1803,15 @@ export class FloorplanCard extends LitElement {
                       openAmount: (o) =>
                         openingClearFraction(
                           o,
-                          this._openingAmount(o),
-                          this._openingSecond(o)?.amount
+                          this._openingAmount(o, renderHass),
+                          this._openingSecond(o, renderHass)?.amount
                         ),
                       // A shutter that is all the way down stops the light, as
                       // one does. Undefined where none is bound, so an opening
                       // without a shutter is judged on itself alone.
                       shutterOpen: (o) =>
                         o.shutterEntity
-                          ? shutterAmount(this.hass?.states[o.shutterEntity], o.shutterInvert)
+                          ? shutterAmount(renderHass?.states[o.shutterEntity], o.shutterInvert)
                           : undefined,
                       light: c.sunlightColor ?? SUN_LIGHT_COLOR,
                       shade: c.sunShade === false ? null : (c.sunShadeColor ?? SUN_SHADE_COLOR),
@@ -1724,7 +1839,7 @@ export class FloorplanCard extends LitElement {
               ${active.areas?.map((a, i) =>
                 renderAreaBorder(
                   a,
-                  areaColor(a, a.entity ? this.hass?.states[a.entity]?.state : undefined),
+                  areaColor(a, a.entity ? renderHass?.states[a.entity]?.state : undefined),
                   `${this._wallMaskId}-area-${i}`
                 )
               )}
@@ -1748,7 +1863,7 @@ export class FloorplanCard extends LitElement {
                 active: this._openingActive(o, renderHass),
                 accent: o.activeColor ?? SKIN_ACCENT,
                 // Per-leaf state for a two-sensor biparting slider (issue #145).
-                second: this._openingSecond(o),
+                second: this._openingSecond(o, renderHass),
                 // External roller shutter layer (issue #74). No entity bound
                 // yet → previewed shut, like a static plan.
                 shutter: o.shutterEntity
@@ -1762,7 +1877,7 @@ export class FloorplanCard extends LitElement {
                       flip: o.shutterFlipV,
                       // Per-panel state for a two-contact hinged shutter
                       // (issue #159).
-                      second: this._shutterSecond(o),
+                      second: this._shutterSecond(o, renderHass),
                     }
                   : undefined,
               });
@@ -1831,12 +1946,12 @@ export class FloorplanCard extends LitElement {
               // nodes rather than morph one floor's badges into another's.
               active.openings.filter((o) => hasShutterMark(o)),
               (o, i) => `${o.id || i}-shutter`,
-              (o) => this._renderShutterMark(o, c, rot, scale)
+              (o) => this._renderShutterMark(o, c, rot, scale, renderHass)
             )}
             ${repeat(
               active.openings.filter((o) => hasOpeningMark(o)),
               (o, i) => `${o.id || i}-opening`,
-              (o) => this._renderOpeningMark(o, c, rot, scale)
+              (o) => this._renderOpeningMark(o, c, rot, scale, renderHass)
             )}
             ${repeat(
               // No entity filter: devices that exist physically but have no HA
@@ -1890,6 +2005,7 @@ export class FloorplanCard extends LitElement {
           <button
             class="replay-show-toggle"
             aria-expanded="false"
+            aria-controls=${this._replayPanelId}
             @click=${() => this._setReplayHistoryVisible(true)}
           >
             Show replay history
@@ -1898,10 +2014,11 @@ export class FloorplanCard extends LitElement {
       `;
     }
     return html`
-      <div class="replay-panel">
+      <div class="replay-panel" id=${this._replayPanelId}>
         <button
           class="replay-hide-toggle"
           aria-label="Hide replay panel"
+          aria-controls=${this._replayPanelId}
           @click=${() => this._setReplayHistoryVisible(false)}
         >
           hide
@@ -1913,6 +2030,7 @@ export class FloorplanCard extends LitElement {
           </div>
           <div class="replay-status">
             ${this._replayError ? html`<span class="replay-error">${this._replayError}</span>` : nothing}
+            ${this._replayRangeWarning ? html`<span class="replay-loading">${this._replayRangeWarning}</span>` : nothing}
             ${!this._replayReady && this._replayEnabled && !this._replayError ? html`<span class="replay-loading">Loading history…</span>` : nothing}
           </div>
         </div>
@@ -2000,6 +2118,7 @@ export class FloorplanCard extends LitElement {
             </button>
           </div>
           <div class="replay-timeline-wrap">
+
             <easy-floorplan-history-timeline
               .events=${this._historyEvents}
               .startTime=${this._playbackController.startTime}
@@ -2017,7 +2136,7 @@ export class FloorplanCard extends LitElement {
           ${this._historyEvents.length
             ? html`
                 ${this._replayLogExpanded
-                  ? html`<ul class="replay-event-list" ${ref(this._setReplayEventLogRef)}>${repeat(this._historyEvents, (event) => `${event.timestamp}-${event.entityId}-${event.newState}`, (event) => this._renderReplayEvent(event, currentEvent?.timestamp === event.timestamp))}</ul>`
+                  ? html`<ul class="replay-event-list" ${ref(this._setReplayEventLogRef)}>${repeat(this._historyEvents, (event, index) => `${event.timestamp}-${event.entityId}-${event.newState}-${index}`, (event) => this._renderReplayEvent(event, currentEvent?.timestamp === event.timestamp))}</ul>`
                   : nothing}
               `
             : html`<div class="replay-empty">No history events yet.</div>`}
@@ -2028,10 +2147,10 @@ export class FloorplanCard extends LitElement {
 
   private _renderReplayEvent(event: HistoryEventInput, isCurrent: boolean): TemplateResult {
     const passed = event.timestamp <= this._playbackController.currentTime;
-    const color = event.color ?? this._getReplayEventColor(event);
+    const color = cssColor(event.color ?? this._getReplayEventColor(event));
     const icon = this._getReplayEventIcon(event);
     return html`
-      <li class="replay-event-item ${passed ? "replay-event-passed" : ""} ${isCurrent ? "replay-event-current" : ""}">
+      <li class="replay-event-item ${passed ? "replay-event-passed" : ""} ${isCurrent ? "replay-event-current" : ""}" data-timestamp=${event.timestamp}>
         <span class="replay-event-dot" style=${color ? `background:${color}; box-shadow:0 0 0 2px ${color}22;` : nothing}></span>
         <span class="replay-event-time">${this._formatReplayTime(event.timestamp)}</span>
         <span class="replay-event-icon"><ha-icon icon=${icon}></ha-icon></span>
@@ -2062,58 +2181,68 @@ export class FloorplanCard extends LitElement {
   }
 
   private _getReplayEventColor(event: HistoryEventInput): string | undefined {
-    if (!this._config) return event.color;
+    if (!this._config) return resolveReplayEventColor(event);
 
-    const configuredColor = this._findConfiguredReplayColor(event.entityId);
+    const configuredColor = cssColor(this._findConfiguredReplayColor(event.entityId));
     const active = entityIsActive(event.entityId, event.newState);
     if (configuredColor) return active ? configuredColor : "#ffffff";
 
-    const rawColor = event.attributes?.color;
-    if (typeof rawColor === "string" && rawColor.trim()) return active ? rawColor : "#ffffff";
-
-    if (event.entityId.startsWith("light.")) return active ? "#f4b400" : "#ffffff";
-    if (event.entityId.startsWith("cover.")) return active ? "#7b1fa2" : "#ffffff";
-    if (event.entityId.startsWith("sensor.")) return active ? "#1976d2" : "#ffffff";
-    if (event.entityId.startsWith("binary_sensor.")) return active ? "#e53935" : "#ffffff";
-    if (event.entityId.startsWith("fan.")) return active ? "#00897b" : "#ffffff";
-    if (event.entityId.startsWith("media_player.")) return active ? "#6d4c41" : "#ffffff";
-    return undefined;
+    const resolved = resolveReplayEventColor(event);
+    return active ? resolved : "#ffffff";
   }
 
   private _findConfiguredReplayColor(entityId: string): string | undefined {
     if (!this._config) return undefined;
+    if (this._replayConfiguredColorCache.has(entityId)) {
+      return this._replayConfiguredColorCache.get(entityId);
+    }
+
     const floors = getFloors(this._config);
+    let color: string | undefined;
     for (const floor of floors) {
       for (const item of floor.items ?? []) {
         if (item.entity === entityId) {
-          return item.activeColor ?? item.rippleColor;
+          color = item.activeColor ?? item.rippleColor;
+          this._replayConfiguredColorCache.set(entityId, color);
+          return color;
         }
       }
       for (const opening of floor.openings ?? []) {
         if (opening.entity === entityId) {
-          return opening.activeColor;
+          color = opening.activeColor;
+          this._replayConfiguredColorCache.set(entityId, color);
+          return color;
         }
       }
+
       for (const furniture of floor.furniture ?? []) {
         if (furniture.entity === entityId) {
-          return furniture.activeColor;
+          color = furniture.activeColor;
+          this._replayConfiguredColorCache.set(entityId, color);
+          return color;
         }
       }
     }
+    this._replayConfiguredColorCache.set(entityId, undefined);
     return undefined;
   }
 
   private _getCurrentReplayEvent(): HistoryEventInput | undefined {
     if (!this._historyEvents.length) return undefined;
-    let current: HistoryEventInput | undefined;
-    for (const event of this._historyEvents) {
-      if (event.timestamp <= this._playbackController.currentTime) {
-        current = event;
+    const target = this._playbackController.currentTime;
+    let lo = 0;
+    let hi = this._historyEvents.length - 1;
+    let best = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (this._historyEvents[mid].timestamp <= target) {
+        best = mid;
+        lo = mid + 1;
       } else {
-        break;
+        hi = mid - 1;
       }
     }
-    return current ?? this._historyEvents[0];
+    return best >= 0 ? this._historyEvents[best] : undefined;
   }
 
   private _setReplayEventLogRef = (element: Element | undefined): void => {
@@ -2124,7 +2253,10 @@ export class FloorplanCard extends LitElement {
   private _syncReplayLogToCurrentEvent(): void {
     if (!this._replayEventLogRef) return;
     const current = this._replayEventLogRef.querySelector<HTMLElement>(".replay-event-item.replay-event-current");
+    const currentTimestamp = Number(current?.dataset["timestamp"]);
+    if (Number.isFinite(currentTimestamp) && this._replayLastSyncedEventTs === currentTimestamp) return;
     if (current && typeof current.scrollIntoView === "function") {
+      if (Number.isFinite(currentTimestamp)) this._replayLastSyncedEventTs = currentTimestamp;
       current.scrollIntoView({ block: "nearest", inline: "nearest" });
     }
   }
@@ -2132,11 +2264,7 @@ export class FloorplanCard extends LitElement {
   private _formatReplayTime(timestamp: number): string {
     if (!Number.isFinite(timestamp)) return "—";
     try {
-      return new Intl.DateTimeFormat(undefined, {
-        hour: "numeric",
-        minute: "2-digit",
-        second: "2-digit",
-      }).format(new Date(timestamp * 1000));
+      return this._replayTimeFormatter.format(new Date(timestamp * 1000));
     } catch {
       return new Date(timestamp * 1000).toISOString();
     }
