@@ -75,6 +75,7 @@ import {
   renderSunDimMask,
   wallsLightPassesThrough,
   openingClearFraction,
+  glowClearFraction,
   polygonCentroid,
   trackerSensorReading,
   entityIsActive,
@@ -784,8 +785,16 @@ export class FloorplanCard extends LitElement {
       ? wallsLightPassesThrough(active.walls, active.openings, (o) =>
           // Both leaves, and the travel each style actually has (issue #145):
           // asking `entity` alone left a door whose *second* panel was open
-          // still blocking light outright.
-          openingClearFraction(o, this._openingAmount(o), this._openingSecond(o)?.amount)
+          // still blocking light outright. Glass admits it whole regardless
+          // of sash — a closed window is not a hole, but light still gets
+          // through it. A shutter rolled down overrides that, same as it
+          // does for sunlight.
+          glowClearFraction(
+            o,
+            this._openingAmount(o),
+            this._openingSecond(o)?.amount,
+            o.shutterEntity ? shutterAmount(this.hass?.states[o.shutterEntity], o.shutterInvert) : undefined
+          )
         )
       : active.walls;
     // Lit rooms hold back the night (issue #113): without this the flat dim

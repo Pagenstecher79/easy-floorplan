@@ -67,7 +67,7 @@ import {
   resolveOpeningAmount,
   openingIsActive,
   wallsLightPassesThrough,
-  openingClearFraction,
+  glowClearFraction,
   openingHasTwoLeaves,
   secondLeafOf,
   renderGlowMask,
@@ -2836,8 +2836,10 @@ export class FloorplanCardEditor extends LitElement {
       ? wallsLightPassesThrough(floor.walls, floor.openings, (o) => {
           const amt = (id?: string) =>
             resolveOpeningAmount(o, id ? this.hass?.states[id] : undefined);
-          // Same reading as the card, second leaf included (issue #145).
-          return openingClearFraction(
+          // Same reading as the card, second leaf included (issue #145),
+          // glass admitted whole regardless of sash, and a shutter overriding
+          // that — all same as the card.
+          return glowClearFraction(
             o,
             amt(o.entity),
             o.secondaryEntity && openingHasTwoLeaves(o)
@@ -2845,7 +2847,8 @@ export class FloorplanCardEditor extends LitElement {
                   secondLeafOf(o),
                   this.hass?.states[o.secondaryEntity]
                 )
-              : undefined
+              : undefined,
+            o.shutterEntity ? shutterAmount(this.hass?.states[o.shutterEntity], o.shutterInvert) : undefined
           );
         })
       : floor.walls;
