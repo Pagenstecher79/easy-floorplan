@@ -643,38 +643,34 @@ export function openingClearFraction(o: Opening, amount: number, secondAmount?: 
 }
 
 /**
- * Whether an opening is a window, for the glow rule above — plain `type`,
- * with none of {@link openingIsGlazed}'s door exception. Sunlight cares
- * whether an opening is *effectively* glass, door included; a lamp's pool
- * cares whether it is drawn as a window.
- */
-export function openingIsWindow(o: Pick<Opening, "type">): boolean {
-  return o.type === "window";
-}
-
-/**
  * How much of an opening's gap a lamp's cast pool passes through — the same
- * question {@link openingClearFraction} answers, except a window admits its
- * whole gap however its sash is sitting. A closed window is not a hole, but
- * it is not a wall either: the glow spills through it same as an open one,
- * since that is what a pane of glass does.
+ * question {@link openingClearFraction} answers, except glass admits its
+ * whole gap however its sash is sitting, the same rule {@link
+ * openingSunFraction} already applies to sunlight and by the same field:
+ * {@link openingIsGlazed}. `glazed` means one thing — is this opening glass —
+ * and a lamp's light passing through glass same as sunlight does is that one
+ * fact read twice, not two different rules that happen to agree.
  *
- * Deliberately its own check ({@link openingIsWindow}) rather than {@link
- * openingIsGlazed} — `glazed` is sunlight's word for "this door is secretly
- * a wall of glass" ({@link openingSunFraction}), and reads a door's `glazed:
- * true` as a yes. A glow pool asks a different question — is this opening a
- * *window* — so a glazed door still blocks a lamp's light exactly as a door
- * does, and this stays true however sunlight's rule evolves.
+ * One exception sunlight doesn't need: a **roll-motion** window is a blind,
+ * shutter, shade, curtain or awning bound as the opening's own entity (an
+ * auto-detected `device_class`, see {@link openingFromDeviceClass}) — a
+ * covering standing in for the glass behind it, not the glass itself. Glazed
+ * by the same default every window gets, it would read as always-clear no
+ * matter how far down it actually is, defeating the one thing binding it was
+ * for. So it keeps {@link openingClearFraction}'s answer regardless of
+ * `glazed` — the roll-up rule {@link openingClearFraction}'s own docs
+ * describe, honoured here too.
  *
- * A shutter overrides the glass, same priority {@link openingSunFraction}
- * gives it: a persiana rolled down stops a lamp's pool same as it stops the
- * sun, whatever the window behind it would otherwise let through. `shutter`
- * is `undefined` where no shutter is bound, so an opening without one is
- * judged on itself alone.
+ * A shutter — the separate `shutterEntity` layered over an opening — overrides
+ * the glass, same priority {@link openingSunFraction} gives it: rolled down,
+ * it blocks a lamp's pool same as it blocks the sun, whatever glass sits
+ * behind it. `shutter` is `undefined` where none is bound, so an opening
+ * without one is judged on itself alone. Unlike the glass rule above, this
+ * one is not window-only — any opening with a `shutterEntity` reads it.
  *
- * Every other opening — doors (glazed or not), roll-ups, an opaque slider —
- * keeps {@link openingClearFraction}'s answer untouched; only a window is
- * pinned to fully clear.
+ * Every other opening — an ordinary door, an opaque slider, a roll-up —
+ * keeps {@link openingClearFraction}'s answer untouched; only real glass,
+ * open or shut, is pinned to fully clear.
  */
 export function glowClearFraction(
   o: Opening,
@@ -683,7 +679,7 @@ export function glowClearFraction(
   shutter?: number,
 ): number {
   if (shutter !== undefined && shutter <= 0) return 0;
-  if (openingIsWindow(o)) return 1;
+  if (openingIsGlazed(o) && openingMotion(o) !== "roll") return 1;
   return openingClearFraction(o, amount, secondAmount);
 }
 

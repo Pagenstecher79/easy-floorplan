@@ -4402,14 +4402,29 @@ describe("glowClearFraction — glass admits a lamp's pool shut or open", () => 
     expect(glowClearFraction({ type: "window" } as Opening, 1)).toBe(1);
   });
 
-  it("ignores `glazed` — that field is sunlight's, not a lamp's", () => {
-    // A French door is glass to the sun (openingSunFraction), but it is
-    // still a door to a lamp's pool: shut, it blocks like any other door.
-    expect(glowClearFraction({ type: "door", glazed: true } as Opening, 0)).toBe(0);
-    expect(glowClearFraction({ type: "door", glazed: true } as Opening, 0.4)).toBeCloseTo(0.4);
-    // A window stays glass to a lamp even marked `glazed: false` — that flag
-    // only ever meant "block the sun", never "block a lamp's own light".
-    expect(glowClearFraction({ type: "window", glazed: false } as Opening, 0.4)).toBe(1);
+  it("reads `glazed` exactly as openingSunFraction does — one field, one fact", () => {
+    // A patio door marked glazed is a wall of glass to a lamp too, not just
+    // to the sun: shut, its own light still gets through.
+    expect(glowClearFraction({ type: "door", glazed: true } as Opening, 0)).toBe(1);
+    // An opaque window — glass-brick, a hatch — marked glazed: false stays
+    // opaque to a lamp same as it does to the sun: shut, it blocks.
+    expect(glowClearFraction({ type: "window", glazed: false } as Opening, 0)).toBe(0);
+    expect(glowClearFraction({ type: "window", glazed: false } as Opening, 0.4)).toBeCloseTo(0.4);
+  });
+
+  it("a roll-motion window is a blind standing in for the glass, not the glass itself", () => {
+    // device_class "shutter"/"blind"/etc. auto-maps to type: "window",
+    // motion: "roll" (openingFromDeviceClass) — reading `glazed`'s default
+    // here would make the blind always-clear no matter how far down it is.
+    const rollUp = { type: "window", motion: "roll" } as Opening;
+    expect(glowClearFraction(rollUp, 0)).toBe(0);
+    expect(glowClearFraction(rollUp, 0.6)).toBeCloseTo(0.6);
+    expect(glowClearFraction(rollUp, 1)).toBe(1);
+    // Categorical, regardless of `glazed` — motion is what says this is a
+    // covering rather than a sash, and an explicit glazed: true on top of it
+    // is the one case openingSunFraction itself doesn't need to consider,
+    // so there is no existing convention this borrows from either way.
+    expect(glowClearFraction({ ...rollUp, glazed: true }, 0)).toBe(0);
   });
 
   it("still respects a two-panel slider's travel for a non-glazed opening", () => {
