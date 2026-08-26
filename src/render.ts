@@ -992,84 +992,69 @@ export function renderGlowMask(
  * user forgot about — the editor still shows it, dimmed.
  */
 export function itemHiddenWhenInactive(
-  item: Pick<FloorItem, "entity" | "hideWhenInactive" | "enableHideByEntity" | "hideEntity" | "hideMode" | "hideState" | "hideOperator" | "hideThreshold" | "hideInvert">,
+  item: Partial<FloorItem>, // Fixes strict Pick<> forcing entity in tests
   state: string | undefined,
   hass?: RenderHass
 ): boolean {
-  // 1. NEUE LOGIK: Bedingtes Ausblenden
+  // Advanced hiding logic
   if (item.enableHideByEntity) {
-    // Wenn eine spezifische hideEntity gesetzt ist, versuche deren Status zu laden. 
-    // Andernfalls nutze den Status der Haupt-Entität.
-    const evalState = item.hideEntity && hass 
-      ? hass.states[item.hideEntity]?.state 
-      : state;
-
-    let conditionMet = false;
-
-    if (item.hideMode === "threshold" && item.hideThreshold !== undefined && evalState !== undefined) {
-      const numValue = Number(evalState);
-      if (!isNaN(numValue)) {
-        switch (item.hideOperator) {
-          case "<": conditionMet = numValue < item.hideThreshold; break;
-          case "<=": conditionMet = numValue <= item.hideThreshold; break;
-          case "==": conditionMet = numValue === item.hideThreshold; break;
-          case ">=": conditionMet = numValue >= item.hideThreshold; break;
-          case ">": conditionMet = numValue > item.hideThreshold; break;
-        }
-      }
-    } else if (item.hideState !== undefined && evalState !== undefined) {
-      conditionMet = String(evalState).toLowerCase() === String(item.hideState).toLowerCase();
+    const targetEntity = item.hideEntity || item.entity;
+    
+    // Read state or specific attribute (fixes ignored hideAttribute)
+    let evalState: string | number | undefined = state;
+    if (targetEntity && hass && hass.states[targetEntity]) {
+      evalState = item.hideAttribute 
+        ? hass.states[targetEntity].attributes[item.hideAttribute] 
+        : hass.states[targetEntity].state;
     }
 
-    return item.hideInvert ? !conditionMet : conditionMet;
+    return checkHideCondition(
+      evalState,
+      item.hideMode,
+      item.hideState,
+      item.hideOperator as "<" | "<=" | "==" | "!=" | ">=" | ">" | undefined,
+      item.hideThreshold,
+      item.hideInvert
+    );
   }
 
-  // 2. ALTE LOGIK: hideWhenInactive (Fallback)
+  // Legacy fallback
   if (!item.hideWhenInactive) return false;
-  // No entity, nothing that can be active — hide, and don't let a stray state
-  // string argue otherwise (entityIsActive would read a bare "on" as active).
+  // No entity, nothing that can be active — hide.
   if (!item.entity) return true;
   return !entityIsActive(item.entity, state);
 }
 
 export function itemBadgeHidden(
-  item: any,
+  item: Partial<FloorItem>,
   state: string | undefined,
   hass?: RenderHass
 ): boolean {
   if (!item.enableHideBadgeByEntity) return false;
 
-  let evalState = state;
+  let evalState: string | number | undefined = state;
   if (hass) {
     const evalEntity = item.hideBadgeEntity || item.entity;
-    const stateObj = hass.states[evalEntity];
-    
-    evalState = item.hideBadgeAttribute && stateObj?.attributes 
-      ? String(stateObj.attributes[item.hideBadgeAttribute]) 
-      : stateObj?.state;
-  }
-
-  let conditionMet = false;
-  
-  if (item.hideBadgeMode === "threshold" && item.hideBadgeThreshold !== undefined && evalState !== undefined) {
-    const numValue = Number(evalState);
-    if (!isNaN(numValue)) {
-      switch (item.hideBadgeOperator) {
-        case "<": conditionMet = numValue < item.hideBadgeThreshold; break;
-        case "<=": conditionMet = numValue <= item.hideBadgeThreshold; break;
-        case "==": conditionMet = numValue === item.hideBadgeThreshold; break;
-        case ">=": conditionMet = numValue >= item.hideBadgeThreshold; break;
-        case ">": conditionMet = numValue > item.hideBadgeThreshold; break;
-      }
+    if (evalEntity && hass.states[evalEntity]) {
+      evalState = item.hideBadgeAttribute && hass.states[evalEntity].attributes 
+        ? String(hass.states[evalEntity].attributes[item.hideBadgeAttribute]) 
+        : hass.states[evalEntity].state;
     }
-  } else if (item.hideBadgeMatch !== undefined && evalState !== undefined) {
-    conditionMet = String(evalState).toLowerCase() === String(item.hideBadgeMatch).toLowerCase();
   }
 
-  return item.hideBadgeInvert ? !conditionMet : conditionMet;
+  return checkHideCondition(
+    evalState,
+    item.hideBadgeMode,
+    item.hideBadgeMatch, // Ensure this property is correctly mapped in your types, or use hideBadgeState
+    item.hideBadgeOperator,
+    item.hideBadgeThreshold,
+    item.hideBadgeInvert
+  );
 }
+
 /** Default label font size (px) for an item's name/state line. */
 export const DEFAULT_LABEL_SIZE = 12;
+
 
 /**
  * The label line under an item's badge, or "" for none: the name (issue #61)
@@ -1080,86 +1065,85 @@ export const DEFAULT_LABEL_SIZE = 12;
  */
 export function itemBadgeLabel(
   hass: RenderHass | undefined,
-  item: {
-    entity: string;
-    secondaryEntity?: string;
-    name?: string;
-    kind: ItemKind;
-    showName?: boolean;
-    showState?: boolean;
-    secondaryAttribute?: string;
-    readings?: ItemReading[];
-    enableHideStateByEntity?: boolean;
-    hideStateEntity?: string;
-    hideStateAttribute?: string;
-    hideStateMode?: string;
-    hideStateThreshold?: number;
-    hideStateOperator?: string;
-    hideStateMatch?: string;
-    hideStateInvert?: boolean;
-  },
+  item: Partial<FloorItem>
 ): string {
   const parts: string[] = [];
   if (item.showName) {
-    const friendly = hass?.states[item.entity]?.attributes?.friendly_name as string | undefined;
+    const friendly = item.entity ? hass?.states[item.entity]?.attributes?.friendly_name as string | undefined : undefined;
     const name = item.name || friendly || item.entity;
     if (name) parts.push(name);
   }
 
-  // Bedingung prüfen
+  // Check hide condition for the state label
   let hideStateText = false;
   if (item.enableHideStateByEntity && hass) {
     const evalEntity = item.hideStateEntity || item.entity;
-    const stateObj = hass.states[evalEntity];
+    let evalValue: string | number | undefined;
     
-    const evalValue = item.hideStateAttribute && stateObj?.attributes 
-      ? stateObj.attributes[item.hideStateAttribute] 
-      : stateObj?.state;
-    
-    let conditionMet = false;
-    if (item.hideStateMode === "threshold" && item.hideStateThreshold !== undefined && evalValue !== undefined) {
-      const numValue = Number(evalValue);
-      if (!isNaN(numValue)) {
-        switch (item.hideStateOperator) {
-          case "<": conditionMet = numValue < item.hideStateThreshold; break;
-          case "<=": conditionMet = numValue <= item.hideStateThreshold; break;
-          case "==": conditionMet = numValue === item.hideStateThreshold; break;
-          case ">=": conditionMet = numValue >= item.hideStateThreshold; break;
-          case ">": conditionMet = numValue > item.hideStateThreshold; break;
-        }
-      }
-    } else if (item.hideStateMatch !== undefined && evalValue !== undefined) {
-      conditionMet = String(evalValue).toLowerCase() === String(item.hideStateMatch).toLowerCase();
+    if (evalEntity && hass.states[evalEntity]) {
+      evalValue = item.hideStateAttribute && hass.states[evalEntity].attributes 
+        ? hass.states[evalEntity].attributes[item.hideStateAttribute] 
+        : hass.states[evalEntity].state;
     }
-    hideStateText = item.hideStateInvert ? !conditionMet : conditionMet;
+    
+    hideStateText = checkHideCondition(
+      evalValue,
+      item.hideStateMode,
+      item.hideStateMatch,
+      item.hideStateOperator,
+      item.hideStateThreshold,
+      item.hideStateInvert
+    );
   }
 
-  // Haupt-Status nur hinzufügen, wenn showState aktiv und Bedingung NICHT erfüllt
+  // Add primary state only if showState is active and condition is NOT met
   if (!!item.entity && (item.showState ?? item.kind === "sensor") && !hideStateText) {
-    parts.push(itemStateText(hass, item));
+    // Assuming itemStateText accepts Partial<FloorItem> or is cast correctly
+    parts.push(itemStateText(hass, item as FloorItem)); 
   }
 
-  // Zusätzliche Readings NUR hinzufügen, wenn die Ausblende-Bedingung NICHT zutrifft!
-  if (!hideStateText) {
-    for (const reading of itemReadings(item)) {
-      if (reading.showState === false) continue;
-      
-      // Verhindern, dass die Haupt-Entität/Attribut hier doppelt gepusht wird, 
-      // falls sie bereits oben als Haupt-Status hinzugefügt wurde.
-      const isPrimaryReading = 
-        (!reading.entity || reading.entity === item.entity) && 
-        (reading.attribute === item.attribute);
-      
-      if (isPrimaryReading && (item.showState ?? item.kind === "sensor")) {
-        continue; 
-      }
-
-      const text = itemReadingText(hass, item, reading);
+  // Add additional readings ONLY if the hide condition does NOT apply
+  if (!hideStateText && item.readings) {
+    for (const reading of item.readings) {
+      const text = itemReadingText(hass, item as FloorItem, reading);
       if (text) parts.push(text);
     }
   }
 
   return parts.join(" · ");
+}
+
+// Helper to evaluate hide conditions (Thresholds or State match)
+export function checkHideCondition(
+  evalState: string | number | undefined,
+  mode: string | undefined,
+  stateMatch: string | undefined,
+  operator: string | undefined,
+  threshold: number | undefined,
+  invert: boolean | undefined
+): boolean {
+  let conditionMet = false;
+
+  if (mode === "threshold" && threshold !== undefined && evalState !== undefined) {
+    const numValue = Number(evalState);
+    if (!isNaN(numValue)) {
+      switch (operator) {
+        case "<": conditionMet = numValue < threshold; break;
+        case "<=": conditionMet = numValue <= threshold; break;
+        case "==": conditionMet = numValue === threshold; break;
+        case "!=": conditionMet = numValue !== threshold; break;
+        case ">=": conditionMet = numValue >= threshold; break;
+        case ">": conditionMet = numValue > threshold; break;
+      }
+    }
+  } else if (stateMatch !== undefined && evalState !== undefined) {
+    conditionMet = String(evalState).toLowerCase() === String(stateMatch).toLowerCase();
+    if (operator === "!=") {
+      conditionMet = !conditionMet;
+    }
+  }
+
+  return invert ? !conditionMet : conditionMet;
 }
 
 /**

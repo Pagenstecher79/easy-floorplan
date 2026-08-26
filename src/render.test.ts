@@ -139,6 +139,7 @@ import {
   renderOpening,
   renderGlow,
   renderRipple,
+  checkHideCondition,
 } from "./render";
 import type { FloorplanCardConfig, Opening, RenderHass } from "./types";
 import { symbolCatalog, symbolSize } from "./symbols";
@@ -5180,5 +5181,34 @@ describe("stairs that change floor (issue #121)", () => {
     expect(furnitureFloorTarget(stairs("up"), two, "g")).toBe("up");
     expect(furnitureFloorTarget(stairs("down"), two, "up")).toBe("g");
     expect(furnitureFloorTarget(stairs("down"), two, "g")).toBeUndefined();
+  });
+});
+describe("checkHideCondition (Advanced Hiding)", () => {
+  it("returns true when numeric threshold > 20 is met", () => {
+    // evalState: "25", mode: "threshold", stateMatch: undefined, operator: ">", threshold: 20, invert: false
+    const result = checkHideCondition("25", "threshold", undefined, ">", 20, false);
+    expect(result).toBe(true);
+  });
+
+  it("returns false when numeric threshold > 20 is NOT met", () => {
+    const result = checkHideCondition("15", "threshold", undefined, ">", 20, false);
+    expect(result).toBe(false);
+  });
+
+  it("evaluates string state match correctly (case-insensitive)", () => {
+    // evalState: "Playing", mode: "state", stateMatch: "playing", operator: "==", threshold: undefined, invert: false
+    const result = checkHideCondition("Playing", "state", "playing", "==", undefined, false);
+    expect(result).toBe(true);
+  });
+
+  it("evaluates the != operator correctly", () => {
+    const result = checkHideCondition("25", "threshold", undefined, "!=", 20, false);
+    expect(result).toBe(true);
+  });
+
+  it("respects the invert flag", () => {
+    // 25 > 20 is true, but invert is set to true
+    const result = checkHideCondition("25", "threshold", undefined, ">", 20, true);
+    expect(result).toBe(false);
   });
 });
