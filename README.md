@@ -1358,6 +1358,31 @@ The mark's colour is `--fp-offline-mark`, falling back to the theme's `--error-c
 card-mod can recolour it without touching anything else. A device drawn as a bare ripple,
 or as a label with no badge, has nothing to cross out and takes the fade alone.
 
+### Advanced Hiding Logic
+
+You can fine-tune when an item, its badge, or its state label is hidden. Instead of just hiding an element when its main entity is inactive, you can evaluate specific states, numeric thresholds, or even watch entirely different entities. 
+
+This is available for the **whole item** (`hide...`), the **badge** (`hideBadge...`), and the **state text** (`hideState...`). 
+
+| YAML Key | Type | Description |
+| :--- | :--- | :--- |
+| `enableHideByEntity` | `boolean` | Activates the advanced hide logic for the whole item. (Use `enableHideBadgeByEntity` / `enableHideStateByEntity` for specific parts). |
+| `hideEntity` | `string` | The entity to evaluate. If omitted, the device's main `entity` is used. |
+| `hideAttribute` | `string` | Evaluate a specific attribute (e.g., `current_temperature`) instead of the state. |
+| `hideMode` | `string` | Set to `"state"` for text matching, or `"threshold"` for numeric comparisons. |
+| `hideState` | `string` | The exact string to match (case-insensitive) when using `hideMode: "state"`. |
+| `hideOperator` | `string` | The comparison operator (`<`, `<=`, `==`, `!=`, `>=`, `>`) used for thresholds or state matching. |
+| `hideThreshold` | `number` | The numeric value to compare against when using `hideMode: "threshold"`. |
+| `hideInvert` | `boolean` | If `true`, inverts the final result of the condition. |
+
+**Example:** Hide a badge if the temperature of another sensor drops below 20:
+```yaml
+enableHideBadgeByEntity: true
+hideBadgeEntity: sensor.room_temperature
+hideBadgeMode: threshold
+hideBadgeOperator: "<"
+hideBadgeThreshold: 20
+
 ## Compact header
 
 For a dashboard where the top of the card is mostly empty:
