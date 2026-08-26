@@ -1358,7 +1358,7 @@ The mark's colour is `--fp-offline-mark`, falling back to the theme's `--error-c
 card-mod can recolour it without touching anything else. A device drawn as a bare ripple,
 or as a label with no badge, has nothing to cross out and takes the fade alone.
 
-### Advanced Hiding Logic
+## Advanced Hiding Logic
 
 You can fine-tune when an item, its badge, or its state label is hidden. Instead of just hiding an element when its main entity is inactive, you can evaluate specific states, numeric thresholds, or even watch entirely different entities. 
 
@@ -1382,6 +1382,7 @@ hideBadgeEntity: sensor.room_temperature
 hideBadgeMode: threshold
 hideBadgeOperator: "<"
 hideBadgeThreshold: 20
+```
 
 ## Compact header
 
