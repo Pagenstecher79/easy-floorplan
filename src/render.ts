@@ -643,6 +643,47 @@ export function openingClearFraction(o: Opening, amount: number, secondAmount?: 
 }
 
 /**
+ * How much of an opening's gap a lamp's cast pool passes through — the same
+ * question {@link openingClearFraction} answers, except glass admits its
+ * whole gap however its sash is sitting, the same rule {@link
+ * openingSunFraction} already applies to sunlight and by the same field:
+ * {@link openingIsGlazed}. `glazed` means one thing — is this opening glass —
+ * and a lamp's light passing through glass same as sunlight does is that one
+ * fact read twice, not two different rules that happen to agree.
+ *
+ * One exception sunlight doesn't need: a **roll-motion** window is a blind,
+ * shutter, shade, curtain or awning bound as the opening's own entity (an
+ * auto-detected `device_class`, see {@link openingFromDeviceClass}) — a
+ * covering standing in for the glass behind it, not the glass itself. Glazed
+ * by the same default every window gets, it would read as always-clear no
+ * matter how far down it actually is, defeating the one thing binding it was
+ * for. So it keeps {@link openingClearFraction}'s answer regardless of
+ * `glazed` — the roll-up rule {@link openingClearFraction}'s own docs
+ * describe, honoured here too.
+ *
+ * A shutter — the separate `shutterEntity` layered over an opening — overrides
+ * the glass, same priority {@link openingSunFraction} gives it: rolled down,
+ * it blocks a lamp's pool same as it blocks the sun, whatever glass sits
+ * behind it. `shutter` is `undefined` where none is bound, so an opening
+ * without one is judged on itself alone. Unlike the glass rule above, this
+ * one is not window-only — any opening with a `shutterEntity` reads it.
+ *
+ * Every other opening — an ordinary door, an opaque slider, a roll-up —
+ * keeps {@link openingClearFraction}'s answer untouched; only real glass,
+ * open or shut, is pinned to fully clear.
+ */
+export function glowClearFraction(
+  o: Opening,
+  amount: number,
+  secondAmount?: number,
+  shutter?: number,
+): number {
+  if (shutter !== undefined && shutter <= 0) return 0;
+  if (openingIsGlazed(o) && openingMotion(o) !== "roll") return 1;
+  return openingClearFraction(o, amount, secondAmount);
+}
+
+/**
  * The walls as **light** meets them (issue #143): the plan's walls with a gap
  * cut wherever an opening is currently open.
  *
@@ -657,12 +698,16 @@ export function openingClearFraction(o: Opening, amount: number, secondAmount?: 
  * drawn from, so a closed door still blocks, a door opening on its sensor lets
  * light through as it swings, and an unbound door — which this card draws open,
  * with its swing arc — lights the room beyond it without anything to configure.
- * A window behaves the same way: shut it blocks, open it spills light outside,
- * which is what an open window does.
+ *
+ * A window is the one exception, and it is the caller's rule rather than this
+ * function's: a lamp's pool admits light however the sash is sitting, so a
+ * caller wanting that reaches for {@link glowClearFraction} instead of {@link
+ * openingClearFraction}. This function itself stays agnostic — it just cuts
+ * the gap it is handed.
  *
  * The caller supplies how much of each opening is clear — see
- * {@link openingClearFraction}, which is where a two-panel slider's two
- * sensors are reconciled into one number.
+ * {@link openingClearFraction} and {@link glowClearFraction}, which is where a
+ * two-panel slider's two sensors are reconciled into one number.
  *
  * The gap is `length * fraction`, **centred**, and that is an approximation
  * worth naming. A half-open slider really clears one side rather than the
