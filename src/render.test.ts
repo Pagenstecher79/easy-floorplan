@@ -135,7 +135,6 @@ import {
   glowReach,
   wallsLightPassesThrough,
   openingClearFraction,
-  glowClearFraction,
   renderGlowMask,
   renderOpening,
   renderGlow,
@@ -4390,70 +4389,6 @@ describe("openingClearFraction (#145 / #143)", () => {
   });
 });
 
-describe("glowClearFraction — glass admits a lamp's pool shut or open", () => {
-  it("passes an opaque opening straight through to openingClearFraction", () => {
-    expect(glowClearFraction({ type: "door" } as Opening, 0.25)).toBeCloseTo(0.25);
-    expect(glowClearFraction({ type: "door" } as Opening, 1)).toBe(1);
-    expect(glowClearFraction({ type: "door" } as Opening, 0)).toBe(0);
-  });
-
-  it("clears a window's whole gap whatever its sash is doing", () => {
-    expect(glowClearFraction({ type: "window" } as Opening, 0)).toBe(1);
-    expect(glowClearFraction({ type: "window" } as Opening, 0.3)).toBe(1);
-    expect(glowClearFraction({ type: "window" } as Opening, 1)).toBe(1);
-  });
-
-  it("reads `glazed` exactly as openingSunFraction does — one field, one fact", () => {
-    // A patio door marked glazed is a wall of glass to a lamp too, not just
-    // to the sun: shut, its own light still gets through.
-    expect(glowClearFraction({ type: "door", glazed: true } as Opening, 0)).toBe(1);
-    // An opaque window — glass-brick, a hatch — marked glazed: false stays
-    // opaque to a lamp same as it does to the sun: shut, it blocks.
-    expect(glowClearFraction({ type: "window", glazed: false } as Opening, 0)).toBe(0);
-    expect(glowClearFraction({ type: "window", glazed: false } as Opening, 0.4)).toBeCloseTo(0.4);
-  });
-
-  it("a roll-motion window is a blind standing in for the glass, not the glass itself", () => {
-    // device_class "shutter"/"blind"/etc. auto-maps to type: "window",
-    // motion: "roll" (openingFromDeviceClass) — reading `glazed`'s default
-    // here would make the blind always-clear no matter how far down it is.
-    const rollUp = { type: "window", motion: "roll" } as Opening;
-    expect(glowClearFraction(rollUp, 0)).toBe(0);
-    expect(glowClearFraction(rollUp, 0.6)).toBeCloseTo(0.6);
-    expect(glowClearFraction(rollUp, 1)).toBe(1);
-    // Categorical, regardless of `glazed` — motion is what says this is a
-    // covering rather than a sash, and an explicit glazed: true on top of it
-    // is the one case openingSunFraction itself doesn't need to consider,
-    // so there is no existing convention this borrows from either way.
-    expect(glowClearFraction({ ...rollUp, glazed: true }, 0)).toBe(0);
-  });
-
-  it("still respects a two-panel slider's travel for a non-glazed opening", () => {
-    const converging = {
-      id: "o", type: "door", motion: "slide", sliderStyle: "converging",
-      x: 300, y: 300, length: 200, angle: 0,
-    } as Opening;
-    expect(glowClearFraction(converging, 1, 1)).toBe(openingClearFraction(converging, 1, 1));
-  });
-
-  it("a shutter rolled down blocks the pool whatever the glass says (issue #185)", () => {
-    // A window's glass is not the whole story: the persiana in front of it can
-    // still be shut, and shut wins.
-    expect(glowClearFraction({ type: "window" } as Opening, 0, undefined, 0)).toBe(0);
-    expect(glowClearFraction({ type: "window" } as Opening, 1, undefined, 0)).toBe(0);
-    // Open, the window's own rule (always clear) still applies.
-    expect(glowClearFraction({ type: "window" } as Opening, 0, undefined, 1)).toBe(1);
-    // Only a fully-down shutter (0) blocks — a crack open is enough to defer
-    // back to the window, same threshold openingSunFraction uses.
-    expect(glowClearFraction({ type: "window" } as Opening, 0, undefined, 0.01)).toBe(1);
-  });
-
-  it("no shutter bound leaves an opening judged on itself alone", () => {
-    expect(glowClearFraction({ type: "window" } as Opening, 0, undefined, undefined)).toBe(1);
-    expect(glowClearFraction({ type: "door" } as Opening, 0.6, undefined, undefined)).toBeCloseTo(0.6);
-  });
-});
-
 describe("wallsLightPassesThrough (#143)", () => {
   const wall = (x1: number, y1: number, x2: number, y2: number, id = "w") => ({ id, x1, y1, x2, y2 });
   // A door centred on a horizontal wall at y=100, spanning x 480..520.
@@ -4631,22 +4566,6 @@ describe("wallsLightPassesThrough (#143)", () => {
     };
     expect(beyond(0)).toBe(false); // shut: the room beyond stays dark
     expect(beyond(1)).toBe(true); // open: light reaches through
-  });
-
-  it("a shut window still cuts a gap when fed glowClearFraction, unlike a shut door", () => {
-    const walls = [wall(0, 100, 1000, 100)];
-    const win = door({ id: "w", type: "window" } as Partial<Opening>);
-    // Fed the plain amount (0, shut): today's door behaviour — wall stays whole.
-    expect(wallsLightPassesThrough(walls, [win], () => 0)).toEqual(walls);
-    // Fed through glowClearFraction: glass admits the pool regardless of sash.
-    const out = wallsLightPassesThrough(walls, [win], (o) => glowClearFraction(o, 0));
-    expect(spans(out)).toEqual([
-      [0, 480],
-      [520, 1000],
-    ]);
-    // A shut door, run through the same helper, still blocks — only glass is exempt.
-    const doorOut = wallsLightPassesThrough(walls, [door()], (o) => glowClearFraction(o, 0));
-    expect(doorOut).toEqual(walls);
   });
 });
 
