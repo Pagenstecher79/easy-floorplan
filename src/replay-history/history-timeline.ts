@@ -138,6 +138,12 @@ export class HistoryTimeline extends LitElement {
       }
     }
     const entities = Array.from(entityGroups.keys());
+    console.log("[easy-floorplan] Expanded replay lane entities", {
+      visibleEvents: visibleEvents.length,
+      entities,
+      entityCount: entities.length,
+      timeWindow: { startTime: this.startTime, endTime: this.endTime, currentTime: this.currentTime },
+    });
     const playheadLeft = ((this.currentTime - this.startTime) / span) * 100;
     return html`
       <div

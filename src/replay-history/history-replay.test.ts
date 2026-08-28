@@ -6,6 +6,12 @@ import { HistoryStateProvider, LiveStateProvider } from "./state-provider";
 import { HistoryTimeline } from "./history-timeline";
 import { FloorplanCard } from "../floorplan-card";
 import type { HomeAssistant, HassEntity } from "../types";
+import {
+  getReplaySpeedForRange,
+  getReplayWatchedEntities,
+  replaySpeedToSliderValue,
+  sliderValueToReplaySpeed,
+} from "./replay-utils";
 
 import "./history-timeline";
 import "../floorplan-card";
@@ -14,6 +20,10 @@ afterEach(() => {
   document.body.innerHTML = "";
   vi.restoreAllMocks();
 });
+
+function getReplayPanelShadowRoot(card: FloorplanCard): ShadowRoot | null {
+  return card.shadowRoot?.querySelector("easy-floorplan-replay-panel")?.shadowRoot ?? card.shadowRoot;
+}
 
 function makeTimelineRect(width = 200): DOMRect {
   return {
@@ -245,6 +255,17 @@ describe("HistoryService", () => {
 
     expect(service.getEventBefore(1500)?.entityId).toBe("light.kitchen");
     expect(service.getEventAfter(1500)?.entityId).toBe("binary_sensor.front_door");
+  });
+});
+
+describe("ReplayPanel", () => {
+  it("keeps its styles in a shadow root so replay CSS is applied", async () => {
+    const panel = document.createElement("easy-floorplan-replay-panel") as HTMLElement & { visible: boolean };
+    panel.visible = true;
+    document.body.appendChild(panel);
+
+    expect(panel.shadowRoot).not.toBeNull();
+    expect(panel.shadowRoot?.querySelector("style")?.textContent).toContain(".replay-panel");
   });
 });
 
@@ -489,14 +510,13 @@ describe("FloorplanCard replay", () => {
       floors: [{ id: "f1", name: "Floor 1", walls: [], openings: [], items: [], texts: [], furniture: [], trackers: [], areas: [] }],
     });
 
-    const replaySpeed = (card as unknown as { _getReplaySpeedForRange(start: number, end: number): number })._getReplaySpeedForRange(1000, 3700);
+    const replaySpeed = getReplaySpeedForRange((card as any)._config, 1000, 3700);
     expect(replaySpeed).toBe(1);
   });
 
   it("maps logarithmic slider values to replay speed and back", () => {
-    const card = document.createElement("easy-floorplan-card") as FloorplanCard;
-    const sliderToSpeed = (card as unknown as { _sliderValueToReplaySpeed(value: number): number })._sliderValueToReplaySpeed.bind(card);
-    const speedToSlider = (card as unknown as { _replaySpeedToSliderValue(speed: number): number })._replaySpeedToSliderValue.bind(card);
+    const sliderToSpeed = sliderValueToReplaySpeed;
+    const speedToSlider = replaySpeedToSliderValue;
 
     expect(sliderToSpeed(-2)).toBe(0.01);
     expect(sliderToSpeed(0)).toBe(1);
@@ -505,6 +525,43 @@ describe("FloorplanCard replay", () => {
     expect(speedToSlider(0.01)).toBeCloseTo(-2, 3);
     expect(speedToSlider(1)).toBeCloseTo(0, 3);
     expect(speedToSlider(1000)).toBeCloseTo(3, 3);
+  });
+
+  it("reloads replay when the visible floor changes", async () => {
+    const card = document.createElement("easy-floorplan-card") as FloorplanCard;
+    const floors = [
+      { id: "floor-1", name: "Floor 1", walls: [], openings: [], items: [{ id: "item-1", entity: "light.kitchen", x: 0, y: 0, kind: "light" as const, icon: "mdi:lightbulb" }], texts: [], furniture: [], trackers: [], areas: [] },
+      { id: "floor-2", name: "Floor 2", walls: [], openings: [], items: [{ id: "item-2", entity: "switch.lounge", x: 0, y: 0, kind: "switch" as const, icon: "mdi:toggle-switch" }], texts: [], furniture: [], trackers: [], areas: [] },
+    ];
+    card.setConfig({
+      type: "easy-floorplan-card",
+      width: 1000,
+      height: 600,
+      historyReplay: { enabled: true, lookbackSeconds: 3600, defaultSpeed: 1 },
+      floors,
+    });
+    card.hass = {
+      states: {
+        "light.kitchen": { entity_id: "light.kitchen", state: "on", attributes: { friendly_name: "Kitchen" } },
+        "switch.lounge": { entity_id: "switch.lounge", state: "off", attributes: { friendly_name: "Lounge" } },
+      },
+      callApi: vi.fn(),
+      callService: vi.fn(),
+      formatEntityState: (state: HassEntity) => state.state,
+      entities: {},
+      devices: {},
+      locale: { language: "en" },
+      themes: { darkMode: false },
+      floors: {},
+      areas: {},
+      localize: (k: string) => k,
+    } as unknown as HomeAssistant;
+
+    const startSpy = vi.spyOn((card as any)._replayController, "startReplay");
+    (card as any)._goToFloor(floors, "floor-2");
+
+    expect(startSpy).toHaveBeenCalledTimes(1);
+    expect(getReplayWatchedEntities((card as any)._config, (card as any)._activeFloorId)).toEqual(["switch.lounge"]);
   });
 
   it("keeps badge as the default item display when display is unset", async () => {
@@ -590,11 +647,11 @@ describe("FloorplanCard replay", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    const showButton = card.shadowRoot?.querySelector(".replay-show-toggle") as HTMLButtonElement | null;
+    const showButton = getReplayPanelShadowRoot(card)?.querySelector(".replay-show-toggle") as HTMLButtonElement | null;
     showButton?.click();
     await card.updateComplete;
 
-    expect(card.shadowRoot?.querySelector(".replay-event-log")).not.toBeNull();
+    expect(getReplayPanelShadowRoot(card)?.querySelector(".replay-event-log")).not.toBeNull();
   });
 
   it("accepts Home Assistant history_during_period array payloads", async () => {
@@ -640,7 +697,8 @@ describe("FloorplanCard replay", () => {
 
     const start = Math.floor((Date.now() - 3 * 60 * 60 * 1000) / 1000);
     const end = Math.floor(Date.now() / 1000);
-    const events = await (card as any)._loadHistoryEvents(start, end);
+    const service = new HistoryService();
+    const events = await service.loadFromHass(hass, start, end, ["light.kitchen"]);
 
     expect(events.some((event: { entityId: string }) => event.entityId === "light.kitchen")).toBe(true);
   });
@@ -686,7 +744,8 @@ describe("FloorplanCard replay", () => {
 
     const start = Math.floor((Date.now() - 3 * 60 * 60 * 1000) / 1000);
     const end = Math.floor(Date.now() / 1000);
-    const events = await (card as any)._loadHistoryEvents(start, end);
+    const service = new HistoryService();
+    const events = await service.loadFromHass(hass, start, end, ["binary_sensor.front_door"]);
 
     expect(events.some((event: { entityId: string; oldState: string; newState: string }) => event.entityId === "binary_sensor.front_door" && event.oldState === "off" && event.newState === "on")).toBe(true);
   });
@@ -749,12 +808,12 @@ describe("FloorplanCard replay", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    const showButton = card.shadowRoot?.querySelector(".replay-show-toggle") as HTMLButtonElement | null;
+    const showButton = getReplayPanelShadowRoot(card)?.querySelector(".replay-show-toggle") as HTMLButtonElement | null;
     showButton?.click();
     await card.updateComplete;
 
     expect(callApi).toHaveBeenCalled();
-    const timelines = card.shadowRoot?.querySelectorAll("easy-floorplan-history-timeline");
+    const timelines = getReplayPanelShadowRoot(card)?.querySelectorAll("easy-floorplan-history-timeline");
     expect(timelines?.length).toBeGreaterThan(0);
     const timeline = timelines?.[0] as HistoryTimeline | null;
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -803,7 +862,7 @@ describe("FloorplanCard replay", () => {
       }],
     });
 
-    (card as unknown as { _historyEvents: Array<{ timestamp: number; entityId: string; oldState: string; newState: string; attributes?: Record<string, unknown> }> })._historyEvents = [
+    (card as any)._replayController.state.historyEvents = [
       {
         timestamp: 1000,
         entityId: "light.kitchen",
@@ -818,15 +877,15 @@ describe("FloorplanCard replay", () => {
     card.requestUpdate();
     await card.updateComplete;
 
-    const showButton = card.shadowRoot?.querySelector(".replay-show-toggle") as HTMLButtonElement | null;
+    const showButton = getReplayPanelShadowRoot(card)?.querySelector(".replay-show-toggle") as HTMLButtonElement | null;
     showButton?.click();
     await card.updateComplete;
 
-    const logToggle = card.shadowRoot?.querySelector(".replay-log-toggle") as HTMLButtonElement | null;
+    const logToggle = getReplayPanelShadowRoot(card)?.querySelector(".replay-log-toggle") as HTMLButtonElement | null;
     logToggle?.click();
     await card.updateComplete;
 
-    const dot = card.shadowRoot?.querySelector(".replay-event-dot") as HTMLElement | null;
+    const dot = getReplayPanelShadowRoot(card)?.querySelector(".replay-event-dot") as HTMLElement | null;
     expect(dot?.getAttribute("style") ?? "").toContain("background:#ffcc00");
   });
 
@@ -866,7 +925,7 @@ describe("FloorplanCard replay", () => {
       }],
     });
 
-    (card as unknown as { _historyEvents: Array<{ timestamp: number; entityId: string; oldState: string; newState: string; attributes?: Record<string, unknown> }> })._historyEvents = [
+    (card as any)._replayController.state.historyEvents = [
       {
         timestamp: 1000,
         entityId: "light.kitchen",
@@ -875,20 +934,20 @@ describe("FloorplanCard replay", () => {
         attributes: {},
       },
     ];
-    (card as unknown as { _replayReady: boolean })._replayReady = true;
+    (card as any)._replayController.state.ready = true;
     card.requestUpdate();
     await card.updateComplete;
 
-    const showButton = card.shadowRoot?.querySelector(".replay-show-toggle") as HTMLButtonElement | null;
+    const showButton = getReplayPanelShadowRoot(card)?.querySelector(".replay-show-toggle") as HTMLButtonElement | null;
     showButton?.click();
     await card.updateComplete;
 
-    expect(card.shadowRoot?.querySelector(".replay-event-log.collapsed")).not.toBeNull();
-    const toggle = card.shadowRoot?.querySelector(".replay-log-toggle") as HTMLButtonElement | null;
+    expect(getReplayPanelShadowRoot(card)?.querySelector(".replay-event-log.collapsed")).not.toBeNull();
+    const toggle = getReplayPanelShadowRoot(card)?.querySelector(".replay-log-toggle") as HTMLButtonElement | null;
     toggle?.click();
     await card.updateComplete;
-    expect(card.shadowRoot?.querySelector(".replay-event-log.expanded")).not.toBeNull();
-    expect(card.shadowRoot?.querySelector(".replay-event-list")).not.toBeNull();
+    expect(getReplayPanelShadowRoot(card)?.querySelector(".replay-event-log.expanded")).not.toBeNull();
+    expect(getReplayPanelShadowRoot(card)?.querySelector(".replay-event-list")).not.toBeNull();
   });
 
   it("starts with the replay panel hidden and shows a dedicated button to reopen it", async () => {
@@ -918,22 +977,77 @@ describe("FloorplanCard replay", () => {
     });
     await card.updateComplete;
 
-    (card as unknown as { _replayReady: boolean })._replayReady = true;
-    (card as unknown as { _historyEvents: Array<{ timestamp: number; entityId: string; oldState: string; newState: string; attributes?: Record<string, unknown> }> })._historyEvents = [];
+    (card as any)._replayController.state.ready = true;
+    (card as any)._replayController.state.historyEvents = [];
     card.requestUpdate();
     await card.updateComplete;
 
-    const showButton = card.shadowRoot?.querySelector(".replay-show-toggle") as HTMLButtonElement | null;
+    const showButton = getReplayPanelShadowRoot(card)?.querySelector(".replay-show-toggle") as HTMLButtonElement | null;
     expect(showButton).not.toBeNull();
     expect(showButton?.textContent).toContain("Show replay history");
-    expect(card.shadowRoot?.querySelector(".replay-hide-toggle")).toBeNull();
+    expect(getReplayPanelShadowRoot(card)?.querySelector(".replay-hide-toggle")).toBeNull();
 
     showButton?.click();
     await card.updateComplete;
 
-    const hideButton = card.shadowRoot?.querySelector(".replay-hide-toggle") as HTMLButtonElement | null;
+    const hideButton = getReplayPanelShadowRoot(card)?.querySelector(".replay-hide-toggle") as HTMLButtonElement | null;
     expect(hideButton).not.toBeNull();
     expect(hideButton?.textContent).toContain("hide");
+  });
+
+  it("filters replay history to entities mapped on the active floor only", async () => {
+    const card = document.createElement("easy-floorplan-card") as FloorplanCard;
+
+    card.hass = {
+      states: {
+        "light.kitchen": { entity_id: "light.kitchen", state: "off", attributes: { friendly_name: "Kitchen" } },
+        "light.lounge": { entity_id: "light.lounge", state: "off", attributes: { friendly_name: "Lounge" } },
+      },
+      callApi: vi.fn(),
+      callService: vi.fn(),
+      formatEntityState: (state: HassEntity) => state.state,
+      entities: {},
+      devices: {},
+      locale: { language: "en" },
+      themes: { darkMode: false },
+      floors: {},
+      areas: {},
+      localize: (k: string) => k,
+    } as unknown as HomeAssistant;
+
+    card.setConfig({
+      type: "easy-floorplan-card",
+      width: 1000,
+      height: 600,
+      historyReplay: { enabled: true, lookbackSeconds: 3600, defaultSpeed: 1 },
+      floors: [
+        {
+          id: "floor-1",
+          name: "Floor 1",
+          walls: [],
+          openings: [],
+          items: [{ id: "kitchen-light", entity: "light.kitchen", x: 20, y: 20, kind: "light", icon: "mdi:lightbulb" }],
+          texts: [],
+          furniture: [],
+          trackers: [],
+          areas: [],
+        },
+        {
+          id: "floor-2",
+          name: "Floor 2",
+          walls: [],
+          openings: [],
+          items: [{ id: "lounge-light", entity: "light.lounge", x: 30, y: 30, kind: "light", icon: "mdi:lightbulb" }],
+          texts: [],
+          furniture: [],
+          trackers: [],
+          areas: [],
+        },
+      ],
+    });
+    (card as any)._activeFloorId = "floor-2";
+
+    expect(getReplayWatchedEntities((card as any)._config, (card as any)._activeFloorId)).toEqual(["light.lounge"]);
   });
 
   it("filters replay history to entities that are mapped on the floorplan", async () => {
@@ -1010,15 +1124,15 @@ describe("FloorplanCard replay", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    const showButton = card.shadowRoot?.querySelector(".replay-show-toggle") as HTMLButtonElement | null;
+    const showButton = getReplayPanelShadowRoot(card)?.querySelector(".replay-show-toggle") as HTMLButtonElement | null;
     showButton?.click();
     await card.updateComplete;
 
-    const logToggle = card.shadowRoot?.querySelector(".replay-log-toggle") as HTMLButtonElement | null;
+    const logToggle = getReplayPanelShadowRoot(card)?.querySelector(".replay-log-toggle") as HTMLButtonElement | null;
     logToggle?.click();
     await card.updateComplete;
 
-    const entityLabels = Array.from(card.shadowRoot?.querySelectorAll(".replay-event-entity") ?? []).map((el) => el.textContent?.trim());
+    const entityLabels = Array.from(getReplayPanelShadowRoot(card)?.querySelectorAll(".replay-event-entity") ?? []).map((el) => el.textContent?.trim());
     expect(entityLabels).toContain("light.kitchen");
     expect(entityLabels).not.toContain("sensor.unmapped");
   });

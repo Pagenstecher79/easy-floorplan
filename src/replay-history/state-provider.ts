@@ -1,5 +1,5 @@
 import type { HomeAssistant, HassEntity } from "../types";
-import { HistoryService } from "./history-service";
+import { type HistoryServiceLike } from "./history-service";
 
 export interface StateProvider {
   getEntityState(entityId: string): HassEntity | undefined;
@@ -17,7 +17,7 @@ export class HistoryStateProvider implements StateProvider {
   private readonly _historicalStates: Map<string, HassEntity>;
 
   constructor(
-    private readonly _historyService: HistoryService,
+    private readonly _historyService: HistoryServiceLike,
     private readonly _fallback: StateProvider,
     private readonly _timestamp: number,
   ) {

@@ -2,7 +2,6 @@ import { LitElement, html, css, svg, nothing, type TemplateResult, type Property
 import { customElement, property, state } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import { keyed } from "lit/directives/keyed.js";
-import { ref } from "lit/directives/ref.js";
 import type {
   HomeAssistant,
   FloorplanCardConfig,
@@ -11,13 +10,11 @@ import type {
   Floor,
   Area,
   OverlayScale,
-  HassEntity,
   RenderHass,
 } from "./types";
-import { HistoryService, resolveReplayEventColor, type HistoryEventInput } from "./replay-history/history-service";
-import { HistoryStateProvider, LiveStateProvider, type StateProvider } from "./replay-history/state-provider";
-import { PlaybackController } from "./replay-history/playback-controller";
+import { buildRenderHass } from "./replay-history/render-state-service";
 import "./replay-history/history-timeline";
+import "./replay-history/replay-panel";
 import { cssColor, cssColorOr, cssNumber, cssIdent, cssEntityId, contrastText } from "./css-safe";
 import {
   DEFAULT_WIDTH,
@@ -115,7 +112,6 @@ import {
   resolveItemIcon,
   resolveIconAnimation,
   itemIconSize,
-  kindFromEntity,
   normalizePlanRotation,
   rotatedCanvasSize,
   rotatePlanPoint,
@@ -138,6 +134,8 @@ import {
 } from "./skins";
 import { actionForGesture, executeAction, hasAction, itemIsInteractive } from "./actions";
 import { actionHandler } from "./action-handler";
+import { ReplayControllerImpl } from "./replay-history/replay-controller";
+import { createReplayPanelProps, renderReplayPanel } from "./replay-history/replay-panel";
 
 /**
  * Which floor each plan was last viewed on, keyed by its floor-id set (issue
@@ -156,17 +154,12 @@ function floorMemoryKey(floors: readonly Floor[]): string {
   return floors.map((f) => f.id).join("|");
 }
 
-const REPLAY_DEBUG_LOGS = false;
 
 @customElement("easy-floorplan-card")
 export class FloorplanCard extends LitElement {
-  private static readonly _REPLAY_SPEED_LOG_MIN = -2;
-  private static readonly _REPLAY_SPEED_LOG_MAX = 3;
-  private static readonly _REPLAY_UI_UPDATE_INTERVAL_MS = 50;
 
   private static _nextWallMaskId = 0;
   private static _nextGlowId = 0;
-  private static _nextReplayPanelId = 0;
 
   @property({ attribute: false }) public hass?: HomeAssistant;
   @state() private _config?: FloorplanCardConfig;
@@ -179,37 +172,17 @@ export class FloorplanCard extends LitElement {
   private readonly _glowIdBase = `fp-glow-${FloorplanCard._nextGlowId++}`;
   /** Entity ids this plan actually displays; used to skip irrelevant hass updates. */
   private _watchedEntities: Set<string> = new Set();
-  private readonly _historyService = new HistoryService({
-    loader: async (start, end) => this._loadHistoryEvents(start, end),
+  private readonly _replayController = new ReplayControllerImpl({
+    getConfig: () => this._config,
+    getHass: () => this.hass,
+    getActiveFloorId: () => this._activeFloorId,
+    requestUpdate: () => this.requestUpdate(),
   });
-  private _playbackController = new PlaybackController();
-  private _replayConfigured = false;
-  private _replayEnabled = false;
-  private _replayReady = false;
-  private _replayError?: string;
-  private _historyEvents: HistoryEventInput[] = [];
-  private readonly _replayConfiguredColorCache = new Map<string, string | undefined>();
-  private readonly _replayTimeFormatter = new Intl.DateTimeFormat(undefined, {
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-  private _replayLoopId?: number;
-  private _lastReplayFrame?: number;
-  private _replayLoadRequested = false;
-  private _replayStartTime = 0;
-  private _replayEndTime = 0;
-  private _replayEventLogRef?: HTMLUListElement;
-  private _replayLogExpanded = false;
-  private _replayTimelineExpanded = false;
-  private _replaySpeedExpanded = false;
-  private _replayHistoryVisible = false;
-  private _replayRangeWarning?: string;
-  private _replayLastSyncedEventTs?: number;
-  private _replayLoadToken = 0;
-  private _replayManuallyDisabled = false;
-  private _replayUiLastUpdateFrameMs = 0;
-  private readonly _replayPanelId = `fp-replay-panel-${FloorplanCard._nextReplayPanelId++}`;
+
+  private _syncHistoryServiceContext(): void {
+    this._replayController.syncHistoryServiceContext();
+  }
+
 
   public setConfig(config: FloorplanCardConfig): void {
     console.log("plk setConfig called");
@@ -238,26 +211,14 @@ export class FloorplanCard extends LitElement {
       furniture: config.furniture ?? [],
     };
     this._watchedEntities = collectWatchedEntities(this._config);
-    this._replayConfigured = Boolean(config.historyReplay?.enabled);
-    this._replayLoadToken += 1;
-    this._replayManuallyDisabled = false;
-    this._replayEnabled = false;
-    this._replayError = undefined;
-    this._replayReady = false;
-    this._replayLoadRequested = false;
-    this._historyEvents = [];
-    this._replayConfiguredColorCache.clear();
-    this._historyService.clearCache();
-    this._replayRangeWarning = undefined;
-    this._replayLastSyncedEventTs = undefined;
-    const defaultWindow = this._getDefaultReplayWindow();
-    this._replayStartTime = defaultWindow.start;
-    this._replayEndTime = defaultWindow.end;
-    if (!this._replayConfigured) {
-      this._playbackController.pause();
-      this._stopReplayLoop();
+    this._syncHistoryServiceContext();
+    this._replayController.clearConfigColorCache();
+    this._replayController.historyService().clearCache();
+    if (!this._replayController.state.configured) {
+      this._replayController.pausePlayback();
+      this._replayController.stopReplayLoop();
     } else if (this.hass) {
-      this._ensureReplayStarted();
+      this._replayController.ensureStarted();
     }
     // Restore the floor this plan was last viewed on (issue #81). Only when
     // this instance has no floor of its own yet — a live floor switch always
@@ -298,20 +259,14 @@ export class FloorplanCard extends LitElement {
 
   protected updated(changed: PropertyValues): void {
     super.updated(changed);
-    if (
-      changed.has("hass")
-      && this.hass
-      && this._config?.historyReplay?.enabled
-      && !this._replayLoadRequested
-      && !this._replayEnabled
-      && !this._replayManuallyDisabled
-    ) {
-      this._ensureReplayStarted();
+    if (changed.has("hass") || changed.has("_activeFloorId")) {
+      this._syncHistoryServiceContext();
     }
-    // REVIEW: auto-scroll can become noisy during playback on very large logs.
-    // Keep it constrained to when the replay panel and log are both visible.
-    if (this._config?.historyReplay?.enabled && this._historyEvents.length && this._replayHistoryVisible && this._replayLogExpanded) {
-      this._syncReplayLogToCurrentEvent();
+    if (
+      (changed.has("hass") || changed.has("_activeFloorId"))
+      && this._replayController.shouldAutoStart()
+    ) {
+      this._replayController.ensureStarted();
     }
   }
 
@@ -401,686 +356,8 @@ export class FloorplanCard extends LitElement {
     return item.name ?? renderHass?.states[item.entity]?.attributes?.friendly_name ?? item.entity ?? "";
   }
 
-  private _getStateProvider(): StateProvider {
-    if (!this.hass) {
-      return { getEntityState: () => undefined };
-    }
-    if (this._replayEnabled) {
-      return new HistoryStateProvider(this._historyService, new LiveStateProvider(this.hass), this._playbackController.currentTime);
-    }
-    return new LiveStateProvider(this.hass);
-  }
-
-  private _buildRenderHass(): RenderHass | undefined {
-    if (!this.hass) return undefined;
-    console.log("plk Building renderHass with watched entities");
-    const provider = this._getStateProvider();
-    const states: Record<string, HassEntity | undefined> = {};
-    for (const entityId of this._watchedEntities) {
-      states[entityId] = provider.getEntityState(entityId);
-    }
-    return {
-      states,
-      formatEntityState: (stateObj: HassEntity) => this.hass!.formatEntityState(stateObj),
-    };
-  }
-
-  private _getDefaultReplayWindow(): { start: number; end: number } {
-    const now = Date.now() / 1000;
-    const configuredLookback = this._config?.historyReplay?.lookbackSeconds;
-    const lookback =
-      typeof configuredLookback === "number" && Number.isFinite(configuredLookback) && configuredLookback > 0
-        ? configuredLookback
-        : 3600;
-    return {
-      start: Math.max(0, now - lookback),
-      end: now,
-    };
-  }
-
-  private _normalizeReplayWindow(start: number, end: number): { start: number; end: number } {
-    const normalizedStart = Math.min(start, end);
-    const normalizedEnd = Math.max(start, end);
-    return {
-      start: Math.max(0, normalizedStart),
-      end: Math.max(normalizedStart, normalizedEnd),
-    };
-  }
-
-  private _getReplayWatchedEntities(): string[] {
-    return Array.from(this._watchedEntities).sort();
-  }
-
-  private _getReplayScopeKey(): string {
-    const watched = this._getReplayWatchedEntities();
-    return watched.length ? watched.join("|") : "none";
-  }
-
-  private _getReplaySpeedForRange(start: number, end: number): number {
-    const duration = Math.max(1, end - start);
-    const baselineSpeed = duration / 30;
-    const configuredSpeed = this._config?.historyReplay?.defaultSpeed;
-    const derivedSpeed = configuredSpeed != null ? configuredSpeed : baselineSpeed;
-    return Math.max(0.25, derivedSpeed);
-  }
-
-  private _parseReplayInputValue(value: string): number {
-    const parsed = Date.parse(value);
-    return Number.isNaN(parsed) ? Date.now() / 1000 : parsed / 1000;
-  }
-
-  private _formatReplayInputValue(timestamp: number): string {
-    if (!Number.isFinite(timestamp) || timestamp <= 0) return "";
-    const date = new Date(timestamp * 1000);
-    const year = date.getFullYear();
-    const month = `${date.getMonth() + 1}`.padStart(2, "0");
-    const day = `${date.getDate()}`.padStart(2, "0");
-    const hours = `${date.getHours()}`.padStart(2, "0");
-    const minutes = `${date.getMinutes()}`.padStart(2, "0");
-    return `${year}-${month}-${day}T${hours}:${minutes}`;
-  }
-
-  private _handleReplayRangeChange(kind: "start" | "end", ev: Event): void {
-    const input = ev.target as HTMLInputElement;
-    const timestamp = this._parseReplayInputValue(input.value);
-    if (kind === "start") {
-      this._replayStartTime = timestamp;
-    } else {
-      this._replayEndTime = timestamp;
-    }
-    this._updateReplayWindow(this._replayStartTime, this._replayEndTime);
-  }
-
-  private _updateReplayWindow(start: number, end: number): void {
-    const { start: replayStart, end: replayEnd } = this._normalizeReplayWindow(start, end);
-    const span = replayEnd - replayStart;
-    this._replayRangeWarning = span < 60 ? "Very small replay window may hide expected transitions." : undefined;
-    const wasPlaying = this._playbackController.playing;
-    this._replayStartTime = replayStart;
-    this._replayEndTime = replayEnd;
-    this._playbackController.pause();
-    this._stopReplayLoop();
-    this.requestUpdate();
-    if (!this.hass || !this._config?.historyReplay?.enabled) return;
-    void this._startReplay({ preserveCurrentTime: true, keepPlaying: wasPlaying });
-  }
-
-  private _zoomReplayWindow(direction: -1 | 1): void {
-    const span = Math.max(60, this._replayEndTime - this._replayStartTime);
-    const anchor = this._playbackController.currentTime;
-    const nextSpan = direction > 0 ? Math.max(60, span * 0.8) : span * 1.25;
-    const halfSpan = nextSpan / 2;
-    const nextStart = Math.max(0, anchor - halfSpan);
-    const nextEnd = nextStart + nextSpan;
-    this._updateReplayWindow(nextStart, nextEnd);
-  }
-
-  private _ensureReplayStarted(): void {
-    if (
-      !this.hass
-      || !this._config?.historyReplay?.enabled
-      || this._replayLoadRequested
-      || this._replayEnabled
-      || this._replayManuallyDisabled
-    ) return;
-    void this._startReplay();
-  }
-
-  private async _toggleReplay(): Promise<void> {
-    if (!this.hass || !this._config?.historyReplay) return;
-    if (!this._replayEnabled) {
-      this._replayManuallyDisabled = false;
-      await this._startReplay();
-      return;
-    }
-    // REVIEW: clearing transient replay artifacts when disabled keeps
-    // live-mode transitions deterministic.
-    this._replayEnabled = false;
-    this._replayManuallyDisabled = true;
-    this._replayLoadToken += 1;
-    this._replayReady = false;
-    this._replayLoadRequested = false;
-    this._replayError = undefined;
-    this._historyEvents = [];
-    this._replayLastSyncedEventTs = undefined;
-    this._playbackController.pause();
-    this._stopReplayLoop();
-    this.requestUpdate();
-  }
-
-  private _logReplay(message: string, data?: Record<string, unknown>): void {
-    if (!REPLAY_DEBUG_LOGS) return;
-    if (data) {
-      console.info(message, data);
-      return;
-    }
-    console.info(message);
-  }
-
-  private async _startReplay(options: { preserveCurrentTime?: boolean; keepPlaying?: boolean } = {}): Promise<void> {
-    if (!this.hass || !this._config?.historyReplay) return;
-    const start = this._replayStartTime || this._getDefaultReplayWindow().start;
-    const end = this._replayEndTime || this._getDefaultReplayWindow().end;
-    const { start: replayStart, end: replayEnd } = this._normalizeReplayWindow(start, end);
-    this._replayStartTime = replayStart;
-    this._replayEndTime = replayEnd;
-    this._replayManuallyDisabled = false;
-    this._replayEnabled = true;
-    this._replayLoadRequested = true;
-    this._replayError = undefined;
-    this._replayReady = false;
-    const initialTime = options.preserveCurrentTime
-      ? Math.min(replayEnd, Math.max(replayStart, this._playbackController.currentTime))
-      : replayEnd;
-    this._playbackController = new PlaybackController({
-      startTime: replayStart,
-      endTime: replayEnd,
-      initialSpeed: this._getReplaySpeedForRange(replayStart, replayEnd),
-    });
-    this._playbackController.seek(initialTime);
-    if (options.keepPlaying) {
-      this._playbackController.play();
-    }
-    this._historyEvents = [];
-    this._replayLastSyncedEventTs = undefined;
-    const loadToken = ++this._replayLoadToken;
-    this._logReplay("[easy-floorplan] Starting replay", { start: replayStart, end: replayEnd, lookback: replayEnd - replayStart });
-    await this._loadReplayRange(replayStart, replayEnd, loadToken);
-    if (options.keepPlaying && this._replayEnabled && this._playbackController.playing) {
-      this._startReplayLoop();
-    }
-    this.requestUpdate();
-  }
-
-  private async _loadReplayRange(start: number, end: number, loadToken: number): Promise<void> {
-    try {
-      const scopeKey = this._getReplayScopeKey();
-      await this._historyService.loadHistory(start, end, { scopeKey });
-      if (loadToken !== this._replayLoadToken) return;
-      const watched = new Set(this._getReplayWatchedEntities());
-      const loadedEvents = this._historyService.getEvents();
-      console.log("[easy-floorplan] Replay history service result", {
-        scopeKey,
-        watched: Array.from(watched),
-        rawCount: loadedEvents.length,
-        filteredCount: loadedEvents.filter((event) => watched.has(event.entityId)).length,
-        sample: loadedEvents.slice(0, 5),
-      });
-      this._historyEvents = loadedEvents.filter((event) => watched.has(event.entityId)).map((event) => ({
-        ...event,
-        color: this._getReplayEventColor(event),
-      }));
-      this._replayReady = true;
-      this._replayLoadRequested = false;
-      this._replayError = undefined;
-      this._logReplay("[easy-floorplan] Replay history loaded", { eventCount: this._historyEvents.length });
-      this.requestUpdate();
-    } catch (error) {
-      if (loadToken !== this._replayLoadToken) return;
-      this._replayReady = false;
-      this._replayLoadRequested = false;
-      this._replayError = error instanceof Error ? error.message : "Unable to load history.";
-      console.error("[easy-floorplan] Replay history loading failed", error);
-    }
-  }
-
-  private static _attributesEqual(a: unknown, b: unknown): boolean {
-    if (a === b) return true;
-    if (!a || !b) return !a && !b;
-    if (typeof a !== typeof b) return false;
-    if (Array.isArray(a) || Array.isArray(b)) {
-      if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
-      for (let index = 0; index < a.length; index += 1) {
-        if (!FloorplanCard._attributesEqual(a[index], b[index])) return false;
-      }
-      return true;
-    }
-    if (typeof a !== "object") return false;
-    const aObj = a as Record<string, unknown>;
-    const bObj = b as Record<string, unknown>;
-    const aKeys = Object.keys(aObj);
-    const bKeys = Object.keys(bObj);
-    if (aKeys.length !== bKeys.length) return false;
-    for (const key of aKeys) {
-      if (!(key in bObj)) return false;
-      if (!FloorplanCard._attributesEqual(aObj[key], bObj[key])) return false;
-    }
-    return true;
-  }
-
-  private async _loadHistoryEvents(start: number, end: number): Promise<HistoryEventInput[]> {
-    if (!this.hass) return [];
-    const ws = (this.hass as HomeAssistant & { callWS?: (msg: Record<string, unknown>) => Promise<unknown> }).callWS;
-    const api = (this.hass as HomeAssistant & {
-      callApi?: (method: string, path: string, parameters?: Record<string, unknown>) => Promise<unknown>
-    }).callApi;
-    const startTime = new Date(start * 1000).toISOString();
-    const endTime = new Date(end * 1000).toISOString();
-    const watchedFromConfig = this._config ? collectWatchedEntities(this._config) : new Set<string>();
-    const watched = Array.from(this._watchedEntities.size ? this._watchedEntities : watchedFromConfig).sort();
-    // REVIEW: replay should remain scoped to mapped entities only; this guard
-    // prevents accidental all-entity history fetches and UI noise.
-    if (!watched.length) {
-      console.log("[easy-floorplan] Replay history skipped: no mapped entities to query", {
-        watched,
-        watchedFromConfig: Array.from(watchedFromConfig),
-        _watchedEntities: Array.from(this._watchedEntities),
-        configFloorCount: this._config?.floors?.length ?? 0,
-      });
-      this._logReplay("[easy-floorplan] Replay history skipped: no mapped entities to query");
-      return [];
-    }
-    const watchedSet = new Set(watched);
-    const request = {
-      type: "history/history_during_period",
-      start_time: startTime,
-      end_time: endTime,
-      minimal_response: false,
-      no_attributes: false,
-      significant_changes_only: false,
-      entity_ids: watched,
-    };
-    console.log("[easy-floorplan] Replay history request", {
-      startTime,
-      endTime,
-      watched,
-      request,
-    });
-    let history: unknown;
-    if (typeof ws === "function") {
-      this._logReplay("[easy-floorplan] Replay history fetch", {
-        transport: "websocket",
-        startTime,
-        endTime,
-        watchedCount: watched.length,
-        watchedEntities: watched,
-      });
-      try {
-        history = await ws(request);
-      } catch (error) {
-        console.warn("[easy-floorplan] Replay WS history query failed", {
-          startTime,
-          endTime,
-          watchedCount: watched.length,
-          error,
-        });
-      }
-    }
-    if (!history && typeof api === "function") {
-      this._logReplay("[easy-floorplan] Replay history fetch", {
-        transport: "rest",
-        startTime,
-        endTime,
-        watchedCount: watched.length,
-        watchedEntities: watched,
-      });
-      try {
-        history = await api("GET", `history/period/${encodeURIComponent(startTime)}`, {
-          end_time: endTime,
-          filter_entity_id: watched.join(","),
-          minimal_response: false,
-          no_attributes: false,
-          significant_changes_only: false,
-        });
-      } catch (error) {
-        console.warn("[easy-floorplan] Replay REST history query failed", {
-          startTime,
-          endTime,
-          watchedCount: watched.length,
-          error,
-        });
-      }
-    }
-
-    if (!history) {
-      console.log("[easy-floorplan] Replay history fetch returned no payload", {
-        wsAvailable: typeof ws === "function",
-        apiAvailable: typeof api === "function",
-        watched,
-        startTime,
-        endTime,
-      });
-      throw new Error(`Unable to load history via websocket or REST API (ws:${typeof ws === "function" ? "yes" : "no"}, api:${typeof api === "function" ? "yes" : "no"}).`);
-    }
-
-    console.log("[easy-floorplan] Replay raw history payload", {
-      transport: typeof ws === "function" && history !== undefined ? "websocket" : "rest",
-      watched,
-      payload: history,
-    });
-
-    // REVIEW: keep logs bounded to summaries to reduce payload noise/risk.
-    if (Array.isArray(history)) {
-      this._logReplay("[easy-floorplan] Replay history payload summary", {
-        kind: "array",
-        rows: history.length,
-        rowKinds: history.slice(0, 8).map((row) => (Array.isArray(row) ? "array" : typeof row)),
-        preview: history.slice(0, 2).map((row) => {
-          if (!row || typeof row !== "object") return row;
-          const entry = row as Record<string, unknown>;
-          return {
-            entity_id: entry.entity_id,
-            stateCount: Array.isArray(entry.states) ? entry.states.length : 0,
-            keys: Object.keys(entry).slice(0, 10),
-          };
-        }),
-      });
-    } else if (history && typeof history === "object") {
-      this._logReplay("[easy-floorplan] Replay history payload summary", {
-        kind: "object",
-        keys: Object.keys(history as Record<string, unknown>).slice(0, 20),
-      });
-    } else {
-      this._logReplay("[easy-floorplan] Replay history payload summary", {
-        kind: typeof history,
-      });
-    }
-
-    type HistoryStateRow = {
-      state?: string;
-      attributes?: Record<string, unknown>;
-      last_updated?: string | number;
-      last_changed?: string | number;
-    };
-
-    const buckets = new Map<string, HistoryStateRow[]>();
-    const parseHistoryTimestamp = (value: string | number | undefined, fallbackIsoTime: string): number => {
-      if (typeof value === "number") {
-        if (!Number.isFinite(value)) return Number.NaN;
-        return value > 1_000_000_000_000 ? value / 1000 : value;
-      }
-      if (typeof value === "string") {
-        const numeric = Number(value);
-        if (Number.isFinite(numeric)) return numeric > 1_000_000_000_000 ? numeric / 1000 : numeric;
-        const parsed = Date.parse(value) / 1000;
-        return Number.isFinite(parsed) ? parsed : Number.NaN;
-      }
-      return Date.parse(fallbackIsoTime) / 1000;
-    };
-
-    const pickValue = (row: Record<string, unknown>, keys: string[]): unknown => {
-      for (const key of keys) {
-        const value = row[key];
-        if (value !== undefined) return value;
-      }
-      return undefined;
-    };
-
-    const pushStateRows = (entityId: string, entityRows: unknown[]) => {
-      const rows = entityRows.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object");
-      if (!rows.length) return;
-      buckets.set(entityId, rows.map((row) => {
-        const state = pickValue(row, ["state", "s"]);
-        const attributes = pickValue(row, ["attributes", "a"]);
-        const lastUpdated = pickValue(row, ["last_updated", "lu"]);
-        const lastChanged = pickValue(row, ["last_changed", "lc"]);
-        return {
-          state: typeof state === "string" || typeof state === "number" || typeof state === "boolean" ? String(state) : undefined,
-          attributes: attributes && typeof attributes === "object" ? (attributes as Record<string, unknown>) : undefined,
-          last_updated: typeof lastUpdated === "string" || typeof lastUpdated === "number" ? lastUpdated : undefined,
-          last_changed: typeof lastChanged === "string" || typeof lastChanged === "number" ? lastChanged : undefined,
-        };
-      }));
-    };
-
-    if (Array.isArray(history)) {
-      for (const entry of history) {
-        if (!entry || typeof entry !== "object") continue;
-        const record = entry as Record<string, unknown>;
-        const entityId = typeof record.entity_id === "string" ? record.entity_id : undefined;
-        const states = Array.isArray(record.states) ? record.states : Array.isArray(record.history) ? record.history : [];
-        if (entityId && states.length) {
-          pushStateRows(entityId, states);
-        }
-      }
-    } else if (history && typeof history === "object") {
-      for (const [entityId, entityRows] of Object.entries(history as Record<string, unknown>)) {
-        if (Array.isArray(entityRows) && entityRows.length) {
-          pushStateRows(entityId, entityRows);
-          continue;
-        }
-        if (entityRows && typeof entityRows === "object") {
-          const nested = entityRows as Record<string, unknown>;
-          if (Array.isArray(nested.states) && nested.states.length) {
-            pushStateRows(entityId, nested.states);
-          }
-        }
-      }
-    }
-
-    if (buckets.size) {
-      this._logReplay("[easy-floorplan] Replay history buckets parsed", {
-        bucketCount: buckets.size,
-        sample: Array.from(buckets.entries()).slice(0, 5).map(([entityId, states]) => ({
-          entity_id: entityId,
-          stateCount: states.length,
-          first: states[0]?.last_updated ?? states[0]?.last_changed,
-          last: states[states.length - 1]?.last_updated ?? states[states.length - 1]?.last_changed,
-        })),
-      });
-    }
-
-    if (!buckets.size) {
-      console.log("[easy-floorplan] Replay parser produced zero buckets", {
-        watched,
-        history,
-        keys: history && typeof history === "object" ? Object.keys(history as Record<string, unknown>).slice(0, 20) : undefined,
-        arrayLength: Array.isArray(history) ? history.length : undefined,
-      });
-      throw new Error("History payload contained no parseable state rows.");
-    }
-
-    this._logReplay("[easy-floorplan] Replay history buckets", {
-      bucketCount: buckets.size,
-      buckets: Array.from(buckets.entries()).slice(0, 20).map(([entityId, states]) => ({
-        entity_id: entityId,
-        states: states.length,
-        first: states[0]?.last_updated ?? states[0]?.last_changed,
-        last: states.length > 0 ? (states[states.length - 1]?.last_updated ?? states[states.length - 1]?.last_changed) : undefined,
-      })),
-    });
-
-    const normalized: HistoryEventInput[] = [];
-    let droppedTooShort = 0;
-    let droppedBadTimestamp = 0;
-    let droppedOutOfRange = 0;
-    let droppedNoChange = 0;
-
-    for (const [entityId, states] of buckets.entries()) {
-      if (!states.length) {
-        droppedTooShort += 1;
-        continue;
-      }
-
-      if (states.length === 1) {
-        const only = states[0];
-        if (!watchedSet.has(entityId)) {
-          droppedOutOfRange += 1;
-          continue;
-        }
-        const ts = parseHistoryTimestamp(only.last_updated ?? only.last_changed, endTime);
-        if (!Number.isFinite(ts)) {
-          droppedBadTimestamp += 1;
-          continue;
-        }
-        if (ts < start || ts > end) {
-          droppedOutOfRange += 1;
-          continue;
-        }
-        normalized.push({
-          timestamp: ts,
-          entityId,
-          oldState: only.state ?? "unknown",
-          newState: only.state ?? "unknown",
-          attributes: only.attributes ?? {},
-        });
-        continue;
-      }
-
-      for (let index = 1; index < states.length; index += 1) {
-        const prev = states[index - 1];
-        const next = states[index];
-        if (!watchedSet.has(entityId)) {
-          droppedOutOfRange += 1;
-          continue;
-        }
-        const prevTs = parseHistoryTimestamp(prev.last_updated ?? prev.last_changed, endTime);
-        const nextTs = parseHistoryTimestamp(next.last_updated ?? next.last_changed, endTime);
-        if (!Number.isFinite(prevTs) || !Number.isFinite(nextTs)) {
-          droppedBadTimestamp += 1;
-          continue;
-        }
-        if (nextTs < start || prevTs > end) {
-          droppedOutOfRange += 1;
-          continue;
-        }
-        const stateChanged = prev.state !== next.state;
-        const attrsChanged = !FloorplanCard._attributesEqual(prev.attributes ?? {}, next.attributes ?? {});
-        if (!stateChanged && !attrsChanged) {
-          droppedNoChange += 1;
-          continue;
-        }
-        normalized.push({
-          timestamp: nextTs,
-          entityId,
-          oldState: prev.state ?? "unknown",
-          newState: next.state ?? "unknown",
-          attributes: {
-            ...(prev.attributes ?? {}),
-            ...(next.attributes ?? {}),
-          },
-        });
-      }
-    }
-    this._logReplay("[easy-floorplan] Replay history normalization summary", {
-      normalizedCount: normalized.length,
-      droppedTooShort,
-      droppedBadTimestamp,
-      droppedOutOfRange,
-      droppedNoChange,
-    });
-    return normalized.sort((a, b) => a.timestamp - b.timestamp);
-  }
-
-  private _seekReplay(timestamp: number): void {
-    this._playbackController.seek(timestamp);
-    this._logReplay("[easy-floorplan] Replay seek", { timestamp });
-    this.requestUpdate();
-  }
-
-  private _jumpReplay(seconds: number): void {
-    this._playbackController.seek(this._playbackController.currentTime + seconds);
-    this._logReplay("[easy-floorplan] Replay jump", { seconds });
-    this.requestUpdate();
-  }
-
-  private _stepReplay(direction: 1 | -1): void {
-    if (!this._historyEvents.length) return;
-    const currentTime = this._playbackController.currentTime;
-    const epsilon = 0.0001;
-    const candidate = direction > 0
-      ? this._historyService.getEventAfter(currentTime + epsilon)
-      : this._historyService.getEventBefore(currentTime - epsilon);
-    if (candidate) {
-      this._playbackController.seek(candidate.timestamp);
-    } else {
-      this._playbackController.seek(direction > 0 ? this._playbackController.endTime : this._playbackController.startTime);
-    }
-    this.requestUpdate();
-  }
-
-  private _setReplaySpeed(speed: number): void {
-    this._playbackController.setPlaybackSpeed(speed);
-    this._logReplay("[easy-floorplan] Replay speed", { speed });
-    this.requestUpdate();
-  }
-
-  private _replaySpeedToSliderValue(speed: number): number {
-    if (!Number.isFinite(speed) || speed <= 0) return 0;
-    const value = Math.log10(speed);
-    return Math.min(FloorplanCard._REPLAY_SPEED_LOG_MAX, Math.max(FloorplanCard._REPLAY_SPEED_LOG_MIN, value));
-  }
-
-  private _sliderValueToReplaySpeed(value: number): number {
-    const clamped = Math.min(FloorplanCard._REPLAY_SPEED_LOG_MAX, Math.max(FloorplanCard._REPLAY_SPEED_LOG_MIN, value));
-    return Number((10 ** clamped).toPrecision(4));
-  }
-
-  private _formatReplaySpeed(speed: number): string {
-    if (speed >= 100) return `${Math.round(speed)}x`;
-    if (speed >= 10) return `${speed.toFixed(1)}x`;
-    if (speed >= 1) return `${speed.toFixed(2)}x`;
-    return `${speed.toFixed(3)}x`;
-  }
-  private _handleReplaySpeedSliderInput(ev: Event): void {
-    const slider = ev.target as HTMLInputElement;
-    const value = Number(slider.value);
-    if (!Number.isFinite(value)) return;
-    this._setReplaySpeed(this._sliderValueToReplaySpeed(value));
-  }
-
-  private _playReplay(): void {
-    if (!this._replayEnabled) {
-      void this._startReplay({ preserveCurrentTime: true, keepPlaying: true });
-      return;
-    }
-    if (!this._replayReady) {
-      const replayStart = this._replayStartTime || this._playbackController.startTime;
-      const replayEnd = this._replayEndTime || this._playbackController.endTime;
-      void this._loadReplayRange(replayStart, replayEnd, ++this._replayLoadToken);
-    }
-    if (this._playbackController.currentTime >= this._playbackController.endTime) {
-      this._playbackController.seek(this._playbackController.startTime);
-    }
-    this._playbackController.play();
-    this._startReplayLoop();
-    this._logReplay("[easy-floorplan] Replay play", { currentTime: this._playbackController.currentTime });
-    this.requestUpdate();
-  }
-
-  private _pauseReplay(): void {
-    this._playbackController.pause();
-    this._stopReplayLoop();
-    this._logReplay("[easy-floorplan] Replay pause", { currentTime: this._playbackController.currentTime });
-    this.requestUpdate();
-  }
-
-  private _startReplayLoop(): void {
-    if (this._replayLoopId) return;
-    this._lastReplayFrame = undefined;
-    this._replayUiLastUpdateFrameMs = 0;
-    const tick = (timestamp: number): void => {
-      if (this._playbackController.playing) {
-        if (this._lastReplayFrame === undefined) {
-          this._lastReplayFrame = timestamp;
-        } else {
-          this._playbackController.tick(timestamp - this._lastReplayFrame);
-          this._lastReplayFrame = timestamp;
-          if (this._replayUiLastUpdateFrameMs === 0 || timestamp - this._replayUiLastUpdateFrameMs >= FloorplanCard._REPLAY_UI_UPDATE_INTERVAL_MS) {
-            this._replayUiLastUpdateFrameMs = timestamp;
-            this.requestUpdate();
-          }
-        }
-        if (this._playbackController.currentTime >= this._playbackController.endTime) {
-          this._pauseReplay();
-          return;
-        }
-      }
-      this._replayLoopId = window.requestAnimationFrame(tick);
-    };
-    this._replayLoopId = window.requestAnimationFrame(tick);
-  }
-
-  private _stopReplayLoop(): void {
-    if (this._replayLoopId) {
-      window.cancelAnimationFrame(this._replayLoopId);
-      this._replayLoopId = undefined;
-    }
-    this._lastReplayFrame = undefined;
-  }
-
   public disconnectedCallback(): void {
-    this._stopReplayLoop();
+    this._replayController.stopReplayLoop();
     super.disconnectedCallback();
   }
 
@@ -1254,9 +531,13 @@ export class FloorplanCard extends LitElement {
    * dropping a zoom that belonged to the floor being left.
    */
   private _goToFloor(floors: readonly Floor[], id: string): void {
+    const wasSameFloor = this._activeFloorId === id;
     this._activeFloorId = id;
     lastViewedFloor.set(floorMemoryKey(floors), id);
     this._zoomedAreaId = undefined;
+
+    if (wasSameFloor || !this.hass || !this._config?.historyReplay?.enabled) return;
+    this._replayController.resetForFloorChange();
   }
 
   /** Tapping a room zooms the plan in to it; tapping the same room again zooms back out. */
@@ -1513,7 +794,8 @@ export class FloorplanCard extends LitElement {
   protected render(): TemplateResult {
     if (!this._config) return html`${nothing}`;
     const c = this._config;
-    const renderHass = this._buildRenderHass();
+    const replayState = this._replayController.getRenderState();
+    const renderHass = buildRenderHass(this.hass, this._watchedEntities, this._replayController.historyService(), replayState.enabled, replayState.currentTime);
     const floors = getFloors(c);
     const active =
       floors.find((f) => f.id === this._activeFloorId) ??
@@ -1606,7 +888,7 @@ export class FloorplanCard extends LitElement {
            shrink it — it declines it, and draws the title inside the stage
            instead, where it costs no layout height at all (issue #152). -->
       <ha-card .header=${compact ? nothing : (c.title ?? nothing)}>
-        <div class="card-shell">
+        <div class="card-shell ${this._replayController.isHistoryVisible() ? "replay-visible" : ""}">
           ${this._config.historyReplay?.enabled ? this._renderReplayPanel() : nothing}
           <div
             class="stage press-${pressEffectOf(c)} offline-${offlineStyleOf(c)} ${compactTitle
@@ -1989,285 +1271,9 @@ export class FloorplanCard extends LitElement {
     `;
   }
 
-  private _setReplayHistoryVisible(visible: boolean): void {
-    if (this._replayHistoryVisible === visible) return;
-    this._replayHistoryVisible = visible;
-    this.requestUpdate();
-  }
 
   private _renderReplayPanel(): TemplateResult {
-    const currentTimeLabel = this._formatReplayTime(this._playbackController.currentTime);
-    const currentEvent = this._getCurrentReplayEvent();
-    const replaySpeed = this._playbackController.speed;
-    if (!this._replayHistoryVisible) {
-      return html`
-        <div class="replay-panel-toggle">
-          <button
-            class="replay-show-toggle"
-            aria-expanded="false"
-            aria-controls=${this._replayPanelId}
-            @click=${() => this._setReplayHistoryVisible(true)}
-          >
-            Show replay history
-          </button>
-        </div>
-      `;
-    }
-    return html`
-      <div class="replay-panel" id=${this._replayPanelId}>
-        <button
-          class="replay-hide-toggle"
-          aria-label="Hide replay panel"
-          aria-controls=${this._replayPanelId}
-          @click=${() => this._setReplayHistoryVisible(false)}
-        >
-          hide
-        </button>
-        <div class="replay-header">
-          <div class="replay-meta">
-            <span class="replay-chip">${this._replayReady ? "Replay ready" : this._replayEnabled ? "Loading replay…" : "Replay paused"}</span>
-            <span class="replay-time">${currentTimeLabel}</span>
-          </div>
-          <div class="replay-status">
-            ${this._replayError ? html`<span class="replay-error">${this._replayError}</span>` : nothing}
-            ${this._replayRangeWarning ? html`<span class="replay-loading">${this._replayRangeWarning}</span>` : nothing}
-            ${!this._replayReady && this._replayEnabled && !this._replayError ? html`<span class="replay-loading">Loading history…</span>` : nothing}
-          </div>
-        </div>
-        <div class="replay-range">
-          <label class="replay-range-field">
-            <span>Start</span>
-            <input type="datetime-local" .value=${this._formatReplayInputValue(this._replayStartTime)} @change=${(ev: Event) => this._handleReplayRangeChange("start", ev)} />
-          </label>
-          <label class="replay-range-field">
-            <span>End</span>
-            <input type="datetime-local" .value=${this._formatReplayInputValue(this._replayEndTime)} @change=${(ev: Event) => this._handleReplayRangeChange("end", ev)} />
-          </label>
-          <div class="replay-range-tools">
-            <button class="replay-icon-button" aria-label="Zoom out range" title="Zoom out range" @click=${() => this._zoomReplayWindow(-1)}>
-              <ha-icon icon="mdi:magnify-minus-outline"></ha-icon>
-            </button>
-            <button class="replay-icon-button" aria-label="Zoom in range" title="Zoom in range" @click=${() => this._zoomReplayWindow(1)}>
-              <ha-icon icon="mdi:magnify-plus-outline"></ha-icon>
-            </button>
-          </div>
-        </div>
-        <div class="replay-toolbar">
-          <div class="replay-transport" role="group" aria-label="Replay transport controls">
-            <button title="Toggle replay mode" @click=${() => void this._toggleReplay()}>${this._replayEnabled ? "Disable" : "Enable"}</button>
-            <button class="replay-icon-button" aria-label="Jump back 30 seconds" title="Jump back 30 seconds" @click=${() => this._jumpReplay(-30)}>
-              <ha-icon icon="mdi:rewind-30"></ha-icon>
-            </button>
-            <button class="replay-icon-button" aria-label="Step back one event" title="Step back" @click=${() => this._stepReplay(-1)}>
-              <ha-icon icon="mdi:skip-previous"></ha-icon>
-            </button>
-            <button class="replay-run-button" title=${this._playbackController.playing ? "Pause replay" : "Run replay"} @click=${() => (this._playbackController.playing ? this._pauseReplay() : this._playReplay())}>
-              <ha-icon icon=${this._playbackController.playing ? "mdi:pause" : "mdi:play"}></ha-icon>
-              <span>${this._playbackController.playing ? "Pause" : "Run"}</span>
-            </button>
-            <button class="replay-icon-button" aria-label="Step forward one event" title="Step forward" @click=${() => this._stepReplay(1)}>
-              <ha-icon icon="mdi:skip-next"></ha-icon>
-            </button>
-            <button class="replay-icon-button" aria-label="Jump forward 30 seconds" title="Jump forward 30 seconds" @click=${() => this._jumpReplay(30)}>
-              <ha-icon icon="mdi:fast-forward-30"></ha-icon>
-            </button>
-          </div>
-          <div class="replay-toolbar-toggles">
-            <button
-              class="replay-speed-toggle"
-              aria-expanded=${this._replaySpeedExpanded}
-              @click=${() => {
-                this._replaySpeedExpanded = !this._replaySpeedExpanded;
-                this.requestUpdate();
-              }}
-            >
-              Speed ${this._formatReplaySpeed(replaySpeed)}
-              <ha-icon icon=${this._replaySpeedExpanded ? "mdi:chevron-up" : "mdi:chevron-down"}></ha-icon>
-            </button>
-          </div>
-        </div>
-        ${this._replaySpeedExpanded
-          ? html`<div class="replay-speed-panel">
-              <label class="replay-speed-field replay-speed-group">
-                <span>Playback speed</span>
-                <input
-                  class="replay-speed-slider"
-                  type="range"
-                  min=${FloorplanCard._REPLAY_SPEED_LOG_MIN}
-                  max=${FloorplanCard._REPLAY_SPEED_LOG_MAX}
-                  step="0.01"
-                  .value=${this._replaySpeedToSliderValue(replaySpeed).toString()}
-                  @input=${(ev: Event) => this._handleReplaySpeedSliderInput(ev)}
-                />
-                <input
-                  class="replay-speed"
-                  type="number"
-                  min="0.01"
-                  max="1000"
-                  step="0.01"
-                  .value=${replaySpeed.toString()}
-                  @change=${(ev: Event) => this._setReplaySpeed(Number((ev.target as HTMLInputElement).value || 1))}
-                />
-              </label>
-            </div>`
-          : nothing}
-        <div class="replay-lanes">
-          <div class="replay-view-tools">
-            <button class="replay-timeline-toggle" @click=${() => { this._replayTimelineExpanded = !this._replayTimelineExpanded; this.requestUpdate(); }}>
-              ${this._replayTimelineExpanded ? "Collapse lanes" : "Expand lanes"}
-            </button>
-          </div>
-          <div class="replay-timeline-wrap">
-
-            <easy-floorplan-history-timeline
-              .events=${this._historyEvents}
-              .startTime=${this._playbackController.startTime}
-              .endTime=${this._playbackController.endTime}
-              .currentTime=${this._playbackController.currentTime}
-              .expanded=${this._replayTimelineExpanded}
-              @seek=${(ev: CustomEvent<{ timestamp: number }>) => this._seekReplay(ev.detail.timestamp)}
-            ></easy-floorplan-history-timeline>
-          </div>
-        </div>
-        <div class=${`replay-event-log ${this._replayLogExpanded ? "expanded" : "collapsed"}`} role="log" aria-label="Replay event log">
-          <button class="replay-log-toggle" @click=${() => { this._replayLogExpanded = !this._replayLogExpanded; this.requestUpdate(); }}>
-            ${this._replayLogExpanded ? "Hide log" : "Show log"}
-          </button>
-          ${this._historyEvents.length
-            ? html`
-                ${this._replayLogExpanded
-                  ? html`<ul class="replay-event-list" ${ref(this._setReplayEventLogRef)}>${repeat(this._historyEvents, (event, index) => `${event.timestamp}-${event.entityId}-${event.newState}-${index}`, (event) => this._renderReplayEvent(event, currentEvent?.timestamp === event.timestamp))}</ul>`
-                  : nothing}
-              `
-            : html`<div class="replay-empty">No history events yet.</div>`}
-        </div>
-      </div>
-    `;
-  }
-
-  private _renderReplayEvent(event: HistoryEventInput, isCurrent: boolean): TemplateResult {
-    const passed = event.timestamp <= this._playbackController.currentTime;
-    const color = cssColor(event.color ?? this._getReplayEventColor(event));
-    const icon = this._getReplayEventIcon(event);
-    return html`
-      <li class="replay-event-item ${passed ? "replay-event-passed" : ""} ${isCurrent ? "replay-event-current" : ""}" data-timestamp=${event.timestamp}>
-        <span class="replay-event-dot" style=${color ? `background:${color}; box-shadow:0 0 0 2px ${color}22;` : nothing}></span>
-        <span class="replay-event-time">${this._formatReplayTime(event.timestamp)}</span>
-        <span class="replay-event-icon"><ha-icon icon=${icon}></ha-icon></span>
-        <span class="replay-event-entity">${event.entityId}</span>
-        <span class="replay-event-change">${event.oldState} → ${event.newState}</span>
-      </li>
-    `;
-  }
-
-  private _getReplayEventIcon(event: HistoryEventInput): string {
-    const kind = kindFromEntity(event.entityId);
-    const liveState = this.hass?.states[event.entityId];
-    const replayState = {
-      state: event.newState,
-      attributes: {
-        ...(liveState?.attributes ?? {}),
-        ...(event.attributes ?? {}),
-      },
-    };
-    return resolveItemIcon(
-      {
-        entity: event.entityId,
-        kind,
-      },
-      replayState,
-      this.hass?.entities?.[event.entityId]?.icon,
-    );
-  }
-
-  private _getReplayEventColor(event: HistoryEventInput): string | undefined {
-    if (!this._config) return resolveReplayEventColor(event);
-
-    const configuredColor = cssColor(this._findConfiguredReplayColor(event.entityId));
-    const active = entityIsActive(event.entityId, event.newState);
-    if (configuredColor) return active ? configuredColor : "#ffffff";
-
-    const resolved = resolveReplayEventColor(event);
-    return active ? resolved : "#ffffff";
-  }
-
-  private _findConfiguredReplayColor(entityId: string): string | undefined {
-    if (!this._config) return undefined;
-    if (this._replayConfiguredColorCache.has(entityId)) {
-      return this._replayConfiguredColorCache.get(entityId);
-    }
-
-    const floors = getFloors(this._config);
-    let color: string | undefined;
-    for (const floor of floors) {
-      for (const item of floor.items ?? []) {
-        if (item.entity === entityId) {
-          color = item.activeColor ?? item.rippleColor;
-          this._replayConfiguredColorCache.set(entityId, color);
-          return color;
-        }
-      }
-      for (const opening of floor.openings ?? []) {
-        if (opening.entity === entityId) {
-          color = opening.activeColor;
-          this._replayConfiguredColorCache.set(entityId, color);
-          return color;
-        }
-      }
-
-      for (const furniture of floor.furniture ?? []) {
-        if (furniture.entity === entityId) {
-          color = furniture.activeColor;
-          this._replayConfiguredColorCache.set(entityId, color);
-          return color;
-        }
-      }
-    }
-    this._replayConfiguredColorCache.set(entityId, undefined);
-    return undefined;
-  }
-
-  private _getCurrentReplayEvent(): HistoryEventInput | undefined {
-    if (!this._historyEvents.length) return undefined;
-    const target = this._playbackController.currentTime;
-    let lo = 0;
-    let hi = this._historyEvents.length - 1;
-    let best = -1;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      if (this._historyEvents[mid].timestamp <= target) {
-        best = mid;
-        lo = mid + 1;
-      } else {
-        hi = mid - 1;
-      }
-    }
-    return best >= 0 ? this._historyEvents[best] : undefined;
-  }
-
-  private _setReplayEventLogRef = (element: Element | undefined): void => {
-    this._replayEventLogRef = element instanceof HTMLUListElement ? element : undefined;
-    if (this._replayEventLogRef && this._historyEvents.length) this._syncReplayLogToCurrentEvent();
-  };
-
-  private _syncReplayLogToCurrentEvent(): void {
-    if (!this._replayEventLogRef) return;
-    const current = this._replayEventLogRef.querySelector<HTMLElement>(".replay-event-item.replay-event-current");
-    const currentTimestamp = Number(current?.dataset["timestamp"]);
-    if (Number.isFinite(currentTimestamp) && this._replayLastSyncedEventTs === currentTimestamp) return;
-    if (current && typeof current.scrollIntoView === "function") {
-      if (Number.isFinite(currentTimestamp)) this._replayLastSyncedEventTs = currentTimestamp;
-      current.scrollIntoView({ block: "nearest", inline: "nearest" });
-    }
-  }
-
-  private _formatReplayTime(timestamp: number): string {
-    if (!Number.isFinite(timestamp)) return "—";
-    try {
-      return this._replayTimeFormatter.format(new Date(timestamp * 1000));
-    } catch {
-      return new Date(timestamp * 1000).toISOString();
-    }
+    return renderReplayPanel(createReplayPanelProps(this._replayController));
   }
 
   private _renderFloorSwitcher(floors: Floor[], active: Floor, compact = false): TemplateResult {
@@ -2334,6 +1340,13 @@ export class FloorplanCard extends LitElement {
       min-height: 0;
       overflow-y: auto;
       overflow-x: hidden;
+    }
+    .card-shell.replay-visible {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+    }
+    .card-shell.replay-visible .stage {
+      min-height: 0;
     }
     .stage {
       position: relative;
