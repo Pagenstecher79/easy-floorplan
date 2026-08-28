@@ -1053,7 +1053,6 @@ export function itemEffectsForm(it: FloorItem, deviceClass?: string): FormSpec |
   };
 }
 
-/** FormSpec for Group 7a */
 export function itemGroup7aForm(it: FloorItem): FormSpec {
   const fields: FormField[] = [
     {
@@ -1084,22 +1083,27 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
         name: "hideMode",
         label: "Condition Type",
         selector: { select: { mode: "dropdown", options: [{ value: "state", label: "State Match" }, { value: "threshold", label: "Numeric Threshold" }] } },
+      },
+      {
+        name: "hideOperator",
+        label: "Operator",
+        selector: { 
+          select: { 
+            mode: "dropdown", 
+            options: it.hideMode === "threshold"
+              ? [{ value: "<", label: "<" }, { value: "<=", label: "<=" }, { value: "==", label: "==" }, { value: "!=", label: "!=" }, { value: ">=", label: ">=" }, { value: ">", label: ">" }]
+              : [{ value: "==", label: "==" }, { value: "!=", label: "!=" }]
+          } 
+        },
       }
     );
 
     if (it.hideMode === "threshold") {
-      fields.push(
-        {
-          name: "hideOperator",
-          label: "Operator",
-          selector: { select: { mode: "dropdown", options: [{ value: "<", label: "<" }, { value: "<=", label: "<=" }, { value: "==", label: "==" }, { value: ">=", label: ">=" }, { value: ">", label: ">" }] } },
-        },
-        {
-          name: "hideThreshold",
-          label: "Threshold Value",
-          selector: { number: { mode: "box", step: "any" } },
-        }
-      );
+      fields.push({
+        name: "hideThreshold",
+        label: "Threshold Value",
+        selector: { number: { mode: "box", step: "any" } },
+      });
     } else {
       fields.push({
         name: "hideState",
@@ -1149,22 +1153,27 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
         name: "hideStateMode",
         label: "Condition Type",
         selector: { select: { mode: "dropdown", options: [{ value: "state", label: "State Match" }, { value: "threshold", label: "Numeric Threshold" }] } },
+      },
+      {
+        name: "hideStateOperator",
+        label: "Operator",
+        selector: { 
+          select: { 
+            mode: "dropdown", 
+            options: it.hideStateMode === "threshold"
+              ? [{ value: "<", label: "<" }, { value: "<=", label: "<=" }, { value: "==", label: "==" }, { value: "!=", label: "!=" }, { value: ">=", label: ">=" }, { value: ">", label: ">" }]
+              : [{ value: "==", label: "==" }, { value: "!=", label: "!=" }]
+          } 
+        },
       }
     );
 
     if (it.hideStateMode === "threshold") {
-      fields.push(
-        {
-          name: "hideStateOperator",
-          label: "Operator",
-          selector: { select: { mode: "dropdown", options: [{ value: "<", label: "<" }, { value: "<=", label: "<=" }, { value: "==", label: "==" }, { value: ">=", label: ">=" }, { value: ">", label: ">" }] } },
-        },
-        {
-          name: "hideStateThreshold",
-          label: "Threshold Value",
-          selector: { number: { mode: "box", step: "any" } },
-        }
-      );
+      fields.push({
+        name: "hideStateThreshold",
+        label: "Threshold Value",
+        selector: { number: { mode: "box", step: "any" } },
+      });
     } else {
       fields.push({
         name: "hideStateMatch",
@@ -1214,22 +1223,27 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
         name: "hideBadgeMode",
         label: "Condition Type",
         selector: { select: { mode: "dropdown", options: [{ value: "state", label: "State Match" }, { value: "threshold", label: "Numeric Threshold" }] } },
+      },
+      {
+        name: "hideBadgeOperator",
+        label: "Operator",
+        selector: { 
+          select: { 
+            mode: "dropdown", 
+            options: it.hideBadgeMode === "threshold"
+              ? [{ value: "<", label: "<" }, { value: "<=", label: "<=" }, { value: "==", label: "==" }, { value: "!=", label: "!=" }, { value: ">=", label: ">=" }, { value: ">", label: ">" }]
+              : [{ value: "==", label: "==" }, { value: "!=", label: "!=" }]
+          } 
+        },
       }
     );
 
     if (it.hideBadgeMode === "threshold") {
-      fields.push(
-        {
-          name: "hideBadgeOperator",
-          label: "Operator",
-          selector: { select: { mode: "dropdown", options: [{ value: "<", label: "<" }, { value: "<=", label: "<=" }, { value: "==", label: "==" }, { value: ">=", label: ">=" }, { value: ">", label: ">" }] } },
-        },
-        {
-          name: "hideBadgeThreshold",
-          label: "Threshold Value",
-          selector: { number: { mode: "box", step: "any" } },
-        }
-      );
+      fields.push({
+        name: "hideBadgeThreshold",
+        label: "Threshold Value",
+        selector: { number: { mode: "box", step: "any" } },
+      });
     } else {
       fields.push({
         name: "hideBadgeMatch",
@@ -1259,7 +1273,7 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
       hideAttribute: it.hideAttribute ?? "",
       hideMode: it.hideMode ?? "state",
       hideState: it.hideState ?? "",
-      hideOperator: it.hideOperator ?? ">",
+      hideOperator: it.hideOperator ?? "==",     // <-- WICHTIG: Wurde auf "==" geändert
       hideThreshold: it.hideThreshold ?? 0,
       hideInvert: it.hideInvert ?? false,
 
@@ -1268,7 +1282,7 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
       hideStateAttribute: it.hideStateAttribute ?? "",
       hideStateMode: it.hideStateMode ?? "state",
       hideStateMatch: it.hideStateMatch ?? "",
-      hideStateOperator: it.hideStateOperator ?? ">",
+      hideStateOperator: it.hideStateOperator ?? "==", // <-- WICHTIG: Wurde auf "==" geändert
       hideStateThreshold: it.hideStateThreshold ?? 0,
       hideStateInvert: it.hideStateInvert ?? false,
 
@@ -1277,11 +1291,11 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
       hideBadgeAttribute: it.hideBadgeAttribute ?? "",
       hideBadgeMode: it.hideBadgeMode ?? "state",
       hideBadgeMatch: it.hideBadgeMatch ?? "",
-      hideBadgeOperator: it.hideBadgeOperator ?? ">",
+      hideBadgeOperator: it.hideBadgeOperator ?? "==", // <-- WICHTIG: Wurde auf "==" geändert
       hideBadgeThreshold: it.hideBadgeThreshold ?? 0,
       hideBadgeInvert: it.hideBadgeInvert ?? false,
     },
-    toPatch: identity,
+    toPatch: (identity as any), // Ersetze ggf. "identity as any" mit "identity", je nachdem was bei dir oben importiert ist.
   };
 }
 /** Group 7: when the device is drawn at all, and what a press does. */
