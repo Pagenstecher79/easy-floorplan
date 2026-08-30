@@ -3326,8 +3326,15 @@ export const SUN_REACH = 0.34;
  */
 export const SUN_REACH_REF = 30;
 /**
- * How far the falloff spreads ACROSS the beam, as a multiple of the gap's
- * width — the other half of the ellipse the light dies into.
+ * How far the falloff spreads ACROSS the beam, as a multiple of **half** the
+ * gap's width — the other half of the ellipse the light dies into.
+ *
+ * Half, because a gradient's `gradientTransform` scales its *semi*-axes: the
+ * ellipse reaches this far from the beam's middle, and the beam only has half
+ * its width to give on each side. Handed the whole width it ran nearly twice
+ * as wide as the polygon carrying it, so the outline sliced through light at
+ * about half strength all the way up both flanks — the hard diagonal edge in
+ * issue #206. Anything above 1 puts that edge back.
  *
  * The falloff is an ellipse fitted to the beam, not a circle. That is the
  * whole difference between a rounded tip and a flat one, and it took four
@@ -3337,7 +3344,7 @@ export const SUN_REACH_REF = 30;
  * window, 10% of the width. An ellipse squashed to the beam's own proportions
  * curves on the scale of its WIDTH instead, which is what reads as round.
  *
- * A shade under 1 means the light is already dimming at the gap's own edges,
+ * A shade under 1 means the light has died just inside the gap's own edges,
  * so the patch has soft flanks as well as a soft tip.
  */
 export const SUN_ACROSS = 0.95;
@@ -3742,6 +3749,10 @@ export function renderSunlight(
     const gx = gb.x - ga.x;
     const gy = gb.y - ga.y;
     const width = Math.abs(gx * dir.y - gy * dir.x) * clear(o);
+    // Half of it, because the gradient below is scaled by *semi*-axes: the
+    // ellipse reaches `across` from the beam's middle, and the beam only has
+    // half its width to give on each side (issue #206).
+    const halfWidth = width / 2;
     return {
       // The outline runs past the falloff, so the ellipse is what bounds the
       // patch and never the polygon's flat far edge.
@@ -3749,7 +3760,7 @@ export function renderSunlight(
       cx: o.x,
       cy: o.y,
       along,
-      across: Math.max(1, width * SUN_ACROSS),
+      across: Math.max(1, halfWidth * SUN_ACROSS),
       angle: (Math.atan2(dir.y, dir.x) * 180) / Math.PI,
       lightId: `${id}-b${i}`,
       shadeId: `${id}-s${i}`,
