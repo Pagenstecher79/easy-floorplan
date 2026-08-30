@@ -1283,7 +1283,7 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
       hideAttribute: it.hideAttribute ?? "",
       hideMode: it.hideMode ?? "state",
       hideState: it.hideState ?? "",
-      hideOperator: it.hideOperator ?? "==",     // <-- WICHTIG: Wurde auf "==" geändert
+      hideOperator: it.hideOperator ?? "==",    
       hideThreshold: it.hideThreshold ?? 0,
       hideInvert: it.hideInvert ?? false,
 
@@ -1292,7 +1292,7 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
       hideStateAttribute: it.hideStateAttribute ?? "",
       hideStateMode: it.hideStateMode ?? "state",
       hideStateMatch: it.hideStateMatch ?? "",
-      hideStateOperator: it.hideStateOperator ?? "==", // <-- WICHTIG: Wurde auf "==" geändert
+      hideStateOperator: it.hideStateOperator ?? "==",
       hideStateThreshold: it.hideStateThreshold ?? 0,
       hideStateInvert: it.hideStateInvert ?? false,
 
@@ -1301,11 +1301,11 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
       hideBadgeAttribute: it.hideBadgeAttribute ?? "",
       hideBadgeMode: it.hideBadgeMode ?? "state",
       hideBadgeMatch: it.hideBadgeMatch ?? "",
-      hideBadgeOperator: it.hideBadgeOperator ?? "==", // <-- WICHTIG: Wurde auf "==" geändert
+      hideBadgeOperator: it.hideBadgeOperator ?? "==", 
       hideBadgeThreshold: it.hideBadgeThreshold ?? 0,
       hideBadgeInvert: it.hideBadgeInvert ?? false,
     },
-    toPatch: (identity as any), // Ersetze ggf. "identity as any" mit "identity", je nachdem was bei dir oben importiert ist.
+    toPatch: (identity as any),
   };
 }
 /** Group 7: when the device is drawn at all, and what a press does. */

@@ -141,9 +141,9 @@ export function collectWatchedEntities(c: FloorplanCardConfig): Set<string> {
       // opening's second leaf above: miss one and that line of the label is
       // not frozen but *intermittent*, catching up only when some other
       // watched entity happens to move.
-      if ((it as any).hideEntity) ids.add((it as any).hideEntity);
-      if ((it as any).hideStateEntity) ids.add((it as any).hideStateEntity);
-      if ((it as any).hideBadgeEntity) ids.add((it as any).hideBadgeEntity);
+      if (it.hideEntity) ids.add(it.hideEntity);
+      if (it.hideStateEntity) ids.add(it.hideStateEntity);
+      if (it.hideBadgeEntity) ids.add(it.hideBadgeEntity);
       for (const r of itemReadings(it)) if (r.entity) ids.add(r.entity);
     }
     // Entity-bound furniture (issue #82) — without this the card never
@@ -1254,34 +1254,49 @@ export function itemBadgeLabel(
 // Helper to evaluate hide conditions (Thresholds or State match)
 export function checkHideCondition(
   evalState: string | number | undefined,
-  mode: string | undefined,
+  mode: string = "state",
   stateMatch: string | undefined,
-  operator: string | undefined,
+  operator: string = "==",
   threshold: number | undefined,
-  invert: boolean | undefined
+  invert: boolean = false
 ): boolean {
-  let conditionMet = false;
+  // Fail-safe: An unevaluable condition (outage or missing) never hides the device, invert or not.
+  if (evalState === undefined || evalState === "unavailable" || evalState === "unknown") {
+    return false;
+  }
 
-  if (mode === "threshold" && threshold !== undefined && evalState !== undefined) {
-    const numValue = Number(evalState);
-    if (!isNaN(numValue)) {
-      switch (operator) {
-        case "<": conditionMet = numValue < threshold; break;
-        case "<=": conditionMet = numValue <= threshold; break;
-        case "==": conditionMet = numValue === threshold; break;
-        case "!=": conditionMet = numValue !== threshold; break;
-        case ">=": conditionMet = numValue >= threshold; break;
-        case ">": conditionMet = numValue > threshold; break;
-      }
+  let isMet = false;
+
+  if (mode === "threshold") {
+    // Fail to nothing if threshold mode is selected but no threshold is provided.
+    if (threshold === undefined || threshold === null) {
+      return false;
     }
-  } else if (stateMatch !== undefined && evalState !== undefined) {
-    conditionMet = String(evalState).toLowerCase() === String(stateMatch).toLowerCase();
+    const numericState = Number(evalState);
+    if (isNaN(numericState)) return false;
+
+    switch (operator) {
+      case "<": isMet = numericState < threshold; break;
+      case "<=": isMet = numericState <= threshold; break;
+      case "==": isMet = numericState === threshold; break;
+      case "!=": isMet = numericState !== threshold; break;
+      case ">=": isMet = numericState >= threshold; break;
+      case ">": isMet = numericState > threshold; break;
+      default: isMet = numericState > threshold; break;
+    }
+  } else {
+    // State mode
+    const strState = String(evalState).toLowerCase();
+    const strMatch = String(stateMatch || "").toLowerCase();
+    
     if (operator === "!=") {
-      conditionMet = !conditionMet;
+      isMet = strState !== strMatch;
+    } else {
+      isMet = strState === strMatch;
     }
   }
 
-  return invert ? !conditionMet : conditionMet;
+  return invert ? !isMet : isMet;
 }
 
 /**
