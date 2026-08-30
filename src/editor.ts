@@ -112,6 +112,7 @@ import {
   resolveIconAnimation,
   itemIconSize,
   itemLabelSize,
+  textLabel,
   labelPositionOf,
   itemReadings,
   itemHasLabel,
@@ -4203,7 +4204,7 @@ export class FloorplanCardEditor extends LitElement {
         @pointerup=${this._onOverlayUp}
         @pointercancel=${this._onPointerCancel}
       >
-        ${t.text || "…"}
+        ${textLabel(this.hass, t) || "…"}
       </div>
     `;
   }
@@ -4617,7 +4618,7 @@ export class FloorplanCardEditor extends LitElement {
       const t = this._floor().texts.find((x) => x.id === sel.id);
       if (!t) return html`${nothing}`;
       return html`
-        ${this._renderForm(textForm(t), (patch, live) =>
+        ${this._renderForm(textForm(t, this._areaEntitiesAt(t.x, t.y)), (patch, live) =>
           this._applyElementPatch("text", t.id, patch, live)
         )}
         ${this._renderColorRow({

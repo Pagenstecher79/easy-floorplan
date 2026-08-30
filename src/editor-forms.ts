@@ -1096,19 +1096,64 @@ export function itemBehaviourForm(it: FloorItem): FormSpec {
 }
 
 
-export function textForm(t: FloorText): FormSpec {
+/**
+ * `areaScope` narrows the entity picker to the room the label sits in, exactly
+ * as it does for a device or a piece of furniture — a reading placed in the
+ * kitchen is usually a kitchen entity.
+ */
+export function textForm(t: FloorText, areaScope?: AreaEntityScope): FormSpec {
+  const fields: FormField[] = [
+    {
+      name: "text",
+      label: "Text",
+      // Required only while nothing else fills the label. A text with no words
+      // and no entity is an invisible element, which is what this guarded
+      // against; with a reading bound the words are optional, and demanding
+      // them for a label that is only ever a number would be asking for a
+      // placeholder to delete.
+      required: !t.entity,
+      helper: t.entity ? "Shown in front of the reading — leave empty for the value alone" : undefined,
+      selector: { text: {} },
+    },
+    {
+      name: "entity",
+      label: "Entity",
+      helper: areaScopeHelper(areaScope, "Shows this entity's value, formatted as HA formats it"),
+      selector: areaScopedEntity(areaScope, t.entity),
+    },
+  ];
+  // Only once there is an entity to take an attribute from.
+  if (t.entity) {
+    fields.push({
+      name: "attribute",
+      label: "Attribute",
+      helper: "Show this attribute instead of the state (e.g. current_temperature)",
+      selector: { attribute: { entity_id: t.entity } },
+    });
+  }
+  fields.push(
+    {
+      name: "size",
+      label: "Size",
+      selector: { number: { min: 8, max: 200, mode: "slider", unit_of_measurement: "px" } },
+    },
+    angleField()
+  );
   return {
-    fields: [
-      { name: "text", label: "Text", required: true, selector: { text: {} } },
-      {
-        name: "size",
-        label: "Size",
-        selector: { number: { min: 8, max: 200, mode: "slider", unit_of_measurement: "px" } },
-      },
-      angleField(),
-    ],
-    data: { text: t.text, size: t.size ?? DEFAULT_TEXT_SIZE, angle: t.angle ?? 0 },
-    toPatch: identity,
+    fields,
+    data: {
+      text: t.text,
+      entity: t.entity ?? "",
+      attribute: t.attribute ?? "",
+      size: t.size ?? DEFAULT_TEXT_SIZE,
+      angle: t.angle ?? 0,
+    },
+    toPatch: (p) => {
+      // Unbinding the entity takes the attribute with it: left behind, it would
+      // silently reapply to whatever gets bound here next.
+      if ("entity" in p && !p.entity) return { ...p, attribute: undefined };
+      return p;
+    },
   };
 }
 
