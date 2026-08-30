@@ -2096,9 +2096,16 @@ export function openingMotion(o: Opening): "swing" | "slide" | "roll" {
  * openings are drawn closed (intact glass / panels filling the gap). This
  * preserves the look of a static floor plan — a slider drawn open would read as
  * a hole rather than a door.
+ *
+ * `invert` flips this picture same as it flips a bound entity's reading
+ * ({@link resolveOpeningOpen}) — an unbound opening has no sensor to invert,
+ * but the intent is the same either way: "the opposite of what this would
+ * otherwise draw." A swing door marked `invert: true` and left unbound draws
+ * shut; an unbound window marked the same way draws open.
  */
 export function openingDefaultOpen(o: Opening): boolean {
-  return o.type === "door" && openingMotion(o) === "swing";
+  const natural = o.type === "door" && openingMotion(o) === "swing";
+  return o.invert ? !natural : natural;
 }
 
 /**

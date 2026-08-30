@@ -392,12 +392,22 @@ export function openingForm(o: Opening, featuresOf: (entityId: string) => number
   }
   // Named after what it flips — the opening's own leaf, which is a door or a
   // sash depending on what this is, the same way Leaves / Sashes above.
-  if (o.entity)
-    fields.push({
-      name: "invert",
-      label: o.type === "door" ? "Invert door animation" : "Invert window animation",
-      selector: { boolean: {} },
-    });
+  // Offered whether or not an entity is bound: with one, it flips which
+  // sensor reading counts as open; without one, it flips the type default a
+  // door or window draws with no sensor to ask (openingDefaultOpen) — so an
+  // unbound door can be drawn shut, or an unbound window drawn open.
+  fields.push({
+    name: "invert",
+    label: o.type === "door" ? "Invert door animation" : "Invert window animation",
+    helper: o.entity
+      ? undefined
+      : // Only a swing door draws open with no sensor to ask
+        // (openingDefaultOpen) — everything else, door or window, draws shut.
+        o.type === "door" && openingMotion(o) === "swing"
+        ? "No sensor bound — draws shut instead of open"
+        : "No sensor bound — draws open instead of shut",
+    selector: { boolean: {} },
+  });
   fields.push(angleField());
   // The opening's own badge (issue #154 follow-up). Offered for any bound
   // opening, but sold on the case that needs it: a raised roll-up has nothing
