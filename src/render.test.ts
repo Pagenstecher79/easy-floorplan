@@ -135,6 +135,8 @@ import {
   glowReach,
   wallsLightPassesThrough,
   openingClearFraction,
+  openingClearSpan,
+  glowClearSpan,
   glowClearFraction,
   renderGlowMask,
   renderOpening,
@@ -4454,6 +4456,72 @@ describe("glowClearFraction — glass admits a lamp's pool shut or open", () => 
   });
 });
 
+describe("openingClearSpan — where the gap is, not just how wide (#219)", () => {
+  const dbl = (extra: Partial<Opening> = {}) =>
+    ({ id: "d", type: "door", sash: "double", x: 500, y: 100, length: 100, angle: 0, ...extra }) as Opening;
+  const width = ([a, b]: [number, number]) => b - a;
+
+  it("puts a double door's gap in the half whose leaf is open", () => {
+    // The report: a sensor per leaf, one leaf open, and the light came
+    // through the middle — half of it through the leaf that was still shut.
+    expect(openingClearSpan(dbl(), 1, 0)).toEqual([0, 0.5]);
+    expect(openingClearSpan(dbl(), 0, 1)).toEqual([0.5, 1]);
+    // Ajar, each leaf clears outward from the middle as it swings.
+    expect(openingClearSpan(dbl(), 0.5, 0)).toEqual([0.25, 0.5]);
+  });
+
+  it("leaves a double door with both leaves alike exactly where it was", () => {
+    // Which is why a single-sensor double door sees no change at all: the
+    // span it produces *is* the centred one.
+    for (const a of [0.25, 0.5, 1]) {
+      const [s0, s1] = openingClearSpan(dbl(), a, a);
+      expect(s0 + s1).toBeCloseTo(1, 10); // centred
+      expect(width([s0, s1])).toBeCloseTo(a, 10);
+    }
+    expect(openingClearSpan(dbl(), 0.6)).toEqual(openingClearSpan(dbl(), 0.6, 0.6));
+  });
+
+  it("mirrors with flipH, because the leaves swap jambs with it", () => {
+    expect(openingClearSpan(dbl({ flipH: true }), 1, 0)).toEqual([0.5, 1]);
+    expect(openingClearSpan(dbl({ flipH: true }), 0, 1)).toEqual([0, 0.5]);
+  });
+
+  it("never disagrees with openingClearFraction about the amount", () => {
+    // The two answer different halves of one question, so a span that was
+    // wider or narrower than the fraction would leak light or lose it.
+    const cases: Array<[Opening, number, number | undefined]> = [
+      [dbl(), 1, 0],
+      [dbl(), 0.3, 0.9],
+      [dbl({ flipH: true }), 0.2, 1],
+      [{ id: "s", type: "door", x: 0, y: 0, length: 90, angle: 0 } as Opening, 0.4, undefined],
+      [{ id: "w", type: "window", x: 0, y: 0, length: 90, angle: 0 } as Opening, 0.7, undefined],
+      [
+        { id: "c", type: "door", motion: "slide", sliderStyle: "converging",
+          x: 0, y: 0, length: 200, angle: 0 } as Opening,
+        1, 1,
+      ],
+    ];
+    for (const [o, a1, a2] of cases) {
+      expect(width(openingClearSpan(o, a1, a2))).toBeCloseTo(openingClearFraction(o, a1, a2), 10);
+    }
+  });
+
+  it("centres everything that is not a double door, as it always did", () => {
+    const slider = { id: "s", type: "door", motion: "slide", x: 0, y: 0, length: 100, angle: 0 } as Opening;
+    expect(openingClearSpan(slider, 0.5)).toEqual([0.25, 0.75]);
+    const roll = { id: "r", type: "window", motion: "roll", x: 0, y: 0, length: 100, angle: 0 } as Opening;
+    expect(openingClearSpan(roll, 0.4)).toEqual([0.3, 0.7]);
+  });
+
+  it("glowClearSpan keeps glass and a shut shutter as whole-opening answers", () => {
+    const glass = dbl({ glazed: true });
+    expect(glowClearSpan(glass, 1, 0)).toEqual([0, 1]); // all of it, leaves irrelevant
+    expect(glowClearSpan(dbl(), 1, 0, 0)).toEqual([0, 0]); // shutter down: none of it
+    // …and defers to the placed span otherwise.
+    expect(glowClearSpan(dbl(), 1, 0)).toEqual([0, 0.5]);
+  });
+});
+
 describe("wallsLightPassesThrough (#143)", () => {
   const wall = (x1: number, y1: number, x2: number, y2: number, id = "w") => ({ id, x1, y1, x2, y2 });
   // A door centred on a horizontal wall at y=100, spanning x 480..520.
@@ -4491,6 +4559,41 @@ describe("wallsLightPassesThrough (#143)", () => {
       return 1;
     });
     expect(asked).toBe(openings.length);
+  });
+
+  it("cuts the gap where the span says, not always in the middle (#219)", () => {
+    // The end-to-end shape of the fix: a 40-wide double door centred at 500 on
+    // a horizontal wall, first leaf open. The clear half is 480..500, and that
+    // is where the wall must be cut — centring it left 490..510, so a lamp
+    // next door lit half of the leaf that was still shut.
+    const walls = [wall(0, 100, 1000, 100)];
+    const dbl = door({ sash: "double" } as Partial<Opening>);
+    expect(spans(wallsLightPassesThrough(walls, [dbl], () => 0.5))).toEqual([
+      [0, 490],
+      [510, 1000],
+    ]);
+    expect(spans(wallsLightPassesThrough(walls, [dbl], (o) => openingClearSpan(o, 1, 0)))).toEqual([
+      [0, 480],
+      [500, 1000],
+    ]);
+    expect(spans(wallsLightPassesThrough(walls, [dbl], (o) => openingClearSpan(o, 0, 1)))).toEqual([
+      [0, 500],
+      [520, 1000],
+    ]);
+  });
+
+  it("places the span against the wall's own direction, not the canvas's", () => {
+    // A wall drawn right-to-left runs backwards under the same opening, so a
+    // span read straight off would land mirrored — and only ever show up on a
+    // door with unequal leaves, which is the one case this is for.
+    const forward = [wall(0, 100, 1000, 100)];
+    const backward = [wall(1000, 100, 0, 100, "wb")];
+    const dbl = door({ sash: "double" } as Partial<Opening>);
+    const cut = (walls: ReturnType<typeof wall>[]) =>
+      spans(wallsLightPassesThrough(walls, [dbl], (o) => openingClearSpan(o, 1, 0)))
+        .map(([a, b]) => [Math.min(a, b), Math.max(a, b)])
+        .sort((p, q) => p[0]! - q[0]!);
+    expect(cut(forward)).toEqual(cut(backward));
   });
 
   it("hands back the very same array when nothing is open", () => {
