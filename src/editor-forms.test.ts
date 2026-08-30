@@ -158,10 +158,16 @@ describe("openingForm", () => {
     });
   });
 
-  it("invert only offered with an entity; the picker takes contacts, covers and locks", () => {
-    expect(openingForm(door).fields.map((x) => x.name)).not.toContain("invert");
+  it("invert is offered whether or not an entity is bound; the picker takes contacts, covers and locks", () => {
+    // Unbound, invert flips the type default (openingDefaultOpen) instead of
+    // a sensor reading — still worth offering, so it carries its own helper
+    // explaining what it does with nothing bound.
+    const unbound = openingForm(door).fields.find((x) => x.name === "invert")!;
+    expect(unbound).toBeDefined();
+    expect(unbound.helper).toContain("No sensor bound");
     const bound = openingForm({ ...door, entity: "cover.x" } as Opening);
     expect(bound.fields.map((x) => x.name)).toContain("invert");
+    expect(bound.fields.find((x) => x.name === "invert")!.helper).toBeUndefined();
     const entity = bound.fields.find((x) => x.name === "entity")!;
     // `lock` joined with issue #176 — a door with a smart lock and no contact.
     expect(entity.selector).toEqual({

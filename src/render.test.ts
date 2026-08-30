@@ -243,6 +243,19 @@ describe("openingDefaultOpen", () => {
     expect(openingDefaultOpen({ type: "door", motion: "slide" } as Opening)).toBe(false);
     expect(openingDefaultOpen({ type: "window", motion: "slide" } as Opening)).toBe(false);
   });
+
+  it("invert flips the unbound picture, same as it flips a bound reading", () => {
+    // A swing door normally draws open — inverted, and still unbound, it
+    // draws shut.
+    expect(openingDefaultOpen({ type: "door", invert: true } as Opening)).toBe(false);
+    // A window normally draws shut — inverted, and still unbound, it draws
+    // open, letting someone give an unbound window an "always open" look.
+    expect(openingDefaultOpen({ type: "window", invert: true } as Opening)).toBe(true);
+    // A slider/roll-up normally draws shut too, and inverts the same way.
+    expect(openingDefaultOpen({ type: "door", motion: "slide", invert: true } as Opening)).toBe(true);
+    // invert: false is the same as omitting it — no flip.
+    expect(openingDefaultOpen({ type: "door", invert: false } as Opening)).toBe(true);
+  });
 });
 
 describe("openingMotion", () => {
@@ -458,6 +471,11 @@ describe("resolveOpeningOpen", () => {
     expect(resolveOpeningOpen(slider, undefined)).toBe(false);
   });
 
+  it("invert flips that fallback too, for an opening with no entity at all", () => {
+    expect(resolveOpeningOpen({ type: "door", invert: true } as Opening, undefined)).toBe(false);
+    expect(resolveOpeningOpen({ type: "window", invert: true } as Opening, undefined)).toBe(true);
+  });
+
   it("a slider bound to a cover resolves like a door", () => {
     expect(resolveOpeningOpen(slider, "open")).toBe(true);
     expect(resolveOpeningOpen(slider, "closed")).toBe(false);
@@ -488,6 +506,11 @@ describe("resolveOpeningAmount", () => {
   it("uses the type default when there is no entity/state", () => {
     expect(resolveOpeningAmount({ type: "door" } as Opening, undefined)).toBe(1);
     expect(resolveOpeningAmount({ type: "door", motion: "slide" } as Opening, undefined)).toBe(0);
+  });
+
+  it("invert flips that default too, for an opening with no entity at all", () => {
+    expect(resolveOpeningAmount({ type: "door", invert: true } as Opening, undefined)).toBe(0);
+    expect(resolveOpeningAmount({ type: "window", invert: true } as Opening, undefined)).toBe(1);
   });
 
   it("fails closed (0) on a sensor outage, ignoring any stale position", () => {
