@@ -67,7 +67,7 @@ import {
   resolveOpeningAmount,
   openingIsActive,
   wallsLightPassesThrough,
-  glowClearFraction,
+  glowClearSpan,
   openingHasTwoLeaves,
   secondLeafOf,
   renderGlowMask,
@@ -2839,7 +2839,7 @@ export class FloorplanCardEditor extends LitElement {
           // Same reading as the card, second leaf included (issue #145),
           // glass admitted whole regardless of sash, and a shutter overriding
           // that — all same as the card.
-          return glowClearFraction(
+          return glowClearSpan(
             o,
             amt(o.entity),
             o.secondaryEntity && openingHasTwoLeaves(o)

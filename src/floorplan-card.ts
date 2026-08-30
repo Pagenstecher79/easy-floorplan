@@ -75,7 +75,7 @@ import {
   renderSunDimMask,
   wallsLightPassesThrough,
   openingClearFraction,
-  glowClearFraction,
+  glowClearSpan,
   polygonCentroid,
   trackerSensorReading,
   entityIsActive,
@@ -789,7 +789,7 @@ export class FloorplanCard extends LitElement {
           // of sash — a closed window is not a hole, but light still gets
           // through it. A shutter rolled down overrides that, same as it
           // does for sunlight.
-          glowClearFraction(
+          glowClearSpan(
             o,
             this._openingAmount(o),
             this._openingSecond(o)?.amount,
