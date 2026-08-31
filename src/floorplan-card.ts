@@ -1323,8 +1323,31 @@ export class FloorplanCard extends LitElement {
     .plan.scale-plan {
       container-type: inline-size;
     }
+    /*
+     * The unit itself, declared twice on purpose.
+     *
+     * The fallback in var(--fp-u, 1px) is not the safety net it looks like: it
+     * fires when the property is *unset*, never when its value fails to
+     * resolve. A browser with no container queries parses the calc quite
+     * happily -- a custom property takes almost any token stream -- and then
+     * every property using it is invalid at computed-value time, so each falls
+     * back to its own initial value. Width becomes auto, and a badge collapses
+     * to its borders: about 3px, with its label landing on top of it because
+     * the item's box collapsed with it.
+     *
+     * So the plain value is declared first, and the container-query one only
+     * where it can actually be computed. One pixel per canvas unit is exactly
+     * what overlayScale fixed draws, which is the right thing to degrade to: a
+     * plan that looks like it did before canvas units existed, rather than one
+     * with 3px badges.
+     */
     .plan.scale-plan .items {
-      --fp-u: calc(100cqw / var(--fp-plan-w));
+      --fp-u: 1px;
+    }
+    @supports (container-type: inline-size) {
+      .plan.scale-plan .items {
+        --fp-u: calc(100cqw / var(--fp-plan-w));
+      }
     }
     /* The measures that aren't config-driven, so they never reach an inline
        style. Label padding goes to em rather than canvas units because it
