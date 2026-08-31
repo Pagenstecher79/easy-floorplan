@@ -108,6 +108,28 @@ describe("FrameCoalescer", () => {
     expect(frames.depth).toBe(0);
   });
 
+  it("delivers a queued null like any other value", () => {
+    const frames = manualFrames();
+    const deliver = vi.fn();
+    const c = new FrameCoalescer<number | null>(frames.scheduler, deliver);
+
+    c.push(null);
+    expect(c.pending).toBe(true);
+    frames.tick();
+    expect(deliver).toHaveBeenCalledWith(null);
+  });
+
+  it("settles a queued null rather than treating it as nothing queued", () => {
+    const frames = manualFrames();
+    const deliver = vi.fn();
+    const c = new FrameCoalescer<number | null>(frames.scheduler, deliver);
+
+    c.push(null);
+    c.settle();
+    expect(deliver).toHaveBeenCalledWith(null);
+    expect(frames.depth).toBe(0);
+  });
+
   it("reports whether a value is waiting", () => {
     const frames = manualFrames();
     const c = new FrameCoalescer<number>(frames.scheduler, vi.fn());

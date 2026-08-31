@@ -231,6 +231,29 @@ interface Drag {
   snapshot?: FloorplanCardConfig;
   /** The redo stack as it stood before the drag's history push cleared it. */
   priorFuture?: FloorplanCardConfig[];
+  /**
+   * Set if anything emitted while this drag was live. A drag normally emits
+   * nothing until it is released, which is what lets cancel restore the
+   * pre-drag config locally; if something did emit, the host has moved on and
+   * has to be told to go back.
+   */
+  emitted?: boolean;
+}
+
+/**
+ * One drag move, already resolved to canvas coordinates.
+ *
+ * Resolved where the event arrives rather than where it is applied: a pointer
+ * event carries screen coordinates, and turning those into canvas coordinates
+ * needs the SVG's CTM, which is live — scrolling the canvas (a plain wheel
+ * does exactly that) or zooming changes it. Transforming a frame later would
+ * read the *new* CTM against the *old* pointer position and place the element
+ * off by the scroll delta.
+ */
+interface DragMove {
+  x: number;
+  y: number;
+  altKey: boolean;
 }
 
 type Marquee = Rect;
@@ -379,8 +402,8 @@ export class FloorplanCardEditor extends LitElement {
    * frame cannot finish, so the element falls further behind the longer the
    * drag lasts.
    */
-  private _dragMoves = new FrameCoalescer<PointerEvent>(rafScheduler, (ev) => {
-    if (this._drag) this._applyDrag(ev);
+  private _dragMoves = new FrameCoalescer<DragMove>(rafScheduler, (move) => {
+    if (this._drag) this._applyDrag(move);
   });
   /** A drag changed the config and the host has not been told yet. */
   private _dragDirty = false;
@@ -443,6 +466,20 @@ export class FloorplanCardEditor extends LitElement {
     this.removeEventListener("keydown", this._onHostKeyDown);
     window.removeEventListener("focusin", this._onFocusIn);
     if (this._applyResetTimer !== null) clearTimeout(this._applyResetTimer);
+    // HA's dialog reparents the editor, so this can land mid-drag. Removal
+    // takes the pointer capture with it, so the gesture is over either way:
+    // hand the host what the drag accumulated (_config is otherwise its only
+    // copy of the edit, and a save sees only what config-changed delivered),
+    // then end the gesture. Dropping the queued move rather than settling it
+    // commits the position the canvas last actually drew — settling would be
+    // safe too, now that a queued move carries no DOM dependency, but it would
+    // commit a position that was never rendered. Clearing _gesturePointer is
+    // not optional: it gates every new gesture, and the pointer it belongs to
+    // can no longer report.
+    this._dragMoves.cancel();
+    this._flushDrag();
+    this._drag = null;
+    this._gesturePointer = null;
     this._resetPinch();
     super.disconnectedCallback();
   }
@@ -836,6 +873,7 @@ export class FloorplanCardEditor extends LitElement {
   private _lastEmitted?: FloorplanCardConfig;
 
   private _emit(config: FloorplanCardConfig): void {
+    if (this._drag) this._drag.emitted = true;
     this._config = config;
     // Recompute here, not just in setConfig: real HA deep-equal-skips the
     // setConfig echo of our own emission, so entities bound during the
@@ -1212,7 +1250,16 @@ export class FloorplanCardEditor extends LitElement {
     this._drag = null;
     if (drag?.moved && drag.snapshot) {
       this._history = this._history.filter((c) => c !== drag.snapshot);
-      this._emit(drag.snapshot);
+      if (drag.emitted) {
+        this._emit(drag.snapshot);
+      } else {
+        // Nothing emitted while the drag was live, so the host still holds
+        // exactly this config: restore locally and spare it a full re-render.
+        // _lastEmitted stays as it is — it still describes the last thing
+        // actually emitted.
+        this._config = drag.snapshot;
+        this._watchedEntities = collectWatchedEntities(drag.snapshot);
+      }
       // The push at first movement cleared the redo stack; a canceled drag
       // must be a complete no-op, so put it back.
       this._future = drag.priorFuture ?? [];
@@ -1263,7 +1310,7 @@ export class FloorplanCardEditor extends LitElement {
       this._marquee = { ...this._marquee, x1: raw.x, y1: raw.y };
       return;
     }
-    if (this._drag) this._dragMoves.push(ev);
+    if (this._drag) this._dragMoves.push({ ...this._toVirtual(ev, false), altKey: ev.altKey });
   }
 
   private _onCanvasUp(ev: PointerEvent): void {
@@ -1413,9 +1460,8 @@ export class FloorplanCardEditor extends LitElement {
     return m;
   }
 
-  private _applyDrag(ev: PointerEvent): void {
+  private _applyDrag(p: DragMove): void {
     const drag = this._drag!;
-    const p = this._toVirtual(ev, false);
     // First *effective* movement: snapshot for undo now, not at pointerdown,
     // so a plain selection click — including the ~1px jitter real clicks and
     // taps produce — doesn't spam history or wipe the redo stack. Threshold
@@ -1433,7 +1479,7 @@ export class FloorplanCardEditor extends LitElement {
     // corners of other walls travel along (Alt detaches), so dragging a room
     // corner stretches the room (issue #30).
     if (drag.endpoint) {
-      const attach = ev.altKey ? [] : (drag.attached ?? []);
+      const attach = p.altKey ? [] : (drag.attached ?? []);
       // The moving cluster must not be a snap candidate for itself — the
       // dragged corner would stick to its own last emitted position.
       const moving = new Set<string>([
@@ -1509,7 +1555,7 @@ export class FloorplanCardEditor extends LitElement {
     // Whole-wall drag: shared corners of neighboring walls follow (issue #30),
     // unless Alt detaches or the neighbor is itself part of the selection
     // (then it already translated with the group).
-    if (drag.attached?.length && !ev.altKey) {
+    if (drag.attached?.length && !p.altKey) {
       const walls = (patch.walls ?? f.walls).map((w) => {
         let out = w;
         for (const a of drag.attached!) {
@@ -1557,7 +1603,7 @@ export class FloorplanCardEditor extends LitElement {
       this._cancelGesture();
       return;
     }
-    if (this._drag) this._dragMoves.push(ev);
+    if (this._drag) this._dragMoves.push({ ...this._toVirtual(ev, false), altKey: ev.altKey });
   }
 
   private _onOverlayUp(ev: PointerEvent): void {

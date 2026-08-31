@@ -23,6 +23,12 @@ export const rafScheduler: FrameScheduler = {
 
 export class FrameCoalescer<T> {
   private _pending: T | null = null;
+  /**
+   * Whether `_pending` holds a value. A separate flag rather than a `null`
+   * check: `T` may itself include `null`, and a queued `null` has to be
+   * delivered like any other value instead of being read as "nothing queued".
+   */
+  private _hasPending = false;
   private _handle: number | null = null;
 
   constructor(
@@ -30,20 +36,19 @@ export class FrameCoalescer<T> {
     private readonly deliver: (value: T) => void,
   ) {}
 
-  /** True while a value is waiting for its frame. */
+  /** True while a value is queued for delivery. */
   get pending(): boolean {
-    return this._handle !== null;
+    return this._hasPending;
   }
 
   /** Queue a value, replacing any still waiting for this frame. */
   push(value: T): void {
     this._pending = value;
+    this._hasPending = true;
     if (this._handle !== null) return;
     this._handle = this.frames.request(() => {
       this._handle = null;
-      const value = this._pending;
-      this._pending = null;
-      if (value !== null) this.deliver(value);
+      this._deliverPending();
     });
   }
 
@@ -53,21 +58,28 @@ export class FrameCoalescer<T> {
    * whatever the previous frame happened to catch.
    */
   settle(): void {
-    if (this._handle !== null) {
-      this.frames.cancel(this._handle);
-      this._handle = null;
-    }
-    const value = this._pending;
-    this._pending = null;
-    if (value !== null) this.deliver(value);
+    this._cancelFrame();
+    this._deliverPending();
   }
 
   /** Drop anything queued without delivering it (the gesture was canceled). */
   cancel(): void {
-    if (this._handle !== null) {
-      this.frames.cancel(this._handle);
-      this._handle = null;
-    }
+    this._cancelFrame();
     this._pending = null;
+    this._hasPending = false;
+  }
+
+  private _cancelFrame(): void {
+    if (this._handle === null) return;
+    this.frames.cancel(this._handle);
+    this._handle = null;
+  }
+
+  private _deliverPending(): void {
+    if (!this._hasPending) return;
+    const value = this._pending as T;
+    this._pending = null;
+    this._hasPending = false;
+    this.deliver(value);
   }
 }
