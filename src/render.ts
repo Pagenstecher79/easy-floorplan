@@ -1417,6 +1417,17 @@ const DOMAIN_STATE_ICONS: Record<string, { on: string; off: string }> = {
 };
 
 /**
+ * Two media_player states differ from its plain on/off pair above (issue
+ * #206 follow-up): "paused" is on but not mid-playback, and "idle" is on
+ * with nothing loaded at all. mdi:television-play used to claim both, which
+ * reads as "playing" for a device doing neither.
+ */
+const MEDIA_PLAYER_STATE_ICONS: Record<string, string> = {
+  paused: "mdi:television-pause",
+  idle: "mdi:television",
+};
+
+/**
  * A climate entity's icon per HVAC mode (issue #206) — its state carries the
  * mode directly, unlike the on/off domains {@link DOMAIN_STATE_ICONS} covers,
  * so a single on/off pair cannot say "cool" from "heat". Every mode HA's own
@@ -1673,12 +1684,15 @@ export function entityDefaultIcon(
   if (domain === "climate")
     return CLIMATE_MODE_ICONS[state ?? ""] ?? (on ? "mdi:thermostat" : "mdi:power");
   if (domain === "weather") return WEATHER_CONDITION_ICONS[state ?? ""] ?? "mdi:weather-cloudy";
-  // A paused player is still "on" by entityIsActive's own rule (issue #206
-  // follow-up) — it stays lit, correctly — but the play glyph that fact
-  // shares with "playing" reads as a stall nobody noticed, not what
-  // actually happened. One state differs from the domain's on/off pair, so
-  // one override rather than a whole table for it.
-  if (domain === "media_player" && state === "paused") return "mdi:television-pause";
+  // paused and idle are both "on" by entityIsActive's own rule (issue #206
+  // follow-up) — correctly so — but the play glyph the on/off pair below
+  // would give both reads as "playing" for a device doing neither. Checked
+  // ahead of that pair; every other active state (playing, buffering, the
+  // literal "on") still falls through to it.
+  if (domain === "media_player" && state) {
+    const stateIcon = MEDIA_PLAYER_STATE_ICONS[state];
+    if (stateIcon) return stateIcon;
+  }
   // These domains carry their meaning in the domain, not a device class, so the
   // device-class guard below would skip them entirely.
   const byDomain = DOMAIN_STATE_ICONS[domain];

@@ -553,12 +553,14 @@ describe("entityDefaultIcon for domains without a device class", () => {
     expect(entityDefaultIcon("media_player.tv", undefined, true, "paused")).toBe(
       "mdi:television-pause",
     );
-    // Every other active state keeps the plain play glyph — only "paused"
-    // gets its own.
+    // "idle" is on with nothing loaded at all — its own glyph too, not
+    // "playing" and not "paused".
+    expect(entityDefaultIcon("media_player.tv", undefined, true, "idle")).toBe("mdi:television");
+    // Every other active state keeps the plain play glyph.
     expect(entityDefaultIcon("media_player.tv", undefined, true, "playing")).toBe(
       "mdi:television-play",
     );
-    expect(entityDefaultIcon("media_player.tv", undefined, true, "idle")).toBe(
+    expect(entityDefaultIcon("media_player.tv", undefined, true, "buffering")).toBe(
       "mdi:television-play",
     );
   });
