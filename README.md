@@ -1069,6 +1069,13 @@ apart when the card resizes" — though the better answer is often to have no cl
 all: put the readings on **one** device with [`readings`](#more-readings-per-device) and
 there is no relative position left to preserve.)
 
+> **"It looks right on my computer and wrong on my phone."** Same plan, same config —
+> a phone just gives the card less width. Under `fixed` the badges stay 34px and the text
+> stays 12px while everything they were spaced against halves, so a badge ends up sitting
+> on the label or the free text beside it, and it reads as a label that has moved. Nothing
+> has moved: the gaps shrank and the badges did not. `overlayScale: plan` is the answer —
+> it is what a plan drawn once and shown at two sizes wants. (Issue #217.)
+
 Reach for `fixed` when the card renders **larger** than its canvas, or on a wall tablet
 where a px floor under the text is what keeps it readable from across the room.
 
