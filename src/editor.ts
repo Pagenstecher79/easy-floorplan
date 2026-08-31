@@ -1307,6 +1307,7 @@ export class FloorplanCardEditor extends LitElement {
       itemSize: DEFAULT_ITEM_SIZE,
       textSize: DEFAULT_TEXT_SIZE,
       wallThickness: WALL_THICKNESS,
+      hass: this.hass,
     });
     const sameSpot =
       !!this._pickAnchor &&
