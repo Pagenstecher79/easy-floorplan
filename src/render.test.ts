@@ -142,6 +142,8 @@ import {
   renderOpening,
   renderGlow,
   renderRipple,
+  checkHideCondition,
+  itemBadgeHidden,
 } from "./render";
 import type { FloorplanCardConfig, Opening, RenderHass } from "./types";
 import { symbolCatalog, symbolSize } from "./symbols";
@@ -5387,5 +5389,226 @@ describe("stairs that change floor (issue #121)", () => {
     expect(furnitureFloorTarget(stairs("up"), two, "g")).toBe("up");
     expect(furnitureFloorTarget(stairs("down"), two, "up")).toBe("g");
     expect(furnitureFloorTarget(stairs("down"), two, "g")).toBeUndefined();
+  });
+});
+describe("hide by condition (checkHideCondition)", () => {
+  // Signature: (evalState, mode, stateMatch, operator, threshold, invert)
+
+  describe("threshold mode", () => {
+    it("hides when the comparison holds", () => {
+      expect(checkHideCondition("25", "threshold", undefined, ">", 20, false)).toBe(true);
+    });
+
+    it("leaves the item alone when it does not", () => {
+      expect(checkHideCondition("15", "threshold", undefined, ">", 20, false)).toBe(false);
+    });
+
+    it("honours every operator the editor offers", () => {
+      const at = (op: string) => checkHideCondition("20", "threshold", undefined, op, 20, false);
+      expect([at("<"), at("<="), at("=="), at("!="), at(">="), at(">")])
+        .toEqual([false, true, true, false, true, false]);
+    });
+
+    it("inverts the result when asked", () => {
+      expect(checkHideCondition("25", "threshold", undefined, ">", 20, true)).toBe(false);
+    });
+
+    // Fail-to-nothing guards. Each of these used to hide, or fall through to
+    // state matching against an unrelated value.
+    it("does nothing when no threshold is configured", () => {
+      expect(checkHideCondition("25", "threshold", undefined, ">", undefined, false)).toBe(false);
+    });
+
+    it("does not invert a missing threshold into a hide", () => {
+      expect(checkHideCondition("25", "threshold", undefined, ">", undefined, true)).toBe(false);
+    });
+
+    it("does nothing for a non-numeric state", () => {
+      expect(checkHideCondition("heating", "threshold", undefined, ">", 20, false)).toBe(false);
+      expect(checkHideCondition("unavailable", "threshold", undefined, "<", 31, false)).toBe(false);
+    });
+
+    it("does not guess at an operator it was never given", () => {
+      // An editor that grows a new operator must teach this switch about it
+      // rather than silently hiding devices as though it meant ">".
+      expect(checkHideCondition("25", "threshold", undefined, "≥", 20, false)).toBe(false);
+    });
+  });
+
+  describe("state mode", () => {
+    it("matches case-insensitively", () => {
+      expect(checkHideCondition("Playing", "state", "playing", "==", undefined, false)).toBe(true);
+    });
+
+    it("matches the same way matchStateRule does, whitespace and all", () => {
+      // A hide rule and a colour rule must agree about " on " (render.ts:302).
+      expect(checkHideCondition(" on ", "state", "on", "==", undefined, false)).toBe(true);
+      expect(checkHideCondition("on", "state", " ON ", "==", undefined, false)).toBe(true);
+    });
+
+    it("supports !=", () => {
+      expect(checkHideCondition("idle", "state", "heating", "!=", undefined, false)).toBe(true);
+      expect(checkHideCondition("heating", "state", "heating", "!=", undefined, false)).toBe(false);
+    });
+
+    it("does nothing when no match string is configured", () => {
+      // The editor seeds these fields with "". Without this guard, picking
+      // "!=" before typing a match hides the device, because every state
+      // differs from the empty string.
+      expect(checkHideCondition("on", "state", "", "!=", undefined, false)).toBe(false);
+      expect(checkHideCondition("on", "state", undefined, "!=", undefined, false)).toBe(false);
+      expect(checkHideCondition("on", "state", "   ", "==", undefined, false)).toBe(false);
+    });
+
+    it("does not invert a missing match into a hide", () => {
+      expect(checkHideCondition("on", "state", "", "!=", undefined, true)).toBe(false);
+    });
+  });
+
+  describe("a sensor that does not answer", () => {
+    it("hides when the outage is what was asked for", () => {
+      // "Hide the badge while this sensor is dead" is a real rule, and the
+      // one the feature's own screenshots demonstrate.
+      expect(checkHideCondition("unavailable", "state", "unavailable", "==", undefined, false)).toBe(true);
+      expect(checkHideCondition("unknown", "state", "unknown", "==", undefined, false)).toBe(true);
+    });
+
+    it("leaves the item on the plan when the outage was not asked for", () => {
+      // "Hide unless the sensor says heating" must not become "hide" the day
+      // that sensor is renamed — the device would vanish with nothing on
+      // screen to explain it.
+      expect(checkHideCondition("unavailable", "state", "heating", "==", undefined, false)).toBe(false);
+      expect(checkHideCondition("unknown", "state", "heating", "!=", undefined, false)).toBe(false);
+    });
+
+    it("does not let invert turn an outage into a hide", () => {
+      expect(checkHideCondition("unavailable", "state", "heating", "==", undefined, true)).toBe(false);
+      expect(checkHideCondition("unavailable", "threshold", undefined, "<", 31, true)).toBe(false);
+    });
+
+    it("treats a missing or empty value as no answer at all", () => {
+      expect(checkHideCondition(undefined, "state", "on", "==", undefined, false)).toBe(false);
+      expect(checkHideCondition(undefined, "state", "on", "==", undefined, true)).toBe(false);
+      expect(checkHideCondition("", "state", "on", "==", undefined, false)).toBe(false);
+    });
+  });
+});
+
+describe("hide by condition, through the card's own entry points", () => {
+  const OUTSIDE = "sensor.outside_temperature";
+  const RADIATOR = "climate.radiator";
+
+  const hass = (states: Record<string, { state: string; attributes?: object }>) =>
+    ({
+      states: Object.fromEntries(
+        Object.entries(states).map(([id, v]) => [
+          id,
+          { entity_id: id, state: v.state, attributes: v.attributes ?? {} },
+        ]),
+      ),
+      formatEntityState: (s: { state: string }) => s.state,
+    }) as unknown as RenderHass;
+
+  it("hides the whole device on a threshold against another entity", () => {
+    const h = hass({ [OUTSIDE]: { state: "25" }, [RADIATOR]: { state: "idle" } });
+    const item = {
+      entity: RADIATOR,
+      enableHideByEntity: true,
+      hideEntity: OUTSIDE,
+      hideMode: "threshold",
+      hideOperator: "<=",
+      hideThreshold: 31,
+    } as const;
+    expect(itemHiddenWhenInactive(item, "idle", h)).toBe(true);
+    expect(itemHiddenWhenInactive({ ...item, hideThreshold: 10 }, "idle", h)).toBe(false);
+  });
+
+  it("reads hideAttribute rather than the state when one is named", () => {
+    const h = hass({ [OUTSIDE]: { state: "25", attributes: { humidity: 80 } } });
+    expect(
+      itemHiddenWhenInactive(
+        {
+          entity: OUTSIDE,
+          enableHideByEntity: true,
+          hideAttribute: "humidity",
+          hideMode: "threshold",
+          hideOperator: ">=",
+          hideThreshold: 50,
+        },
+        "25",
+        h,
+      ),
+    ).toBe(true);
+  });
+
+  it("hides the badge without touching the device", () => {
+    const h = hass({ [OUTSIDE]: { state: "25" }, [RADIATOR]: { state: "idle" } });
+    const item = {
+      entity: RADIATOR,
+      enableHideBadgeByEntity: true,
+      hideBadgeEntity: OUTSIDE,
+      hideBadgeMode: "threshold",
+      hideBadgeOperator: "<=",
+      hideBadgeThreshold: 31,
+    } as const;
+    expect(itemBadgeHidden(item, "idle", h)).toBe(true);
+    // The gate is what turns it on: same config, flag off, badge stays.
+    expect(itemBadgeHidden({ ...item, enableHideBadgeByEntity: false }, "idle", h)).toBe(false);
+    // …and it says nothing about the device itself.
+    expect(itemHiddenWhenInactive(item, "idle", h)).toBe(false);
+  });
+
+  it("hides the badge of a sensor that has gone unavailable", () => {
+    const h = hass({ [OUTSIDE]: { state: "unavailable" } });
+    expect(
+      itemBadgeHidden(
+        {
+          entity: OUTSIDE,
+          enableHideBadgeByEntity: true,
+          hideBadgeMode: "state",
+          hideBadgeMatch: "unavailable",
+          hideBadgeOperator: "==",
+        },
+        "unavailable",
+        h,
+      ),
+    ).toBe(true);
+  });
+
+  it("drops the state text while keeping the name", () => {
+    const h = hass({ [RADIATOR]: { state: "idle" } });
+    const item = {
+      entity: RADIATOR,
+      name: "Radiator",
+      showName: true,
+      showState: true,
+      enableHideStateByEntity: true,
+      hideStateMode: "state",
+      hideStateMatch: "idle",
+      hideStateOperator: "==",
+    } as const;
+    expect(itemBadgeLabel(h, item)).toBe("Radiator");
+    expect(itemBadgeLabel(h, { ...item, hideStateMatch: "heating" })).toBe("Radiator · idle");
+  });
+
+  it("leaves the legacy hideWhenInactive path alone", () => {
+    const h = hass({ "light.kitchen": { state: "on" } });
+    expect(itemHiddenWhenInactive({ entity: "light.kitchen", hideWhenInactive: true }, "on", h)).toBe(false);
+    expect(itemHiddenWhenInactive({ entity: "light.kitchen", hideWhenInactive: true }, "off", h)).toBe(true);
+  });
+
+  it("watches every entity a hide rule names (issue #82)", () => {
+    const ids = collectWatchedEntities({
+      items: [
+        {
+          id: "a",
+          entity: RADIATOR,
+          hideEntity: OUTSIDE,
+          hideStateEntity: "sensor.a",
+          hideBadgeEntity: "sensor.b",
+        },
+      ],
+    } as unknown as FloorplanCardConfig);
+    for (const id of [RADIATOR, OUTSIDE, "sensor.a", "sensor.b"]) expect(ids.has(id)).toBe(true);
   });
 });

@@ -90,6 +90,7 @@ import {
   offlineStyleOf,
   itemIsOffline,
   itemHiddenWhenInactive,
+  itemBadgeHidden,
   itemLabelSize,
   areaLabelFontSize,
   wallStrokeStyle,
@@ -601,8 +602,12 @@ export class FloorplanCard extends LitElement {
     // arrive every device would answer "offline" and the plan would flash
     // grey on load.
     const offline = !!this.hass && itemIsOffline(item, st?.state);
+
+    // Hide badge by state or operator (preserve layout space via CSS visibility)
+    const isBadgeHidden = itemBadgeHidden(item, st?.state, this.hass);
     // "none" is the old `showIcon: false` — no badge, label only (issue #106).
     const showIcon = badgeContentOf(item) !== "none";
+
     const display = item.display ?? "badge";
     // Per-device active color (issue #79). Ripples follow it too, so a device
     // given one color does not come out yellow-badged with a blue ring.
@@ -622,16 +627,23 @@ export class FloorplanCard extends LitElement {
     const badgeInk = contrastText(stateColor ?? activeColor);
     const rippleSize = item.rippleSize ?? DEFAULT_RIPPLE_SIZE;
 
+    // Apply visibility hidden to keep the layout space intact for the label
+    const hiddenStyle = isBadgeHidden ? "visibility: hidden; pointer-events: none;" : "";
+
     let visual: TemplateResult | typeof nothing = nothing;
     if (display === "ripple") {
-      visual = renderRipple(on, rippleColor, rippleSize, 3, scale);
+      visual = html`<span style="${hiddenStyle}">
+        ${renderRipple(on, rippleColor, rippleSize, 3, scale)}
+      </span>`;
     } else if (display === "iconRipple") {
-      visual = html`<div class="stack">
+      visual = html`<div class="stack" style="${hiddenStyle}">
         ${renderRipple(on, rippleColor, rippleSize, 3, scale)}
         ${showIcon ? html`<div class="stack-icon">${this._renderBadge(item, scale)}</div>` : nothing}
       </div>`;
     } else if (showIcon) {
-      visual = this._renderBadge(item, scale);
+      visual = html`<span style="${hiddenStyle}">
+        ${this._renderBadge(item, scale)}
+      </span>`;
     }
 
     // Rotated frame: the overlay is HTML, so each anchor is remapped instead
