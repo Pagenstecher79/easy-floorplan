@@ -5604,11 +5604,17 @@ export class FloorplanCardEditor extends LitElement {
      * what overlayScale fixed draws, which is the right thing to degrade to: a
      * plan that looks like it did before canvas units existed, rather than one
      * with 3px badges.
+     *
+     * The guard tests the unit as well as the property, because they are two
+     * features and only one of them is what the declaration is made of. A
+     * browser with container-type but no cqw would pass a check for the
+     * property and then fail on the value, which is the exact collapse this is
+     * here to stop. Test what is actually used; it costs one more clause.
      */
     .stage.scale-plan .items {
       --fp-u: 1px;
     }
-    @supports (container-type: inline-size) {
+    @supports (container-type: inline-size) and (width: 1cqw) {
       .stage.scale-plan .items {
         --fp-u: calc(100cqw / var(--fp-plan-w));
       }
