@@ -1135,12 +1135,12 @@ export function itemHiddenWhenInactive(
   // Advanced hiding logic
   if (item.enableHideByEntity) {
     const targetEntity = item.hideEntity || item.entity;
-    
+
     // Read state or specific attribute (fixes ignored hideAttribute)
     let evalState: string | number | undefined = state;
     if (targetEntity && hass && hass.states[targetEntity]) {
-      evalState = item.hideAttribute 
-        ? hass.states[targetEntity].attributes[item.hideAttribute] 
+      evalState = item.hideAttribute
+        ? hass.states[targetEntity].attributes[item.hideAttribute]
         : hass.states[targetEntity].state;
     }
 
@@ -1172,8 +1172,8 @@ export function itemBadgeHidden(
   if (hass) {
     const evalEntity = item.hideBadgeEntity || item.entity;
     if (evalEntity && hass.states[evalEntity]) {
-      evalState = item.hideBadgeAttribute && hass.states[evalEntity].attributes 
-        ? String(hass.states[evalEntity].attributes[item.hideBadgeAttribute]) 
+      evalState = item.hideBadgeAttribute && hass.states[evalEntity].attributes
+        ? String(hass.states[evalEntity].attributes[item.hideBadgeAttribute])
         : hass.states[evalEntity].state;
     }
   }
@@ -1215,13 +1215,13 @@ export function itemBadgeLabel(
   if (item.enableHideStateByEntity && hass) {
     const evalEntity = item.hideStateEntity || item.entity;
     let evalValue: string | number | undefined;
-    
+
     if (evalEntity && hass.states[evalEntity]) {
-      evalValue = item.hideStateAttribute && hass.states[evalEntity].attributes 
-        ? hass.states[evalEntity].attributes[item.hideStateAttribute] 
+      evalValue = item.hideStateAttribute && hass.states[evalEntity].attributes
+        ? hass.states[evalEntity].attributes[item.hideStateAttribute]
         : hass.states[evalEntity].state;
     }
-    
+
     hideStateText = checkHideCondition(
       evalValue,
       item.hideStateMode,
@@ -1235,14 +1235,14 @@ export function itemBadgeLabel(
   // Add primary state only if showState is active and condition is NOT met
   if (!!item.entity && (item.showState ?? item.kind === "sensor") && !hideStateText) {
     // Assuming itemStateText accepts Partial<FloorItem> or is cast correctly
-    parts.push(itemStateText(hass, item as FloorItem)); 
+    parts.push(itemStateText(hass, item as FloorItem));
   }
 
   // Add additional readings ONLY if the hide condition does NOT apply
   if (!hideStateText) {
     for (const reading of itemReadings(item as FloorItem)) {
       if (reading.showState === false) continue;
-      
+
       const text = itemReadingText(hass, item as FloorItem, reading);
       if (text) parts.push(text);
     }
@@ -1251,7 +1251,31 @@ export function itemBadgeLabel(
   return parts.join(" · ");
 }
 
-// Helper to evaluate hide conditions (Thresholds or State match)
+/**
+ * States that mean "the sensor did not answer" rather than a value. A hide
+ * rule has to treat these differently from a real reading — see
+ * `checkHideCondition`.
+ */
+const HIDE_OUTAGE_STATES = new Set(["unavailable", "unknown"]);
+
+/**
+ * Whether a hide condition — threshold or state match — is currently met.
+ * Shared by the whole-item, badge and state-text variants so a fix lands once
+ * instead of three times.
+ *
+ * The rule everywhere here is that an *unevaluable* condition never hides. A
+ * device disappearing is the one outcome a user cannot debug from the plan:
+ * there is nothing left on screen to point at. So a missing value, a missing
+ * threshold, an operator the editor never offered, or a sensor that dropped
+ * out all leave the device visible — and `invert` does not get to flip that,
+ * because it is not a "no" to be negated, it is the absence of an answer.
+ *
+ * The one exception is an outage the user *named*. "Hide the badge while the
+ * sensor is unavailable" is a real rule people write, so a `stateMatch` of
+ * `unavailable`/`unknown` is honoured. Only an unnamed outage is ignored,
+ * which keeps "hide unless the sensor says X" from quietly deleting the
+ * device the day that sensor is renamed.
+ */
 export function checkHideCondition(
   evalState: string | number | undefined,
   mode: string = "state",
@@ -1260,20 +1284,20 @@ export function checkHideCondition(
   threshold: number | undefined,
   invert: boolean = false
 ): boolean {
-  // Fail-safe: An unevaluable condition (outage or missing) never hides the device, invert or not.
-  if (evalState === undefined || evalState === "unavailable" || evalState === "unknown") {
-    return false;
-  }
+  // `== null` on purpose: an attribute read straight off hass can be null as
+  // easily as undefined, and neither is something to compare against.
+  if (evalState == null || evalState === "") return false;
 
   let isMet = false;
 
   if (mode === "threshold") {
-    // Fail to nothing if threshold mode is selected but no threshold is provided.
-    if (threshold === undefined || threshold === null) {
-      return false;
-    }
+    // No threshold, no rule — fail to nothing rather than fall through to
+    // state matching, which would compare against something unrelated.
+    if (threshold === undefined || threshold === null) return false;
+    // Number() covers the outage states too: they are not numbers, so a
+    // threshold rule on a dead sensor simply does not fire.
     const numericState = Number(evalState);
-    if (isNaN(numericState)) return false;
+    if (!Number.isFinite(numericState)) return false;
 
     switch (operator) {
       case "<": isMet = numericState < threshold; break;
@@ -1282,18 +1306,27 @@ export function checkHideCondition(
       case "!=": isMet = numericState !== threshold; break;
       case ">=": isMet = numericState >= threshold; break;
       case ">": isMet = numericState > threshold; break;
-      default: isMet = numericState > threshold; break;
+      // Not an operator the editor offers. Guessing one would hide devices
+      // for a reason the config does not state.
+      default: return false;
     }
   } else {
-    // State mode
-    const strState = String(evalState).toLowerCase();
-    const strMatch = String(stateMatch || "").toLowerCase();
-    
-    if (operator === "!=") {
-      isMet = strState !== strMatch;
-    } else {
-      isMet = strState === strMatch;
+    // State mode. Nothing to match against is nothing to act on — without
+    // this, flipping the operator to "!=" before typing a match hides the
+    // device, since every state differs from "".
+    if (stateMatch == null || String(stateMatch).trim() === "") return false;
+
+    // Same normalisation as matchStateRule (trim, then lowercase), so a hide
+    // rule and a colour rule agree about a state with stray whitespace.
+    const strState = String(evalState).trim().toLowerCase();
+    const strMatch = String(stateMatch).trim().toLowerCase();
+
+    // An outage counts only when it is what the user asked for.
+    if (HIDE_OUTAGE_STATES.has(strState) && !HIDE_OUTAGE_STATES.has(strMatch)) {
+      return false;
     }
+
+    isMet = operator === "!=" ? strState !== strMatch : strState === strMatch;
   }
 
   return invert ? !isMet : isMet;

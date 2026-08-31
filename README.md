@@ -1377,6 +1377,12 @@ This is available for the **whole item** (`hide...`), the **badge** (`hideBadge.
 | `hideThreshold` | `number` | The numeric value to compare against when using `hideMode: "threshold"`. |
 | `hideInvert` | `boolean` | If `true`, inverts the final result of the condition. |
 
+The badge and state-text variants take the same eight keys with a `hideBadge` /
+`hideState` prefix — `enableHideBadgeByEntity`, `hideBadgeEntity`, `hideBadgeAttribute`,
+`hideBadgeMode`, `hideBadgeMatch`, `hideBadgeOperator`, `hideBadgeThreshold`,
+`hideBadgeInvert`, and likewise for `hideState...`. (The whole-item key is `hideState`;
+the state-text one is `hideStateMatch`.)
+
 **Example:** Hide a badge if the temperature of another sensor drops below 20:
 ```yaml
 enableHideBadgeByEntity: true
@@ -1385,6 +1391,13 @@ hideBadgeMode: threshold
 hideBadgeOperator: "<"
 hideBadgeThreshold: 20
 ```
+
+**When the sensor doesn't answer.** A condition that can't be evaluated never hides —
+a device that vanishes is the one thing you can't debug from the plan. A missing value,
+a missing threshold, or a sensor gone `unavailable` under a numeric threshold all leave
+the item on screen, and `hideInvert` doesn't flip that. The exception is an outage you
+asked for by name: `hideMode: state` with `hideState: unavailable` does hide, so
+"hide the badge while this sensor is dead" works as written.
 
 ## Compact header
 

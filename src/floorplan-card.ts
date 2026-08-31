@@ -602,12 +602,12 @@ export class FloorplanCard extends LitElement {
     // arrive every device would answer "offline" and the plan would flash
     // grey on load.
     const offline = !!this.hass && itemIsOffline(item, st?.state);
-    
+
     // Hide badge by state or operator (preserve layout space via CSS visibility)
     const isBadgeHidden = itemBadgeHidden(item, st?.state, this.hass);
     // "none" is the old `showIcon: false` — no badge, label only (issue #106).
     const showIcon = badgeContentOf(item) !== "none";
-    
+
     const display = item.display ?? "badge";
     // Per-device active color (issue #79). Ripples follow it too, so a device
     // given one color does not come out yellow-badged with a blue ring.

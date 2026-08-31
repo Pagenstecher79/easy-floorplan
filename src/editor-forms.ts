@@ -1072,10 +1072,10 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
     },
   ];
 
-  // 1. Gesamtes Objekt verstecken
+  // 1. Hide the whole device.
   if (it.enableHideByEntity) {
     const evalEntity = it.hideEntity || it.entity;
-    
+
     fields.push(
       {
         name: "hideEntity",
@@ -1097,13 +1097,13 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
       {
         name: "hideOperator",
         label: "Operator",
-        selector: { 
-          select: { 
-            mode: "dropdown", 
+        selector: {
+          select: {
+            mode: "dropdown",
             options: it.hideMode === "threshold"
               ? [{ value: "<", label: "<" }, { value: "<=", label: "<=" }, { value: "==", label: "==" }, { value: "!=", label: "!=" }, { value: ">=", label: ">=" }, { value: ">", label: ">" }]
               : [{ value: "==", label: "==" }, { value: "!=", label: "!=" }]
-          } 
+          }
         },
       }
     );
@@ -1135,7 +1135,7 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
     });
   }
 
-  // 2. Statustext verstecken
+  // 2. Hide the state text only.
   fields.push({
     name: "enableHideStateByEntity",
     label: "Hide State by condition",
@@ -1145,7 +1145,7 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
 
   if (it.enableHideStateByEntity) {
     const evalStateEntity = it.hideStateEntity || it.entity;
-    
+
     fields.push(
       {
         name: "hideStateEntity",
@@ -1167,13 +1167,13 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
       {
         name: "hideStateOperator",
         label: "Operator",
-        selector: { 
-          select: { 
-            mode: "dropdown", 
+        selector: {
+          select: {
+            mode: "dropdown",
             options: it.hideStateMode === "threshold"
               ? [{ value: "<", label: "<" }, { value: "<=", label: "<=" }, { value: "==", label: "==" }, { value: "!=", label: "!=" }, { value: ">=", label: ">=" }, { value: ">", label: ">" }]
               : [{ value: "==", label: "==" }, { value: "!=", label: "!=" }]
-          } 
+          }
         },
       }
     );
@@ -1205,7 +1205,7 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
     });
   }
 
-  // 3. Badge (Icon/Bubble) verstecken
+  // 3. Hide the badge (icon/bubble) only.
   fields.push({
     name: "enableHideBadgeByEntity",
     label: "Hide Badge by condition",
@@ -1237,13 +1237,13 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
       {
         name: "hideBadgeOperator",
         label: "Operator",
-        selector: { 
-          select: { 
-            mode: "dropdown", 
+        selector: {
+          select: {
+            mode: "dropdown",
             options: it.hideBadgeMode === "threshold"
               ? [{ value: "<", label: "<" }, { value: "<=", label: "<=" }, { value: "==", label: "==" }, { value: "!=", label: "!=" }, { value: ">=", label: ">=" }, { value: ">", label: ">" }]
               : [{ value: "==", label: "==" }, { value: "!=", label: "!=" }]
-          } 
+          }
         },
       }
     );
@@ -1283,7 +1283,7 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
       hideAttribute: it.hideAttribute ?? "",
       hideMode: it.hideMode ?? "state",
       hideState: it.hideState ?? "",
-      hideOperator: it.hideOperator ?? "==",    
+      hideOperator: it.hideOperator ?? "==",
       hideThreshold: it.hideThreshold ?? 0,
       hideInvert: it.hideInvert ?? false,
 
@@ -1301,11 +1301,11 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
       hideBadgeAttribute: it.hideBadgeAttribute ?? "",
       hideBadgeMode: it.hideBadgeMode ?? "state",
       hideBadgeMatch: it.hideBadgeMatch ?? "",
-      hideBadgeOperator: it.hideBadgeOperator ?? "==", 
+      hideBadgeOperator: it.hideBadgeOperator ?? "==",
       hideBadgeThreshold: it.hideBadgeThreshold ?? 0,
       hideBadgeInvert: it.hideBadgeInvert ?? false,
     },
-    toPatch: (identity as any),
+    toPatch: identity,
   };
 }
 /** Group 7: when the device is drawn at all, and what a press does. */
