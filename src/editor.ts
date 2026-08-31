@@ -5588,8 +5588,37 @@ export class FloorplanCardEditor extends LitElement {
     .stage.scale-plan {
       container-type: inline-size;
     }
+    /*
+     * The unit itself, declared twice on purpose.
+     *
+     * The fallback in var(--fp-u, 1px) is not the safety net it looks like: it
+     * fires when the property is *unset*, never when its value fails to
+     * resolve. A browser with no container queries parses the calc quite
+     * happily -- a custom property takes almost any token stream -- and then
+     * every property using it is invalid at computed-value time, so each falls
+     * back to its own initial value. Width becomes auto, and a badge collapses
+     * to its borders: about 3px, with its label landing on top of it because
+     * the item's box collapsed with it.
+     *
+     * So the plain value is declared first, and the container-query one only
+     * where it can actually be computed. One pixel per canvas unit is exactly
+     * what overlayScale fixed draws, which is the right thing to degrade to: a
+     * plan that looks like it did before canvas units existed, rather than one
+     * with 3px badges.
+     *
+     * The guard tests the unit as well as the property, because they are two
+     * features and only one of them is what the declaration is made of. A
+     * browser with container-type but no cqw would pass a check for the
+     * property and then fail on the value, which is the exact collapse this is
+     * here to stop. Test what is actually used; it costs one more clause.
+     */
     .stage.scale-plan .items {
-      --fp-u: calc(100cqw / var(--fp-plan-w));
+      --fp-u: 1px;
+    }
+    @supports (container-type: inline-size) and (width: 1cqw) {
+      .stage.scale-plan .items {
+        --fp-u: calc(100cqw / var(--fp-plan-w));
+      }
     }
     /* Label padding and offsets go to em so they track the text with the plan,
        exactly as the card's own scale-plan rules do. Hairlines stay px on
