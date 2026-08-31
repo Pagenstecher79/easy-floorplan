@@ -1564,6 +1564,58 @@ const DOMAIN_STATE_ICONS: Record<string, { on: string; off: string }> = {
 };
 
 /**
+ * Two media_player states differ from its plain on/off pair above (issue
+ * #206 follow-up): "paused" is on but not mid-playback, and "idle" is on
+ * with nothing loaded at all. mdi:television-play used to claim both, which
+ * reads as "playing" for a device doing neither.
+ */
+const MEDIA_PLAYER_STATE_ICONS: Record<string, string> = {
+  paused: "mdi:television-pause",
+  idle: "mdi:television",
+};
+
+/**
+ * A climate entity's icon per HVAC mode (issue #206) — its state carries the
+ * mode directly, unlike the on/off domains {@link DOMAIN_STATE_ICONS} covers,
+ * so a single on/off pair cannot say "cool" from "heat". Every mode HA's own
+ * climate.HVACMode enum defines.
+ */
+const CLIMATE_MODE_ICONS: Record<string, string> = {
+  off: "mdi:power",
+  heat: "mdi:fire",
+  cool: "mdi:snowflake",
+  heat_cool: "mdi:sun-snowflake-variant",
+  auto: "mdi:thermostat-auto",
+  dry: "mdi:water-percent",
+  fan_only: "mdi:fan",
+};
+
+/**
+ * A weather entity's icon per condition (issue #206) — again a state that
+ * carries more than on/off, and one this card had no mapping for at all: a
+ * weather item drew the bare `defaultIcon` fallback (a plain circle)
+ * whatever the sky was doing. Every condition HA's own weather integrations
+ * report (`ATTR_CONDITION_*`).
+ */
+const WEATHER_CONDITION_ICONS: Record<string, string> = {
+  "clear-night": "mdi:weather-night",
+  cloudy: "mdi:weather-cloudy",
+  exceptional: "mdi:alert-circle-outline",
+  fog: "mdi:weather-fog",
+  hail: "mdi:weather-hail",
+  lightning: "mdi:weather-lightning",
+  "lightning-rainy": "mdi:weather-lightning-rainy",
+  partlycloudy: "mdi:weather-partly-cloudy",
+  pouring: "mdi:weather-pouring",
+  rainy: "mdi:weather-rainy",
+  snowy: "mdi:weather-snowy",
+  "snowy-rainy": "mdi:weather-snowy-rainy",
+  sunny: "mdi:weather-sunny",
+  windy: "mdi:weather-windy",
+  "windy-variant": "mdi:weather-windy-variant",
+};
+
+/**
  * State-aware icons per `binary_sensor` device class ("show as" in the HA UI),
  * mirroring Home Assistant's own device-class icon set. `on` is the
  * device-class's active state (open / detected / unlocked / …).
@@ -1645,6 +1697,18 @@ const ACTIVE_STATES: Record<string, ReadonlySet<string>> = {
   lock: new Set(["unlocked", "unlocking", "open", "opening"]),
   vacuum: new Set(["cleaning", "returning"]),
   camera: new Set(["recording", "streaming"]),
+  // A climate entity's state *is* its HVAC mode (issue #206) — "cool",
+  // "heat", "dry"… never the generic "on" the fallback test looks for, so
+  // every mode but the literal "off" read as off forever: the active
+  // highlight never lit, and a configured iconAnimation never played on a
+  // unit that was very much running. Every mode HA's own climate.HVACMode
+  // enum defines, off excluded.
+  climate: new Set(["auto", "cool", "dry", "fan_only", "heat", "heat_cool"]),
+  // Same trap, one domain over: a paused or idle player is still switched
+  // on, just not mid-playback, and "playing" alone left everything else
+  // reading as off. "standby" is the one state that means the device itself
+  // dropped to low power, so it stays out.
+  media_player: new Set(["on", "idle", "playing", "paused", "buffering"]),
 };
 
 /**
@@ -1691,6 +1755,13 @@ export function domainIconAnimation(entity: string | undefined): "spin" | "pulse
  * unavailable) entity — including when the config forces "spin"/"pulse": a
  * spinning fan icon is a claim that the fan is running, so it obeys the same
  * fail-closed rule as the active highlight ({@link entityIsActive}).
+ *
+ * A climate entity in `fan_only` spins regardless of `iconAnimation`
+ * (issue #206 follow-up) — its own fan is what's actually running, the same
+ * physical fact that makes a `fan` domain entity spin by default, just
+ * decided from this entity's *state* rather than its domain. `none` still
+ * wins over it: that is a decision to show no animation at all, not a
+ * preference between spin and pulse for this one to override.
  */
 export function resolveIconAnimation(
   item: { entity?: string; iconAnimation?: IconAnimation },
@@ -1699,6 +1770,7 @@ export function resolveIconAnimation(
   const mode = item.iconAnimation ?? "auto";
   if (mode === "none") return undefined;
   if (!entityIsActive(item.entity, state)) return undefined;
+  if (item.entity?.split(".")[0] === "climate" && state === "fan_only") return "spin";
   if (mode === "spin" || mode === "pulse") return mode;
   return domainIconAnimation(item.entity);
 }
@@ -1746,8 +1818,28 @@ export function entityDefaultIcon(
   entityId: string,
   deviceClass: string | undefined,
   on: boolean,
+  state?: string,
 ): string | undefined {
   const domain = entityId.split(".")[0];
+  // Climate and weather carry more than on/off in their state (issue #206):
+  // a climate's state is its HVAC mode, and a weather entity's is its
+  // condition, so a single on/off pair — even a correct one — can only ever
+  // say two things about a domain with five or fifteen. Checked ahead of
+  // the plain on/off table below, and falling back to it (or, for weather,
+  // to state === undefined too) covers a state this card doesn't recognise
+  // rather than drawing nothing.
+  if (domain === "climate")
+    return CLIMATE_MODE_ICONS[state ?? ""] ?? (on ? "mdi:thermostat" : "mdi:power");
+  if (domain === "weather") return WEATHER_CONDITION_ICONS[state ?? ""] ?? "mdi:weather-cloudy";
+  // paused and idle are both "on" by entityIsActive's own rule (issue #206
+  // follow-up) — correctly so — but the play glyph the on/off pair below
+  // would give both reads as "playing" for a device doing neither. Checked
+  // ahead of that pair; every other active state (playing, buffering, the
+  // literal "on") still falls through to it.
+  if (domain === "media_player" && state) {
+    const stateIcon = MEDIA_PLAYER_STATE_ICONS[state];
+    if (stateIcon) return stateIcon;
+  }
   // These domains carry their meaning in the domain, not a device class, so the
   // device-class guard below would skip them entirely.
   const byDomain = DOMAIN_STATE_ICONS[domain];
@@ -1827,6 +1919,7 @@ export function resolveItemIcon(
       item.entity,
       st?.attributes?.device_class as string | undefined,
       entityIsActive(item.entity, st?.state),
+      st?.state,
     ) ?? defaultIcon(item.kind)
   );
 }
