@@ -143,6 +143,7 @@ import {
   type Sel,
   type SelKind,
 } from "./editor-geometry";
+import { FrameCoalescer, rafScheduler } from "./frame-coalescer";
 import { applyCardConfig } from "./editor-save";
 import type { AreaEntityScope } from "./editor-forms";
 import {
@@ -373,6 +374,17 @@ export class FloorplanCardEditor extends LitElement {
 
   private _drag: Drag | null = null;
   /**
+   * Drag moves are applied once per animation frame. A pointer reports faster
+   * than the browser renders, and applying every raw move only queues work the
+   * frame cannot finish, so the element falls further behind the longer the
+   * drag lasts.
+   */
+  private _dragMoves = new FrameCoalescer<PointerEvent>(rafScheduler, (ev) => {
+    if (this._drag) this._applyDrag(ev);
+  });
+  /** A drag changed the config and the host has not been told yet. */
+  private _dragDirty = false;
+  /**
    * Where the last plain selection click landed, for click-cycling through
    * overlapping elements (issue #52). Cleared whenever the pointer lands
    * somewhere else, so cycling only happens on repeat clicks in one spot.
@@ -506,7 +518,26 @@ export class FloorplanCardEditor extends LitElement {
 
   /** Live change to the active floor's elements (no history snapshot — for dragging). */
   private _emitFloor(partial: Partial<Floor>): void {
-    this._emit({ ...this._config, floors: this._patchFloors(partial) });
+    const config = { ...this._config, floors: this._patchFloors(partial) };
+    // A drag owns the config until pointerup. Emitting per move asks HA to
+    // re-render whatever card is being edited — for a stack, every child of it
+    // — and to echo the config back through setConfig, which stalls the gesture
+    // far longer than a frame. The canvas still follows the pointer: _config is
+    // @state, so assigning it repaints the editor without involving the host.
+    if (this._drag) {
+      this._config = config;
+      this._watchedEntities = collectWatchedEntities(config);
+      this._dragDirty = true;
+      return;
+    }
+    this._emit(config);
+  }
+
+  /** Hand the host what a drag accumulated — once, on release. */
+  private _flushDrag(): void {
+    if (!this._dragDirty) return;
+    this._dragDirty = false;
+    this._emit(this._config);
   }
 
   private _patchFloors(partial: Partial<Floor>): Floor[] {
@@ -1168,6 +1199,9 @@ export class FloorplanCardEditor extends LitElement {
    * between — is dropped, so a canceled drag leaves no trace in undo.
    */
   private _cancelGesture(): void {
+    // Whatever the drag accumulated is about to be replaced by its snapshot.
+    this._dragMoves.cancel();
+    this._dragDirty = false;
     this._gesturePointer = null;
     this._draft = null;
     this._draftTracker = null;
@@ -1229,11 +1263,14 @@ export class FloorplanCardEditor extends LitElement {
       this._marquee = { ...this._marquee, x1: raw.x, y1: raw.y };
       return;
     }
-    if (this._drag) this._applyDrag(ev);
+    if (this._drag) this._dragMoves.push(ev);
   }
 
   private _onCanvasUp(ev: PointerEvent): void {
     if (this._foreignPointer(ev)) return;
+    // Land on the last position the pointer reported, not on whatever the
+    // previous frame caught — settle while _drag is still set.
+    this._dragMoves.settle();
     this._gesturePointer = null;
     if (this._tool === "wall" && this._draft) {
       const d = this._draft;
@@ -1278,6 +1315,7 @@ export class FloorplanCardEditor extends LitElement {
     if (this._drag) {
       this._drag = null;
       this._releasePointer(ev);
+      this._flushDrag();
     }
   }
 
@@ -1519,15 +1557,17 @@ export class FloorplanCardEditor extends LitElement {
       this._cancelGesture();
       return;
     }
-    if (this._drag) this._applyDrag(ev);
+    if (this._drag) this._dragMoves.push(ev);
   }
 
   private _onOverlayUp(ev: PointerEvent): void {
     if (this._foreignPointer(ev)) return;
+    this._dragMoves.settle();
     this._gesturePointer = null;
     if (this._drag) {
       this._drag = null;
       this._releasePointer(ev, ev.currentTarget as Element);
+      this._flushDrag();
     }
   }
 
