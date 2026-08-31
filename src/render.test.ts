@@ -547,6 +547,21 @@ describe("entityDefaultIcon for domains without a device class", () => {
     expect(entityDefaultIcon("media_player.tv", undefined, false)).toBe("mdi:television-off");
     expect(entityDefaultIcon("camera.doorbell", undefined, true)).toBe("mdi:cctv");
   });
+  it("draws a paused media_player with its own glyph, not the playing one (issue #206 follow-up)", () => {
+    // "paused" is active (entityIsActive says so too), so this is not the
+    // off icon — but it should not be the same icon "playing" gets either.
+    expect(entityDefaultIcon("media_player.tv", undefined, true, "paused")).toBe(
+      "mdi:television-pause",
+    );
+    // Every other active state keeps the plain play glyph — only "paused"
+    // gets its own.
+    expect(entityDefaultIcon("media_player.tv", undefined, true, "playing")).toBe(
+      "mdi:television-play",
+    );
+    expect(entityDefaultIcon("media_player.tv", undefined, true, "idle")).toBe(
+      "mdi:television-play",
+    );
+  });
   it("shows a lock as open when it is unlocked", () => {
     expect(entityDefaultIcon("lock.front", undefined, true)).toBe("mdi:lock-open-variant");
     expect(entityDefaultIcon("lock.front", undefined, false)).toBe("mdi:lock");

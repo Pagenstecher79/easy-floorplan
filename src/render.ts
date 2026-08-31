@@ -1673,6 +1673,12 @@ export function entityDefaultIcon(
   if (domain === "climate")
     return CLIMATE_MODE_ICONS[state ?? ""] ?? (on ? "mdi:thermostat" : "mdi:power");
   if (domain === "weather") return WEATHER_CONDITION_ICONS[state ?? ""] ?? "mdi:weather-cloudy";
+  // A paused player is still "on" by entityIsActive's own rule (issue #206
+  // follow-up) — it stays lit, correctly — but the play glyph that fact
+  // shares with "playing" reads as a stall nobody noticed, not what
+  // actually happened. One state differs from the domain's on/off pair, so
+  // one override rather than a whole table for it.
+  if (domain === "media_player" && state === "paused") return "mdi:television-pause";
   // These domains carry their meaning in the domain, not a device class, so the
   // device-class guard below would skip them entirely.
   const byDomain = DOMAIN_STATE_ICONS[domain];

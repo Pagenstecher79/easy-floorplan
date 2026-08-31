@@ -283,8 +283,8 @@ views:
                     kind: generic
                   # Boots "playing" (issue #206). Call
                   # media_player.media_pause from Developer Tools > Actions
-                  # and it reads "paused" and stays lit -- that used to read
-                  # as off.
+                  # and it reads "paused", stays lit, and switches to its own
+                  # pause glyph instead of "off" or the plain play icon.
                   - id: i10
                     entity: media_player.walkman
                     x: 620
