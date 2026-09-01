@@ -443,7 +443,7 @@ export class FloorplanCardEditor extends LitElement {
     if (!isTypingPath(ev.composedPath())) return;
     ev.preventDefault();
     ev.stopPropagation();
-    this._canvasWrap?.focus();
+    this._canvasWrap?.focus({ preventScroll: true });
   };
   private _onFocusIn = (ev: FocusEvent) => {
     // While the fullscreen popover is up, anything that pulls focus outside the
@@ -1179,7 +1179,7 @@ export class FloorplanCardEditor extends LitElement {
     if (ev.button !== 0) return;
     // One gesture at a time: a second touch must not hijack the state machine.
     if (this._gesturePointer !== null) return;
-    this._canvasWrap?.focus();
+    this._canvasWrap?.focus({ preventScroll: true });
     const raw = this._toVirtual(ev, false);
 
     if (this._tool === "wall") {
@@ -1405,7 +1405,7 @@ export class FloorplanCardEditor extends LitElement {
     if (this._tool !== "select") return;
     ev.stopPropagation();
     if (this._gesturePointer !== null) return;
-    this._canvasWrap?.focus();
+    this._canvasWrap?.focus({ preventScroll: true });
     // Endpoint/vertex handles always operate on that single element; every
     // other click goes through the overlap-aware picker (issue #52).
     const explicitHandle = endpoint != null || areaVertex != null;
@@ -1585,7 +1585,7 @@ export class FloorplanCardEditor extends LitElement {
     // preventDefault suppresses native mousedown focusing, so focus explicitly.
     ev.preventDefault();
     if (this._gesturePointer !== null) return;
-    this._canvasWrap?.focus();
+    this._canvasWrap?.focus({ preventScroll: true });
     const pick = this._resolvePick(ev, sel);
     this._selectForPointer(ev, pick);
     this._drag = {
@@ -3082,7 +3082,7 @@ export class FloorplanCardEditor extends LitElement {
                 // Hand focus back to the canvas: while the <select> keeps it,
                 // isTypingPath swallows every shortcut — most visibly Ctrl+V
                 // after a cross-floor copy (issue #37).
-                this._canvasWrap?.focus();
+                this._canvasWrap?.focus({ preventScroll: true });
               }}
             >
               ${floors.map(
