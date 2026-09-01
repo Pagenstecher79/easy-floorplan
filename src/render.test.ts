@@ -573,6 +573,23 @@ describe("entityDefaultIcon for domains without a device class", () => {
     expect(entityDefaultIcon("media_player.tv", undefined, false)).toBe("mdi:television-off");
     expect(entityDefaultIcon("camera.doorbell", undefined, true)).toBe("mdi:cctv");
   });
+  it("draws a paused media_player with its own glyph, not the playing one (issue #206 follow-up)", () => {
+    // "paused" is active (entityIsActive says so too), so this is not the
+    // off icon — but it should not be the same icon "playing" gets either.
+    expect(entityDefaultIcon("media_player.tv", undefined, true, "paused")).toBe(
+      "mdi:television-pause",
+    );
+    // "idle" is on with nothing loaded at all — its own glyph too, not
+    // "playing" and not "paused".
+    expect(entityDefaultIcon("media_player.tv", undefined, true, "idle")).toBe("mdi:television");
+    // Every other active state keeps the plain play glyph.
+    expect(entityDefaultIcon("media_player.tv", undefined, true, "playing")).toBe(
+      "mdi:television-play",
+    );
+    expect(entityDefaultIcon("media_player.tv", undefined, true, "buffering")).toBe(
+      "mdi:television-play",
+    );
+  });
   it("shows a lock as open when it is unlocked", () => {
     expect(entityDefaultIcon("lock.front", undefined, true)).toBe("mdi:lock-open-variant");
     expect(entityDefaultIcon("lock.front", undefined, false)).toBe("mdi:lock");
@@ -582,6 +599,54 @@ describe("entityDefaultIcon for domains without a device class", () => {
   });
   it("does not shadow a binary_sensor's device-class icon", () => {
     expect(entityDefaultIcon("binary_sensor.d", "door", true)).toBe("mdi:door-open");
+  });
+});
+
+describe("entityDefaultIcon for climate and weather (issue #206)", () => {
+  it("reads the HVAC mode, not just on/off — a running unit says which mode", () => {
+    // Before: every mode fell through to the bare thermostat icon, since
+    // climate had no entry in DOMAIN_STATE_ICONS at all.
+    expect(entityDefaultIcon("climate.ac", undefined, true, "cool")).toBe("mdi:snowflake");
+    expect(entityDefaultIcon("climate.ac", undefined, true, "heat")).toBe("mdi:fire");
+    expect(entityDefaultIcon("climate.ac", undefined, true, "dry")).toBe("mdi:water-percent");
+    expect(entityDefaultIcon("climate.ac", undefined, true, "fan_only")).toBe("mdi:fan");
+    expect(entityDefaultIcon("climate.ac", undefined, true, "auto")).toBe("mdi:thermostat-auto");
+    expect(entityDefaultIcon("climate.ac", undefined, true, "heat_cool")).toBe(
+      "mdi:sun-snowflake-variant"
+    );
+    expect(entityDefaultIcon("climate.ac", undefined, false, "off")).toBe("mdi:power");
+  });
+
+  it("falls back to a plain on/off thermostat for a mode it doesn't recognise", () => {
+    expect(entityDefaultIcon("climate.ac", undefined, true, "some_custom_mode")).toBe(
+      "mdi:thermostat"
+    );
+    expect(entityDefaultIcon("climate.ac", undefined, false, "some_custom_mode")).toBe(
+      "mdi:power"
+    );
+    // No state passed at all — same fallback, not a crash.
+    expect(entityDefaultIcon("climate.ac", undefined, true)).toBe("mdi:thermostat");
+  });
+
+  it("reads the weather condition — before, a weather item drew a bare circle", () => {
+    expect(entityDefaultIcon("weather.home", undefined, true, "sunny")).toBe("mdi:weather-sunny");
+    expect(entityDefaultIcon("weather.home", undefined, true, "rainy")).toBe("mdi:weather-rainy");
+    expect(entityDefaultIcon("weather.home", undefined, true, "partlycloudy")).toBe(
+      "mdi:weather-partly-cloudy"
+    );
+    expect(entityDefaultIcon("weather.home", undefined, true, "clear-night")).toBe(
+      "mdi:weather-night"
+    );
+    expect(entityDefaultIcon("weather.home", undefined, true, "lightning-rainy")).toBe(
+      "mdi:weather-lightning-rainy"
+    );
+  });
+
+  it("falls back to a generic cloud for a weather condition it doesn't recognise", () => {
+    expect(entityDefaultIcon("weather.home", undefined, true, "a_new_condition")).toBe(
+      "mdi:weather-cloudy"
+    );
+    expect(entityDefaultIcon("weather.home", undefined, true)).toBe("mdi:weather-cloudy");
   });
 });
 
@@ -1331,8 +1396,11 @@ describe("isEntityOn / resolveItemIcon", () => {
       expect(resolveItemIcon(climate, { state: "heat", attributes: { hvac_action: "heating" } })).toBe(
         "mdi:fire"
       );
+      // No rule matches (hvac_action is "idle", not "heating"): falls to the
+      // entity's own default icon, which since issue #206 is heat's own icon
+      // rather than the bare climate fallback.
       expect(resolveItemIcon(climate, { state: "heat", attributes: { hvac_action: "idle" } })).toBe(
-        defaultIcon("climate")
+        entityDefaultIcon("climate.hall", undefined, true, "heat")
       );
     });
 
@@ -1634,6 +1702,23 @@ describe("entityIsActive — domains that never say \"on\"", () => {
     expect(entityIsActive("camera.door", "idle")).toBe(false);
   });
 
+  it("a climate entity is active in any HVAC mode but off (issue #206)", () => {
+    // Its state *is* the mode — "cool", "heat", … — never the literal "on"
+    // the generic test looks for, so every one of these used to read as off.
+    for (const mode of ["auto", "cool", "dry", "fan_only", "heat", "heat_cool"]) {
+      expect(entityIsActive("climate.ac", mode), mode).toBe(true);
+    }
+    expect(entityIsActive("climate.ac", "off")).toBe(false);
+  });
+
+  it("a media player is active whenever it isn't off, not only while playing (issue #206)", () => {
+    // A paused or idle player is still switched on, just not mid-playback.
+    for (const s of ["on", "idle", "playing", "paused", "buffering"]) {
+      expect(entityIsActive("media_player.tv", s), s).toBe(true);
+    }
+    expect(entityIsActive("media_player.tv", "off")).toBe(false);
+  });
+
   it("falls back to the generic on/off test for every other domain", () => {
     expect(entityIsActive("light.a", "on")).toBe(true);
     expect(entityIsActive("binary_sensor.a", "off")).toBe(false);
@@ -1676,13 +1761,54 @@ describe("resolveIconAnimation (issue #48)", () => {
     expect(resolveIconAnimation({ entity: "switch.a" }, "on")).toBeUndefined();
   });
 
+  it("a climate entity in fan_only always spins, whatever iconAnimation says (issue #206 follow-up)", () => {
+    // Auto: no other climate mode gets a default animation, but fan_only
+    // does — its own fan is what's running.
+    expect(resolveIconAnimation({ entity: "climate.ac" }, "fan_only")).toBe("spin");
+    expect(resolveIconAnimation({ entity: "climate.ac" }, "cool")).toBeUndefined();
+    // Forced pulse: every other active mode pulses, but fan_only still spins
+    // — the fan_only spin overrides the config rather than the other way
+    // round.
+    expect(
+      resolveIconAnimation({ entity: "climate.ac", iconAnimation: "pulse" }, "fan_only"),
+    ).toBe("spin");
+    expect(
+      resolveIconAnimation({ entity: "climate.ac", iconAnimation: "pulse" }, "cool"),
+    ).toBe("pulse");
+    // Forced spin: no conflict, still spins.
+    expect(
+      resolveIconAnimation({ entity: "climate.ac", iconAnimation: "spin" }, "fan_only"),
+    ).toBe("spin");
+    // none is a decision to show no animation at all, and wins over even
+    // fan_only's own spin.
+    expect(
+      resolveIconAnimation({ entity: "climate.ac", iconAnimation: "none" }, "fan_only"),
+    ).toBeUndefined();
+    // Off never animates, fan_only override or not.
+    expect(resolveIconAnimation({ entity: "climate.ac" }, "off")).toBeUndefined();
+  });
+
+  it("a forced spin plays for a climate entity running in any mode (issue #206)", () => {
+    // The reported bug exactly: an AC in "cool" with iconAnimation: "spin"
+    // read as off (entityIsActive didn't know "cool" from "off") and never
+    // animated at all.
+    expect(
+      resolveIconAnimation({ entity: "climate.ac", iconAnimation: "spin" }, "cool"),
+    ).toBe("spin");
+    expect(
+      resolveIconAnimation({ entity: "climate.ac", iconAnimation: "spin" }, "off"),
+    ).toBeUndefined();
+  });
+
   it("never animates an inactive entity — including forced spin/pulse", () => {
     expect(resolveIconAnimation({ entity: "fan.ceiling" }, "off")).toBeUndefined();
     expect(
       resolveIconAnimation({ entity: "light.a", iconAnimation: "spin" }, "off"),
     ).toBeUndefined();
+    // "paused" is active (issue #206) — a paused player is switched on, just
+    // not mid-playback — so "off" is what proves this rather than "paused".
     expect(
-      resolveIconAnimation({ entity: "media_player.tv", iconAnimation: "pulse" }, "paused"),
+      resolveIconAnimation({ entity: "media_player.tv", iconAnimation: "pulse" }, "off"),
     ).toBeUndefined();
   });
 
