@@ -477,7 +477,7 @@ distorted anyway.
 | `size`        | number                                 | `34`         | Icon badge diameter (px).                              |
 | `angle`       | number                                 | `0`          | Icon rotation (deg).                                   |
 | `display`     | `badge` \| `ripple` \| `iconRipple`    | `badge`      | How the device is drawn. The editor spells this as the **Ripple** toggle (plus **Badge shows: Nothing** for `ripple`) and offers it only on devices that detect something where they sit (see [Presence ripples](#presence-ripples)); in YAML it works on any entity. |
-| `iconAnimation` | `auto` \| `none` \| `spin` \| `pulse` | `auto`       | Animate the icon while active. `auto`: fan spins; media player / vacuum pulse. The editor spells this as the icon options of **Badge shows**, showing `auto` as whatever it resolves to. |
+| `iconAnimation` | `auto` \| `none` \| `spin` \| `pulse` | `auto`       | Animate the icon while active. `auto`: fan spins; media player / vacuum pulse. A `climate` entity animates only while its `hvac_action` says it is working — an AC holding `cool` at temperature keeps its colour but stops moving. The editor spells this as the icon options of **Badge shows**, showing `auto` as whatever it resolves to. |
 | `activeColor` | string                                 | theme color  | Badge color while on. Ignored while `stateColor` rules match. |
 | `rippleColor` | string                                 | `activeColor`| Ripple ring color, falling back to `activeColor` then the primary color. |
 | `rippleSize`  | number                                 | `80`         | Max ripple diameter (px).                              |
@@ -1505,6 +1505,34 @@ npm test           # vitest (pure-logic tests; no browser)
 
 Releases are built and attached automatically by GitHub Actions when a GitHub release
 is published.
+
+### What the suite does not cover
+
+The tests run in node against the pure modules — geometry, config migration, rendering
+decisions, the frame coalescer with an injected scheduler. That covers most of the
+codebase, and it runs in about a second.
+
+It does **not** cover the editor's gesture wiring in [`src/editor.ts`](src/editor.ts):
+the pointerdown/move/up listeners, pointer capture, what gets queued for the next frame,
+and what happens to an in-flight drag on teardown. Those are verified by reading and by
+hand, so a green suite says nothing about them (issue
+[#233](https://github.com/nicosandller/easy-floorplan/issues/233)).
+
+**Changing anything on a drag path therefore needs manual verification in a real
+browser** — [`npm run ha`](#local-home-assistant) is the way — and the check has to
+include a moving viewport, because that is where these bugs live. Drag an element while
+the canvas scrolls under it: positions are mapped through the SVG's live
+`getScreenCTM()`, so anything deferred by a frame resolves against a matrix that may have
+moved since. A 150px wheel scroll mid-drag is enough to turn an 8-unit move into a
+288-unit one.
+
+A DOM shim is not a shortcut past this. Both candidates were measured against these
+exact needs: jsdom has no `getScreenCTM` at all, and happy-dom has one that always
+returns the identity matrix with a canvas that can never scroll — so a regression test
+for the bug above would run, pass, and prove nothing. Real coverage here means a real
+browser (`@vitest/browser` with the Playwright provider, as a second vitest project);
+that has been prototyped successfully but is not wired up, and the CI weight is the open
+question. Until it is, this section is the honest version.
 
 ### Local Home Assistant
 

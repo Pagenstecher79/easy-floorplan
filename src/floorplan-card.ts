@@ -523,10 +523,8 @@ export class FloorplanCard extends LitElement {
     // Animation goes on the inner ha-icon, not the badge: the badge carries
     // the user's `angle` rotation, and a spin on the same element would
     // overwrite it.
-    const anim = resolveIconAnimation(
-      item,
-      item.entity ? this.hass?.states[item.entity]?.state : undefined,
-    );
+    const st = item.entity ? this.hass?.states[item.entity] : undefined;
+    const anim = resolveIconAnimation(item, st?.state, st?.attributes);
     // "Show the reading, not a picture" (issue #106). Same badge — size, angle,
     // state colour, ripple stacking all unchanged — with the glyph swapped for
     // the number. A device with nothing numeric to show keeps its icon.

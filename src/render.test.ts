@@ -1787,6 +1787,59 @@ describe("resolveIconAnimation (issue #48)", () => {
     expect(resolveIconAnimation({ entity: "climate.ac" }, "off")).toBeUndefined();
   });
 
+  it("a climate entity animates only while hvac_action says it is working (issue #235)", () => {
+    // The reported case: an AC set to "cool" that has reached its setpoint
+    // reports state "cool" with hvac_action "idle". The mode is a setting,
+    // not moving air, so a spin there is a claim the unit is not making.
+    expect(
+      resolveIconAnimation({ entity: "climate.ac", iconAnimation: "spin" }, "cool", {
+        hvac_action: "idle",
+      }),
+    ).toBeUndefined();
+    // Same unit a minute later, actually cooling: the spin is true again.
+    expect(
+      resolveIconAnimation({ entity: "climate.ac", iconAnimation: "spin" }, "cool", {
+        hvac_action: "cooling",
+      }),
+    ).toBe("spin");
+    // Every other working action counts the same way.
+    for (const action of ["heating", "drying", "fan", "preheating", "defrosting"]) {
+      expect(
+        resolveIconAnimation({ entity: "climate.ac", iconAnimation: "pulse" }, "heat", {
+          hvac_action: action,
+        }),
+      ).toBe("pulse");
+    }
+    // "off" as an action is the same story as idle: nothing is running.
+    expect(
+      resolveIconAnimation({ entity: "climate.ac", iconAnimation: "spin" }, "cool", {
+        hvac_action: "off",
+      }),
+    ).toBeUndefined();
+    // fan_only's own spin is gated too — a stopped fan is not spinning
+    // whatever the mode says — but still plays while the fan runs.
+    expect(
+      resolveIconAnimation({ entity: "climate.ac" }, "fan_only", { hvac_action: "idle" }),
+    ).toBeUndefined();
+    expect(
+      resolveIconAnimation({ entity: "climate.ac" }, "fan_only", { hvac_action: "fan" }),
+    ).toBe("spin");
+    // An integration that reports no hvac_action at all keeps animating:
+    // the attribute is optional, and going quiet on those would be a second
+    // regression to fix the first.
+    expect(
+      resolveIconAnimation({ entity: "climate.ac", iconAnimation: "spin" }, "cool", {
+        current_temperature: 20,
+      }),
+    ).toBe("spin");
+    expect(resolveIconAnimation({ entity: "climate.ac" }, "fan_only", {})).toBe("spin");
+    // The gate is climate-only: a fan entity has no hvac_action to consult,
+    // and an unrelated domain that happens to carry one is not a thermostat.
+    expect(
+      resolveIconAnimation({ entity: "fan.ceiling" }, "on", { hvac_action: "idle" }),
+    ).toBe("spin");
+  });
+
   it("a forced spin plays for a climate entity running in any mode (issue #206)", () => {
     // The reported bug exactly: an AC in "cool" with iconAnimation: "spin"
     // read as off (entityIsActive didn't know "cool" from "off") and never

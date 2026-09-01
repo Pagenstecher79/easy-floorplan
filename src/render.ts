@@ -1750,27 +1750,65 @@ export function domainIconAnimation(entity: string | undefined): "spin" | "pulse
 }
 
 /**
+ * The `hvac_action` values that mean a climate entity is switched on but not
+ * moving any air or heat right now — HA's own HVACAction enum, whose other
+ * members (heating, cooling, drying, preheating, defrosting, fan) all
+ * describe work in progress.
+ */
+const CLIMATE_IDLE_ACTIONS = new Set(["idle", "off"]);
+
+/**
+ * Whether a climate entity is doing something *right now*, as opposed to
+ * merely being set to a mode (issue #235, @GhislainC). Its state is the mode
+ * the user asked for — a thermostat sitting at temperature reads "cool" all
+ * night — while `hvac_action` is what the hardware is doing about it, so a
+ * unit that has reached its setpoint reports `cool` / `idle` together.
+ *
+ * An entity that reports no `hvac_action` at all is treated as working: the
+ * attribute is optional in HA, and the alternative is to silently stop
+ * animating every integration that omits it.
+ */
+function climateIsWorking(attributes: Record<string, unknown> | undefined): boolean {
+  const action = attributes?.["hvac_action"];
+  if (typeof action !== "string") return true;
+  return !CLIMATE_IDLE_ACTIONS.has(action);
+}
+
+/**
  * Which animation an item's icon should play right now, or undefined for
  * none. Shared by card and editor. Never animates an inactive (or
  * unavailable) entity — including when the config forces "spin"/"pulse": a
  * spinning fan icon is a claim that the fan is running, so it obeys the same
  * fail-closed rule as the active highlight ({@link entityIsActive}).
  *
+ * A climate entity extends that same claim one step further (issue #235): its
+ * mode is a *setting*, not a fact about moving air, so an idle unit holding
+ * "cool" animates nothing however `iconAnimation` is set. The badge still
+ * lights — {@link entityIsActive} is untouched, so the AC still reads as on,
+ * it just stops pretending to blow. Only the animation is gated, and only
+ * when the entity actually reports `hvac_action`.
+ *
  * A climate entity in `fan_only` spins regardless of `iconAnimation`
  * (issue #206 follow-up) — its own fan is what's actually running, the same
  * physical fact that makes a `fan` domain entity spin by default, just
  * decided from this entity's *state* rather than its domain. `none` still
  * wins over it: that is a decision to show no animation at all, not a
- * preference between spin and pulse for this one to override.
+ * preference between spin and pulse for this one to override. It is gated by
+ * `hvac_action` like every other mode: a fan that has stopped is not spinning
+ * whatever the mode says.
  */
 export function resolveIconAnimation(
   item: { entity?: string; iconAnimation?: IconAnimation },
   state: string | undefined,
+  attributes?: Record<string, unknown>,
 ): "spin" | "pulse" | undefined {
   const mode = item.iconAnimation ?? "auto";
   if (mode === "none") return undefined;
   if (!entityIsActive(item.entity, state)) return undefined;
-  if (item.entity?.split(".")[0] === "climate" && state === "fan_only") return "spin";
+  if (item.entity?.split(".")[0] === "climate") {
+    if (!climateIsWorking(attributes)) return undefined;
+    if (state === "fan_only") return "spin";
+  }
   if (mode === "spin" || mode === "pulse") return mode;
   return domainIconAnimation(item.entity);
 }

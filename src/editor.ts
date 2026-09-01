@@ -4196,7 +4196,7 @@ export class FloorplanCardEditor extends LitElement {
     // Live preview: the icon animates exactly when the card would animate it
     // (entity currently active), so the "Badge shows" dropdown shows its
     // effect without leaving the editor.
-    const anim = resolveIconAnimation(it, st?.state);
+    const anim = resolveIconAnimation(it, st?.state, st?.attributes);
     // Every measure the card expresses in canvas units, expressed the same way
     // here (issue #192) — the badge box, the value inside it, the glyph, the
     // ripple and the label below.
