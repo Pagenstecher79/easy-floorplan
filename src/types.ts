@@ -517,7 +517,40 @@ export interface FloorItem {
    * "Active" is the same domain-aware test the badge highlight uses
    * ({@link entityIsActive}), so a lock reads unlocked, a vacuum cleaning.
    */
+  // --- Extended hide logic for the entire item (Whole-Item) ---
   hideWhenInactive?: boolean;
+  enableHideByEntity?: boolean;
+  hideEntity?: string;
+  /** Attribute to read instead of the state for the hide condition. */
+  hideAttribute?: string;
+  hideMode?: "state" | "threshold";
+  hideState?: string;
+  /** Hide condition operator (includes !=). */
+  hideOperator?: "<" | "<=" | "==" | "!=" | ">=" | ">";
+  hideThreshold?: number;
+  hideInvert?: boolean;
+
+  // --- Extended hide logic for the Badge (Icon/Bubble) ---
+  enableHideBadgeByEntity?: boolean;
+  hideBadgeEntity?: string;
+  hideBadgeAttribute?: string;
+  hideBadgeMode?: "state" | "threshold";
+  /** Corresponds to the textual state match for the badge. */
+  hideBadgeMatch?: string;
+  hideBadgeOperator?: "<" | "<=" | "==" | "!=" | ">=" | ">";
+  hideBadgeThreshold?: number;
+  hideBadgeInvert?: boolean;
+
+  // --- Extended hide logic for the State Text ---
+  enableHideStateByEntity?: boolean;
+  hideStateEntity?: string;
+  hideStateAttribute?: string;
+  hideStateMode?: "state" | "threshold";
+  hideStateMatch?: string;
+  hideStateOperator?: "<" | "<=" | "==" | "!=" | ">=" | ">";
+  hideStateThreshold?: number;
+  hideStateInvert?: boolean;
+  /** End of Enable the extended hide logic */
   /** Badge diameter in pixels. Default 34. */
   size?: number;
   /** Icon rotation in degrees. Default 0. */

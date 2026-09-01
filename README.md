@@ -1080,6 +1080,13 @@ apart when the card resizes" — though the better answer is often to have no cl
 all: put the readings on **one** device with [`readings`](#more-readings-per-device) and
 there is no relative position left to preserve.)
 
+> **"It looks right on my computer and wrong on my phone."** Same plan, same config —
+> a phone just gives the card less width. Under `fixed` the badges stay 34px and the text
+> stays 12px while everything they were spaced against halves, so a badge ends up sitting
+> on the label or the free text beside it, and it reads as a label that has moved. Nothing
+> has moved: the gaps shrank and the badges did not. `overlayScale: plan` is the answer —
+> it is what a plan drawn once and shown at two sizes wants. (Issue #217.)
+
 Reach for `fixed` when the card renders **larger** than its canvas, or on a wall tablet
 where a px floor under the text is what keeps it readable from across the room.
 
@@ -1370,6 +1377,45 @@ devices**.
 The mark's colour is `--fp-offline-mark`, falling back to the theme's `--error-color`, so
 card-mod can recolour it without touching anything else. A device drawn as a bare ripple,
 or as a label with no badge, has nothing to cross out and takes the fade alone.
+
+## Advanced Hiding Logic
+
+You can fine-tune when an item, its badge, or its state label is hidden. Instead of just hiding an element when its main entity is inactive, you can evaluate specific states, numeric thresholds, or even watch entirely different entities. 
+
+This is available for the **whole item** (`hide...`), the **badge** (`hideBadge...`), and the **state text** (`hideState...`). 
+
+| YAML Key | Type | Description |
+| :--- | :--- | :--- |
+| `enableHideByEntity` | `boolean` | Activates the advanced hide logic for the whole item. (Use `enableHideBadgeByEntity` / `enableHideStateByEntity` for specific parts). |
+| `hideEntity` | `string` | The entity to evaluate. If omitted, the device's main `entity` is used. |
+| `hideAttribute` | `string` | Evaluate a specific attribute (e.g., `current_temperature`) instead of the state. |
+| `hideMode` | `string` | Set to `"state"` for text matching, or `"threshold"` for numeric comparisons. |
+| `hideState` | `string` | The exact string to match (case-insensitive) when using `hideMode: "state"`. |
+| `hideOperator` | `string` | The comparison operator (`<`, `<=`, `==`, `!=`, `>=`, `>`) used for thresholds or state matching. |
+| `hideThreshold` | `number` | The numeric value to compare against when using `hideMode: "threshold"`. |
+| `hideInvert` | `boolean` | If `true`, inverts the final result of the condition. |
+
+The badge and state-text variants take the same eight keys with a `hideBadge` /
+`hideState` prefix — `enableHideBadgeByEntity`, `hideBadgeEntity`, `hideBadgeAttribute`,
+`hideBadgeMode`, `hideBadgeMatch`, `hideBadgeOperator`, `hideBadgeThreshold`,
+`hideBadgeInvert`, and likewise for `hideState...`. (The whole-item key is `hideState`;
+the state-text one is `hideStateMatch`.)
+
+**Example:** Hide a badge if the temperature of another sensor drops below 20:
+```yaml
+enableHideBadgeByEntity: true
+hideBadgeEntity: sensor.room_temperature
+hideBadgeMode: threshold
+hideBadgeOperator: "<"
+hideBadgeThreshold: 20
+```
+
+**When the sensor doesn't answer.** A condition that can't be evaluated never hides —
+a device that vanishes is the one thing you can't debug from the plan. A missing value,
+a missing threshold, or a sensor gone `unavailable` under a numeric threshold all leave
+the item on screen, and `hideInvert` doesn't flip that. The exception is an outage you
+asked for by name: `hideMode: state` with `hideState: unavailable` does hide, so
+"hide the badge while this sensor is dead" works as written.
 
 ## Compact header
 
