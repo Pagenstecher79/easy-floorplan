@@ -155,10 +155,8 @@ function floorMemoryKey(floors: readonly Floor[]): string {
   return floors.map((f) => f.id).join("|");
 }
 
-
 @customElement("easy-floorplan-card")
 export class FloorplanCard extends LitElement {
-
   private static _nextWallMaskId = 0;
   private static _nextGlowId = 0;
 
@@ -236,13 +234,14 @@ export class FloorplanCard extends LitElement {
    * HA pushes a fresh `hass` on every state change anywhere in the instance —
    * for most updates nothing on this plan moved. Skip those renders entirely.
    */
-    protected shouldUpdate(changed: PropertyValues): boolean {
+  protected shouldUpdate(changed: PropertyValues): boolean {
     // Anything but a pure hass tick (config change, floor switch, first render).
     if (!(changed.size === 1 && changed.has("hass"))) return true;
     const prev = changed.get("hass") as HomeAssistant | undefined;
     if (!prev || !this.hass) return true;
     return hassRenderInputsChanged(prev, this.hass, this._watchedEntities);
   }
+
   /**
    * Carry the skin as an attribute on the host, where `skinPalettes` picks it
    * up (issue #155). It has to be the host and not the template, because the
@@ -640,7 +639,7 @@ export class FloorplanCard extends LitElement {
     // Threshold color (issue #68), judged on the displayed value (attribute
     // when set, else the state). cssColor gates the config string (#64).
     const st = item.entity ? renderHass?.states[item.entity] : undefined;
-  const rawValue = itemRawValue(item, st);
+    const rawValue = itemRawValue(item, st);
     // One resolved colour drives the whole element (issue #79 follow-up): the
     // label *and* the badge. A sensor is never "on", so tying the badge to the
     // active state alone left threshold colours invisible on exactly the
@@ -676,7 +675,6 @@ export class FloorplanCard extends LitElement {
     // var()/color-mix()/gradient keeps the theme ink, exactly as before.
     const badgeInk = contrastText(stateColor ?? activeColor);
     const rippleSize = item.rippleSize ?? DEFAULT_RIPPLE_SIZE;
-    const displayMode = item.display ?? "badge";
 
     // Apply visibility hidden to keep the layout space intact for the label
     const hiddenStyle = isBadgeHidden ? "visibility: hidden; pointer-events: none;" : "";
@@ -725,7 +723,7 @@ export class FloorplanCard extends LitElement {
           : ""}${activeColor
           ? `--fp-active:${activeColor};`
           : ""}${badgeInk ? `--fp-ink:${badgeInk};` : ""}"
-  title=${this._label(item, renderHass)}
+        title=${this._label(item, renderHass)}
         role=${interactive ? "button" : nothing}
         tabindex=${interactive ? "0" : nothing}
         @action=${(ev: CustomEvent<{ action: "tap" | "hold" | "double_tap" }>) =>
@@ -822,8 +820,8 @@ export class FloorplanCard extends LitElement {
     // Overlay sizing mode. --fp-plan-w is the canvas width *as displayed*, so a
     // rotated plan divides by the dimension 100cqw actually measures.
     const scale = normalizeOverlayScale(c.overlayScale);
-    // Follow the real sun (issue #113). Elevation comes from the active render
-    // state source, so replay and live rendering stay consistent.
+    // Follow the real sun (issue #113). Elevation comes from the HA instance,
+    // so every viewer sees the same picture regardless of their own timezone.
     const sunLevel = c.sunDimming
       ? sunBrightness(
           renderHass?.states["sun.sun"]?.attributes?.elevation,
@@ -1461,332 +1459,6 @@ export class FloorplanCard extends LitElement {
     }
     .plan.scale-plan .item > .label.label-right {
       left: calc(100% + 0.33em);
-    }
-    .replay-panel {
-      position: relative;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      padding: 12px 12px 10px;
-      border: 1px solid var(--divider-color, #e0e0e0);
-      border-radius: 12px;
-      background: var(--secondary-background-color, rgba(0, 0, 0, 0.03));
-      overflow-x: hidden;
-    }
-    .replay-panel-toggle {
-      display: flex;
-      justify-content: flex-end;
-      margin: 0 0 4px;
-    }
-    .replay-hide-toggle,
-    .replay-show-toggle {
-      border: 1px solid var(--divider-color, #ccc);
-      border-radius: 999px;
-      background: var(--card-background-color, #fff);
-      color: var(--primary-text-color);
-      padding: 4px 10px;
-      font-size: 12px;
-      line-height: 1.2;
-      cursor: pointer;
-      white-space: nowrap;
-    }
-    .replay-hide-toggle {
-      position: absolute;
-      top: 6px;
-      right: 6px;
-      z-index: 1;
-      padding: 2px 8px;
-      font-size: 11px;
-      text-transform: lowercase;
-    }
-    .replay-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-      padding-right: 52px;
-    }
-    .replay-meta {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-    .replay-chip {
-      display: inline-flex;
-      align-items: center;
-      padding: 2px 8px;
-      border-radius: 999px;
-      background: var(--card-background-color, #fff);
-      color: var(--primary-text-color);
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-    .replay-time {
-      font-size: 12px;
-      color: var(--secondary-text-color, #666);
-    }
-    .replay-status {
-      font-size: 12px;
-      color: var(--secondary-text-color, #666);
-    }
-    .replay-toolbar {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      align-items: end;
-      justify-content: space-between;
-    }
-    .replay-toolbar-toggles {
-      display: flex;
-      gap: 6px;
-      align-items: center;
-      flex-wrap: wrap;
-      justify-content: flex-end;
-    }
-    .replay-lanes {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      min-width: 0;
-    }
-    .replay-transport {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      align-items: center;
-    }
-    .replay-speed-toggle {
-      border: 1px solid var(--divider-color, #ccc);
-      border-radius: 999px;
-      background: var(--card-background-color, #fff);
-      color: var(--primary-text-color);
-      padding: 4px 10px;
-      font-size: 12px;
-      line-height: 1.2;
-      cursor: pointer;
-      white-space: nowrap;
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-    }
-    .replay-icon-button {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 30px;
-      height: 28px;
-      padding: 2px 6px;
-    }
-    .replay-icon-button ha-icon,
-    .replay-speed-toggle ha-icon,
-    .replay-run-button ha-icon {
-      --mdc-icon-size: 16px;
-    }
-    .replay-speed-panel {
-      border: 1px solid var(--divider-color, #ddd);
-      border-radius: 8px;
-      background: var(--card-background-color, #fff);
-      padding: 8px 10px;
-      min-width: 0;
-    }
-    .replay-range {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      align-items: end;
-    }
-    .replay-range-tools {
-      display: flex;
-      gap: 4px;
-    }
-    .replay-view-tools {
-      display: flex;
-      gap: 6px;
-      align-items: center;
-    }
-    .replay-timeline-wrap {
-      max-height: 220px;
-      overflow-y: auto;
-      overflow-x: hidden;
-      border: 1px solid var(--divider-color, #ccc);
-      border-radius: 8px;
-      background: var(--card-background-color, #fff);
-      min-width: 0;
-    }
-    .replay-range-field,
-    .replay-speed-field {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      font-size: 12px;
-      color: var(--secondary-text-color, #666);
-    }
-    .replay-range-field {
-      flex: 1 1 210px;
-      min-width: 180px;
-    }
-    .replay-speed-group {
-      flex: 1 1 auto;
-      min-width: 0;
-      max-width: 100%;
-      margin-left: 0;
-    }
-    .replay-range input,
-    .replay-speed-slider,
-    .replay-speed-field input {
-      border: 1px solid var(--divider-color, #ccc);
-      border-radius: 6px;
-      background: var(--card-background-color, #fff);
-      color: var(--primary-text-color);
-      padding: 4px 8px;
-      font-size: 12px;
-      min-width: 150px;
-    }
-    .replay-toolbar button,
-    .replay-range-tools button,
-    .replay-toolbar select,
-    .replay-speed-field input {
-      border: 1px solid var(--divider-color, #ccc);
-      border-radius: 6px;
-      background: var(--card-background-color, #fff);
-      color: var(--primary-text-color);
-      padding: 4px 8px;
-      font-size: 12px;
-      line-height: 1;
-    }
-    .replay-speed-slider {
-      padding: 0;
-      width: 100%;
-      min-width: 0;
-      max-width: 100%;
-    }
-    .replay-speed {
-      width: 92px;
-      min-width: 0;
-      align-self: flex-start;
-    }
-    .replay-run-button {
-      min-width: 82px;
-      font-weight: 600;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .replay-toolbar button,
-    .replay-range-tools button {
-      cursor: pointer;
-    }
-    @media (max-width: 720px) {
-      .replay-toolbar {
-        align-items: stretch;
-      }
-      .replay-speed-group {
-        margin-left: 0;
-        max-width: 100%;
-      }
-    }
-    .replay-event-log {
-      border: 1px solid var(--divider-color, #e0e0e0);
-      border-radius: 8px;
-      background: var(--card-background-color, #fff);
-      padding: 8px 10px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .replay-event-log.collapsed {
-      padding-bottom: 8px;
-    }
-    .replay-timeline-toggle,
-    .replay-log-toggle {
-      align-self: flex-start;
-      border: 1px solid var(--divider-color, #ccc);
-      border-radius: 999px;
-      background: var(--secondary-background-color, rgba(0, 0, 0, 0.03));
-      color: var(--primary-text-color);
-      padding: 4px 8px;
-      font-size: 11px;
-      cursor: pointer;
-    }
-    .replay-event-log ul {
-      list-style: none;
-      margin: 0;
-      padding: 0;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      max-height: 180px;
-      overflow: auto;
-      overscroll-behavior: contain;
-    }
-    .replay-event-item {
-      display: grid;
-      grid-template-columns: auto auto auto minmax(0, 1fr) auto;
-      gap: 8px;
-      align-items: center;
-      font-size: 12px;
-      color: var(--secondary-text-color, #666);
-      user-select: text;
-      cursor: text;
-      padding: 2px 0;
-    }
-    .replay-event-passed {
-      color: var(--primary-text-color);
-    }
-    .replay-event-current {
-      background: var(--secondary-background-color, rgba(0, 0, 0, 0.03));
-      border-radius: 6px;
-      padding: 4px 6px;
-      margin: -4px -6px;
-    }
-    .replay-event-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: var(--divider-color, #ccc);
-      flex-shrink: 0;
-    }
-    .replay-event-time {
-      color: var(--secondary-text-color, #666);
-      white-space: nowrap;
-    }
-    .replay-event-entity {
-      color: var(--primary-text-color);
-      font-weight: 600;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .replay-event-icon {
-      display: inline-flex;
-      align-items: center;
-      color: var(--secondary-text-color, #666);
-    }
-    .replay-event-icon ha-icon {
-      --mdc-icon-size: 16px;
-    }
-    .replay-event-change {
-      color: var(--secondary-text-color, #666);
-      white-space: nowrap;
-      text-align: right;
-    }
-    .replay-panel-hidden {
-      border: 1px dashed var(--divider-color, #ccc);
-      border-radius: 8px;
-      background: var(--card-background-color, #fff);
-      padding: 8px 10px;
-    }
-    .replay-toolbar-hidden {
-      justify-content: flex-end;
-      margin: 0;
-    }
-    .replay-empty {
-      font-size: 12px;
-      color: var(--secondary-text-color, #666);
     }
     .floor-switcher {
       position: absolute;
