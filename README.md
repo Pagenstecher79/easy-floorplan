@@ -405,6 +405,7 @@ and remain valid for backward compatibility.
 | `enabled` | boolean | `false` | Shows replay controls and enables loading history for mapped entities. |
 | `lookbackSeconds` | number | `3600` | Initial replay window length in seconds. Must be positive. |
 | `defaultSpeed` | number | auto | Playback speed in simulated seconds per real second. `1` means real-time. |
+| `debug` | boolean | `false` | Log replay lifecycle (load, seek, play, pause) to the browser console. Off by default — seeking logs once per frame. |
 
 ### Floor
 

@@ -182,6 +182,22 @@ export class FloorplanCard extends LitElement {
     this._replayController.syncHistoryServiceContext();
   }
 
+  /**
+   * What a cached history window depends on: the replay settings, and the set
+   * of entities a window is fetched for. Everything else in the config can
+   * change without invalidating what history was already loaded.
+   */
+  private _lastReplayCacheKey?: string;
+  private _replayCacheKey(): string {
+    const r = this._config?.historyReplay;
+    return JSON.stringify([
+      r?.enabled ?? false,
+      r?.lookbackSeconds ?? null,
+      r?.defaultSpeed ?? null,
+      [...this._watchedEntities].sort(),
+    ]);
+  }
+
 
   public setConfig(config: FloorplanCardConfig): void {
     // Cheap shape assertions so malformed YAML surfaces as HA's error card
@@ -211,7 +227,15 @@ export class FloorplanCard extends LitElement {
     this._watchedEntities = collectWatchedEntities(this._config);
     this._syncHistoryServiceContext();
     this._replayController.clearConfigColorCache();
-    this._replayController.historyService().clearCache();
+    // HA calls setConfig on every keystroke in the config box. Clearing the
+    // history cache unconditionally meant one history query per character for
+    // anyone with replay enabled, so only drop it when something replay
+    // actually depends on has changed.
+    const replayKey = this._replayCacheKey();
+    if (replayKey !== this._lastReplayCacheKey) {
+      this._lastReplayCacheKey = replayKey;
+      this._replayController.historyService().clearCache();
+    }
     if (!this._replayController.state.configured) {
       this._replayController.pausePlayback();
       this._replayController.stopReplayLoop();

@@ -514,6 +514,96 @@ describe("FloorplanCard replay", () => {
     expect(replaySpeed).toBe(1);
   });
 
+  describe("the history cache survives an unrelated setConfig", () => {
+    // HA calls setConfig on every keystroke in the config box. Clearing the
+    // cache there meant one history query per character typed.
+    const floor = (items: { id: string; x: number; y: number; entity?: string }[] = []) => ({
+      id: "f1", name: "Floor 1",
+      walls: [], openings: [], items, texts: [], furniture: [], trackers: [], areas: [],
+    });
+    const config = (over: Record<string, unknown> = {}, items?: Parameters<typeof floor>[0]) => ({
+      type: "easy-floorplan-card",
+      width: 1000,
+      height: 600,
+      historyReplay: { enabled: true, lookbackSeconds: 3600 },
+      floors: [floor(items ?? [{ id: "a", x: 10, y: 10, entity: "sensor.a" }])],
+      ...over,
+    });
+
+    const cardWithSpy = () => {
+      const card = document.createElement("easy-floorplan-card") as FloorplanCard;
+      card.setConfig(config() as never);
+      const spy = vi.spyOn((card as any)._replayController.historyService(), "clearCache");
+      return { card, spy };
+    };
+
+    it("keeps what it loaded when nothing replay depends on changed", () => {
+      const { card, spy } = cardWithSpy();
+      // Same config again, then an edit to a field replay does not read.
+      card.setConfig(config() as never);
+      card.setConfig(config({ title: "Downstairs" }) as never);
+      card.setConfig(config({ width: 1200 }) as never);
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it("drops it when the replay window changes", () => {
+      const { card, spy } = cardWithSpy();
+      card.setConfig(config({ historyReplay: { enabled: true, lookbackSeconds: 7200 } }) as never);
+      expect(spy).toHaveBeenCalledTimes(1);
+    });
+
+    it("drops it when replay is switched off", () => {
+      const { card, spy } = cardWithSpy();
+      card.setConfig(config({ historyReplay: { enabled: false, lookbackSeconds: 3600 } }) as never);
+      expect(spy).toHaveBeenCalledTimes(1);
+    });
+
+    it("drops it when the entities a window is fetched for change", () => {
+      const { card, spy } = cardWithSpy();
+      card.setConfig(config({}, [
+        { id: "a", x: 10, y: 10, entity: "sensor.a" },
+        { id: "b", x: 20, y: 20, entity: "sensor.b" },
+      ]) as never);
+      expect(spy).toHaveBeenCalledTimes(1);
+    });
+
+    it("ignores the order the same entities are written in", () => {
+      const { card, spy } = cardWithSpy();
+      card.setConfig(config({}, [
+        { id: "b", x: 20, y: 20, entity: "sensor.b" },
+        { id: "a", x: 10, y: 10, entity: "sensor.a" },
+      ]) as never);
+      // sensor.b is new, so this one does clear.
+      expect(spy).toHaveBeenCalledTimes(1);
+      spy.mockClear();
+      card.setConfig(config({}, [
+        { id: "a", x: 10, y: 10, entity: "sensor.a" },
+        { id: "b", x: 20, y: 20, entity: "sensor.b" },
+      ]) as never);
+      // Same set, written the other way round: nothing to drop.
+      expect(spy).not.toHaveBeenCalled();
+    });
+  });
+
+  it("logs replay lifecycle only when historyReplay.debug is set", () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const base = {
+      type: "easy-floorplan-card", width: 1000, height: 600,
+      floors: [{ id: "f1", name: "Floor 1", walls: [], openings: [], items: [], texts: [], furniture: [], trackers: [], areas: [] }],
+    };
+
+    const quiet = document.createElement("easy-floorplan-card") as FloorplanCard;
+    quiet.setConfig({ ...base, historyReplay: { enabled: true } } as never);
+    // seek is the one that fires per frame while the playhead is dragged.
+    (quiet as any)._replayController.seekReplay(1000);
+    expect(log).not.toHaveBeenCalled();
+
+    const loud = document.createElement("easy-floorplan-card") as FloorplanCard;
+    loud.setConfig({ ...base, historyReplay: { enabled: true, debug: true } } as never);
+    (loud as any)._replayController.seekReplay(1000);
+    expect(log).toHaveBeenCalled();
+  });
+
   it("maps logarithmic slider values to replay speed and back", () => {
     const sliderToSpeed = sliderValueToReplaySpeed;
     const speedToSlider = replaySpeedToSliderValue;

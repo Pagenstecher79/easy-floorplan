@@ -115,6 +115,10 @@ export class ReplayControllerImpl implements ReplayController {
   }
 
   private logReplay(message: string, data?: Record<string, unknown>): void {
+    // Opt-in: this is called on seek, so a playhead drag emits one line per
+    // frame. Warnings and errors elsewhere in this module stay ungated — those
+    // are real failures and should not need a config change to surface.
+    if (!this._card.getConfig()?.historyReplay?.debug) return;
     console.log(message, data ?? {});
   }
 

@@ -1197,6 +1197,13 @@ export interface HistoryReplayConfig {
   enabled?: boolean;
   lookbackSeconds?: number;
   defaultSpeed?: number;
+  /**
+   * Log replay lifecycle to the browser console. Off by default: these fire on
+   * every seek, so scrubbing the playhead would otherwise bury anything else
+   * in the console. Failures are reported through `console.warn`/`error`
+   * regardless — this flag only gates the running commentary.
+   */
+  debug?: boolean;
 }
 
 export interface FloorplanCardConfig extends LovelaceCardConfig {

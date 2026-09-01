@@ -1,6 +1,7 @@
-import { LitElement, css, html } from "lit";
+import { LitElement, css, html, unsafeCSS } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { resolveReplayEventColor, type HistoryEventInput } from "./history-service";
+import { SKIN_ACCENT } from "../skins";
 
 @customElement("easy-floorplan-history-timeline")
 export class HistoryTimeline extends LitElement {
@@ -313,7 +314,7 @@ export class HistoryTimeline extends LitElement {
       background: var(--divider-color, #ddd);
     }
     .track { position: absolute; inset: 0; border-radius: 999px; background: var(--divider-color, #ddd); }
-    .playhead { position: absolute; top: -2px; width: 2px; height: calc(100% + 4px); background: var(--primary-color, #03a9f4); }
+    .playhead { position: absolute; top: -2px; width: 2px; height: calc(100% + 4px); background: ${unsafeCSS(SKIN_ACCENT)}; }
     .playhead-expanded { top: 0; bottom: 0; height: auto; transform: translateX(-50%); }
     .marker-cluster {
       position: absolute;
