@@ -113,6 +113,12 @@ then pick the entity in the **Element** section below the canvas.
 - **Label position** — **Below** the badge (the default), or hung off its **left** or
   **right**. A reading under a badge grows in both directions and meets whatever sits
   beside it; hung off one side it grows one way only.
+- **Disable Label Color** (disableLabelColor)
+  By default, an item's label text automatically adapts its color based on the state or
+  active color rules. For some items, this can impact readability or clash with the desired design.
+  With the new disableLabelColor boolean toggle (available in Group 3 of the item editor), you can 
+  override this behavior per item. When set to true, the label text will stay locked to its default 
+  theme color, while the icon and badge continue to reflect the dynamic state colors.
 - **Badge shows** — one dropdown for what the device draws: *Icon* — **still**,
   **spinning** or **pulsing** — its *Value*, or *Nothing* (label only). **Value** draws
   the reading inside the badge — a thermostat reads `21°` in the circle your state rules
