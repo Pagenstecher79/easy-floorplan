@@ -16,10 +16,10 @@ export function getDefaultReplayWindow(config: FloorplanCardConfig | undefined):
 }
 
 export function normalizeReplayWindow(start: number, end: number): { start: number; end: number } {
-  const normalizedStart = Math.min(start, end);
-  const normalizedEnd = Math.max(start, end);
+  const normalizedStart = Math.max(0, Math.min(start, end));
+  const normalizedEnd = Math.max(0, Math.max(start, end));
   return {
-    start: Math.max(0, normalizedStart),
+    start: normalizedStart,
     end: Math.max(normalizedStart, normalizedEnd),
   };
 }

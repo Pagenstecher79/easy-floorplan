@@ -545,7 +545,14 @@ describe("FloorplanCard replay", () => {
         "light.kitchen": { entity_id: "light.kitchen", state: "on", attributes: { friendly_name: "Kitchen" } },
         "switch.lounge": { entity_id: "switch.lounge", state: "off", attributes: { friendly_name: "Lounge" } },
       },
-      callApi: vi.fn(),
+      callApi: vi.fn(async () => {
+        const older = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+        const recent = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+        return [
+          { entity_id: "light.kitchen", states: [{ state: "off", last_updated: older }, { state: "on", last_updated: recent }] },
+          { entity_id: "switch.lounge", states: [{ state: "off", last_updated: older }, { state: "on", last_updated: recent }] },
+        ];
+      }),
       callService: vi.fn(),
       formatEntityState: (state: HassEntity) => state.state,
       entities: {},
@@ -830,7 +837,17 @@ describe("FloorplanCard replay", () => {
           attributes: { friendly_name: "Kitchen" },
         },
       },
-      callApi: vi.fn(),
+      callApi: vi.fn(async () => {
+        const older = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+        const recent = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+        return [{
+          entity_id: "light.kitchen",
+          states: [
+            { state: "off", attributes: {}, last_updated: older },
+            { state: "on", attributes: { color: "#ffcc00" }, last_updated: recent },
+          ],
+        }];
+      }),
       callService: vi.fn(),
       formatEntityState: (state: HassEntity) => state.state,
       entities: {},
@@ -893,7 +910,11 @@ describe("FloorplanCard replay", () => {
     const card = document.createElement("easy-floorplan-card") as FloorplanCard;
     const hass = {
       states: {},
-      callApi: vi.fn(),
+      callApi: vi.fn(async () => {
+        const older = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+        const recent = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+        return [{ entity_id: "light.kitchen", states: [{ state: "off", last_updated: older }, { state: "on", last_updated: recent }] }];
+      }),
       callService: vi.fn(),
       formatEntityState: (state: HassEntity) => state.state,
       entities: {},
@@ -954,7 +975,14 @@ describe("FloorplanCard replay", () => {
     const card = document.createElement("easy-floorplan-card") as FloorplanCard;
     const hass = {
       states: {},
-      callApi: vi.fn(),
+      callApi: vi.fn(async () => {
+        const older = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+        const recent = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+        return [
+          { entity_id: "light.kitchen", states: [{ state: "off", last_updated: older }, { state: "on", last_updated: recent }] },
+          { entity_id: "light.lounge", states: [{ state: "off", last_updated: older }, { state: "on", last_updated: recent }] },
+        ];
+      }),
       callService: vi.fn(),
       formatEntityState: (state: HassEntity) => state.state,
       entities: {},
@@ -1003,7 +1031,7 @@ describe("FloorplanCard replay", () => {
         "light.kitchen": { entity_id: "light.kitchen", state: "off", attributes: { friendly_name: "Kitchen" } },
         "light.lounge": { entity_id: "light.lounge", state: "off", attributes: { friendly_name: "Lounge" } },
       },
-      callApi: vi.fn(),
+      callApi: vi.fn(async () => []),
       callService: vi.fn(),
       formatEntityState: (state: HassEntity) => state.state,
       entities: {},

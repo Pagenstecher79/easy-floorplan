@@ -185,7 +185,6 @@ export class FloorplanCard extends LitElement {
 
 
   public setConfig(config: FloorplanCardConfig): void {
-    console.log("plk setConfig called");
     // Cheap shape assertions so malformed YAML surfaces as HA's error card
     // instead of a render crash deep inside the SVG.
     if (!config || typeof config !== "object") throw new Error("Invalid configuration");
@@ -844,9 +843,9 @@ export class FloorplanCard extends LitElement {
           // does for sunlight.
           glowClearSpan(
             o,
-            this._openingAmount(o),
-            this._openingSecond(o)?.amount,
-            o.shutterEntity ? shutterAmount(this.hass?.states[o.shutterEntity], o.shutterInvert) : undefined
+            this._openingAmount(o, renderHass),
+            this._openingSecond(o, renderHass)?.amount,
+            o.shutterEntity ? shutterAmount(renderHass?.states[o.shutterEntity], o.shutterInvert) : undefined
           )
         )
       : active.walls;

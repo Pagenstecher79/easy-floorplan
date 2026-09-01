@@ -1,6 +1,7 @@
 import { LitElement, css, html, nothing, type TemplateResult } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
+import { cssColor } from "../css-safe";
 import { formatReplayInputValue, sliderValueToReplaySpeed } from "./replay-utils";
 import { resolveReplayEventColor, type HistoryEventInput } from "./history-service";
 
@@ -546,13 +547,15 @@ export class ReplayPanel extends LitElement {
 
   private _renderEventItem(event: HistoryEventInput, isCurrent: boolean): TemplateResult {
     const passed = event.timestamp <= this.currentTime;
-    const color =
+    const rawColor =
       (typeof event.color === "string" ? event.color : undefined)
       ?? (typeof event.attributes?.color === "string" ? event.attributes.color : undefined)
       ?? resolveReplayEventColor(event);
+    const color = cssColor(rawColor);
+    const dotStyle = color ? `background:${color}; box-shadow:0 0 0 2px ${color}22;` : nothing;
     return html`
       <li class="replay-event-item ${passed ? "replay-event-passed" : ""} ${isCurrent ? "replay-event-current" : ""}" data-timestamp=${event.timestamp}>
-        <span class="replay-event-dot" style=${`background:${color}; box-shadow:0 0 0 2px ${color}22;`}></span>
+        <span class="replay-event-dot" style=${dotStyle}></span>
         <span class="replay-event-time">${new Date(event.timestamp * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}</span>
         <span class="replay-event-icon"><ha-icon icon="mdi:swap-horizontal"></ha-icon></span>
         <span class="replay-event-entity">${event.entityId}</span>
