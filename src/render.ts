@@ -1480,6 +1480,16 @@ export function editorItemLabel(
 export function itemLabelSize(v: unknown): number {
   return Math.min(40, Math.max(8, cssNumber(v, DEFAULT_LABEL_SIZE)));
 }
+/**
+ * Resolves the label color for an item, respecting the `disableLabelColor` toggle.
+ * When disabled, it returns undefined so the label falls back to the theme default.
+ */
+export function itemLabelColor(
+  item: { disableLabelColor?: boolean },
+  stateColor: string | undefined
+): string | undefined {
+  return item.disableLabelColor ? undefined : stateColor;
+}
 
 /** Clamp a config area `labelSize` to the same 8–40 range item labels use. */
 export function areaLabelSize(v: unknown): number {

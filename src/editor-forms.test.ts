@@ -494,7 +494,7 @@ describe("itemForm", () => {
       ["name", "showName"], // 1. Identity — what it is
       ["entity", "attribute"], // 2. What it reads…
       ["showState"], //         …including whether its own state shows
-      ["labelPosition", "labelSize"], // 3. Label
+      ["labelPosition", "labelSize", "disableLabelColor"], // 3. Label
       ["badgeMode", "size", "angle"], // 4. Badge
       // 5. Colour and the readings list are hand-rolled rows, not ha-form
       //    fields, so they do not appear here — the editor slots them into

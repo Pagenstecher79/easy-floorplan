@@ -923,17 +923,27 @@ export function itemLabelForm(it: FloorItem): FormSpec {
         label: "Label size",
         selector: { number: { min: 8, max: 40, step: 1, mode: "slider", unit_of_measurement: "px" } },
       },
+      {
+        name: "disableLabelColor",
+        label: "Disable label color",
+        helper: "Keeps the text in its default color even if the icon changes color",
+        selector: { boolean: {} },
+      },
     ],
     data: {
       labelPosition: labelPositionOf(it),
       labelSize: it.labelSize ?? DEFAULT_LABEL_SIZE,
+      disableLabelColor: it.disableLabelColor ?? false,
     },
-    // Below is the default, so it stays out of the YAML.
-    toPatch: (p) =>
-      "labelPosition" in p && p.labelPosition === "below" ? { ...p, labelPosition: undefined } : p,
+    // Defaults stay out of the YAML to keep the configuration clean
+    toPatch: (p) => {
+      const out = { ...p };
+      if (out.labelPosition === "below") out.labelPosition = undefined;
+      if (out.disableLabelColor === false) out.disableLabelColor = undefined;
+      return out;
+    },
   };
 }
-
 /**
  * Group 4: the badge — what it holds, which reading, and how big it is.
  *
