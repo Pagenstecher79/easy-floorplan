@@ -332,7 +332,7 @@ export class ReplayControllerImpl implements ReplayController {
   public async loadReplayRange(start: number, end: number, loadToken: number): Promise<void> {
     try {
       const scopeKey = this.scopeKey();
-      await this._historyService.loadHistory(start, end, { scopeKey, hass: this._card.getHass(), watched: this.watchedEntities() });
+      await this._historyService.loadHistory(start, end, { scopeKey, hass: this._card.getHass(), watched: this.watchedEntities(), numericSteps: this._card.getConfig()?.historyReplay?.numericSteps });
       if (loadToken !== this.state.loadToken) return;
       const watched = new Set(this.watchedEntities());
       const loadedEvents = this._historyService.getEvents();

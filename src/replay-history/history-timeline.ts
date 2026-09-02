@@ -1,4 +1,5 @@
 import { LitElement, css, html, unsafeCSS } from "lit";
+import { guard } from "lit/directives/guard.js";
 import { customElement, property } from "lit/decorators.js";
 import { resolveReplayEventColor, type HistoryEventInput } from "./history-service";
 import { SKIN_ACCENT } from "../skins";
@@ -38,9 +39,14 @@ export class HistoryTimeline extends LitElement {
     return `clamp(${edgePx}px, ${raw}, calc(100% - ${edgePx}px))`;
   }
 
+  /** This timestamp as a 0-100 position in the window, unitless for calc(). */
+  private _pct(timestamp: number): number {
+    return ((timestamp - this.startTime) / Math.max(1, this.endTime - this.startTime)) * 100;
+  }
+
   private _markerStyle(event: HistoryEventInput, stackOffset = "0px"): string {
     const color = resolveReplayEventColor(event);
-    const base = `left:${this._getMarkerLeftClamped(event.timestamp, 7)};--stack-offset:${stackOffset};`;
+    const base = `left:${this._getMarkerLeftClamped(event.timestamp, 7)};--stack-offset:${stackOffset};--marker-pct:${this._pct(event.timestamp)};`;
     return color ? `${base}background:${color};box-shadow:0 0 0 2px ${color}22;` : base;
   }
 
@@ -59,7 +65,7 @@ export class HistoryTimeline extends LitElement {
     return this.events.filter((event) => event.timestamp >= start && event.timestamp <= end);
   }
 
-  private _groupEventsByTimestamp(): Array<{ timestamp: number; events: HistoryEventInput[]; left: string; passed: boolean }> {
+  private _groupEventsByTimestamp(): Array<{ timestamp: number; events: HistoryEventInput[]; left: string }> {
     const visibleEvents = this._visibleEvents();
     const grouped = new Map<number, HistoryEventInput[]>();
     for (const event of visibleEvents) {
@@ -75,7 +81,6 @@ export class HistoryTimeline extends LitElement {
       timestamp,
       events,
       left: this._getMarkerLeft(timestamp),
-      passed: timestamp <= this.currentTime,
     }));
   }
 
@@ -143,6 +148,7 @@ export class HistoryTimeline extends LitElement {
     return html`
       <div
         class="timeline-expanded timeline-interactive"
+        style="--playhead-pct:${this._pct(this.currentTime)}"
         role="slider"
         tabindex="0"
         aria-label="Replay timeline"
@@ -160,7 +166,8 @@ export class HistoryTimeline extends LitElement {
         <div class="timeline-track-overlay" style="grid-row:1 / span ${entities.length};" aria-hidden="true">
           <div class="playhead playhead-expanded" style="left:${playheadLeft}%"></div>
         </div>
-        ${entities.map((entityId, index) => {
+        ${guard([this.events, this.startTime, this.endTime], () =>
+          entities.map((entityId, index) => {
           const laneEvents = entityGroups.get(entityId) ?? [];
           const row = index + 1;
           const label = this._getEntityLabel(laneEvents[0]);
@@ -170,11 +177,10 @@ export class HistoryTimeline extends LitElement {
               ${laneEvents.map((event) => {
                 const color = resolveReplayEventColor(event);
                 const left = this._getMarkerLeftClamped(event.timestamp, 4);
-                const passed = event.timestamp <= this.currentTime;
                 return html`
                   <button
-                    class="marker ${passed ? "passed" : ""}"
-                    style=${`left:${left};${color ? `background:${color};box-shadow:0 0 0 2px ${color}22;` : ""}`}
+                    class="marker"
+                    style=${`left:${left};--marker-pct:${this._pct(event.timestamp)};${color ? `background:${color};box-shadow:0 0 0 2px ${color}22;` : ""}`}
                     title=${this._formatEventTitle(event)}
                     @click=${(ev: Event) => {
                       ev.stopPropagation();
@@ -185,7 +191,7 @@ export class HistoryTimeline extends LitElement {
               })}
             </div>
           `;
-        })}
+        }))}
       </div>
     `;
   }
@@ -215,7 +221,6 @@ export class HistoryTimeline extends LitElement {
       return html`<div class="timeline-empty">No history available.</div>`;
     }
     const span = Math.max(1, this.endTime - this.startTime);
-    const markerGroups = this._groupEventsByTimestamp();
     if (this.expanded) {
       return this._renderExpandedTimeline(span);
     }
@@ -223,6 +228,7 @@ export class HistoryTimeline extends LitElement {
     return html`
       <div
         class="timeline timeline-interactive"
+        style="--playhead-pct:${this._pct(this.currentTime)}"
         role="slider"
         tabindex="0"
         aria-label="Replay timeline"
@@ -238,11 +244,12 @@ export class HistoryTimeline extends LitElement {
         @keydown=${this._handleKeyDown}
       >
         <div class="track"></div>
-        <div class="playhead" style="left:${((this.currentTime - this.startTime) / span) * 100}%"></div>
-        ${markerGroups.map((group) => html`
+        <div class="playhead" style="left:${this._pct(this.currentTime)}%"></div>
+        ${guard([this.events, this.startTime, this.endTime], () =>
+          this._groupEventsByTimestamp().map((group) => html`
           <div
-            class="marker-cluster ${group.passed ? "passed" : ""}"
-            style="left:${this._getMarkerLeftClamped(group.timestamp, 7)};"
+            class="marker-cluster"
+            style="left:${this._getMarkerLeftClamped(group.timestamp, 7)};--marker-pct:${this._pct(group.timestamp)};"
             title=${this._formatClusterTitle(group.events)}
             @click=${(ev: Event) => {
               ev.stopPropagation();
@@ -253,7 +260,7 @@ export class HistoryTimeline extends LitElement {
               const stackOffset = index === 0 ? "-2px" : index === 1 ? "2px" : index === 2 ? "-4px" : "4px";
               return html`
                 <button
-                  class="marker ${group.passed ? "passed" : ""}"
+                  class="marker"
                   style=${this._markerStyle(event, stackOffset)}
                   title=${this._formatEventTitle(event)}
                   @click=${(ev: Event) => {
@@ -264,7 +271,7 @@ export class HistoryTimeline extends LitElement {
               `;
             })}
           </div>
-        `)}
+        `))}
       </div>
     `;
   }
@@ -338,8 +345,24 @@ export class HistoryTimeline extends LitElement {
       padding: 0;
       box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
     }
-    .marker.passed {
-      transform: translate(-50%, -50%) scale(1.2);
+    /*
+     * "Passed" — a marker the playhead has already crossed — used to be a class
+     * written per marker, which meant every one of them re-rendered on every
+     * frame of playback: 8,000 nodes rebuilt 20 times a second. Both numbers
+     * are now plain custom properties, so the whole effect is one variable
+     * written on the container and the markers themselves never change.
+     *
+     * clamp() is doing the comparison: the difference is scaled far past 1, so
+     * it saturates to exactly 1 when the playhead is ahead of the marker and 0
+     * when it is behind — a step function built out of arithmetic, because CSS
+     * has no way to ask whether one length is greater than another.
+     */
+    .marker,
+    .marker-cluster {
+      --passed: clamp(0, (var(--playhead-pct, 0) - var(--marker-pct, 0) + 0.000001) * 1000000, 1);
+    }
+    .marker {
+      transform: translate(-50%, -50%) scale(calc(1 + 0.2 * var(--passed)));
     }
     .timeline-empty { font-size: 12px; color: var(--secondary-text-color, #666); }
   `;

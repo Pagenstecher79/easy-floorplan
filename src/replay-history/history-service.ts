@@ -2,6 +2,8 @@ import type { HassEntity, HomeAssistant } from "../types";
 import { cssColor } from "../css-safe";
 import { SKIN_ACCENT, SKIN_ACTIVE, SKIN_INACTIVE } from "../skins";
 
+import { downsampleHistory } from "./downsample";
+
 export interface HistoryEventInput {
   timestamp: number;
   entityId: string;
@@ -53,6 +55,8 @@ export interface HistoryLoadOptions {
    * Keeps replay windows with different filters from sharing stale results.
    */
   scopeKey?: string;
+  /** See {@link HistoryReplayConfig.numericSteps}. */
+  numericSteps?: number;
   /**
    * When present, the service can fetch and normalize HA history directly rather
    * than delegating to a host card loader.
@@ -84,7 +88,9 @@ export class HistoryService implements HistoryServiceLike {
   public async loadHistory(start: number, end: number, options: HistoryLoadOptions = {}): Promise<void> {
     const loadId = ++this._loadCommitId;
     const scope = options.scopeKey ?? "all";
-    const key = `${start}:${end}:${scope}`;
+    // The resolution is part of the key: a window thinned to 25 levels is not
+    // the same data as the same window kept whole.
+    const key = `${start}:${end}:${scope}:${options.numericSteps ?? 0}`;
     if (this._cache.has(key)) {
       if (loadId === this._loadCommitId) {
         const cachedEvents = this._cache.get(key)!;
@@ -106,15 +112,16 @@ export class HistoryService implements HistoryServiceLike {
         ...event,
         attributes: event.attributes ?? {},
       }));
+    const thinned = downsampleHistory(normalized, { numericSteps: options.numericSteps });
 
     if (loadId !== this._loadCommitId) return;
-    this._cache.set(key, normalized);
+    this._cache.set(key, thinned);
     if (this._cache.size > this._maxCacheEntries) {
       const oldestKey = this._cache.keys().next().value as string | undefined;
       if (oldestKey) this._cache.delete(oldestKey);
     }
-    this._events = normalized;
-    this._eventsByEntity = this._groupEventsByEntity(normalized);
+    this._events = thinned;
+    this._eventsByEntity = this._groupEventsByEntity(thinned);
   }
 
   public async loadFromHass(hass: HomeAssistant, start: number, end: number, watched: string[]): Promise<HistoryEventInput[]> {

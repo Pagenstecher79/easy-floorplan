@@ -499,6 +499,83 @@ describe("HistoryTimeline", () => {
   });
 });
 
+describe("timeline cost during playback", () => {
+  const T0 = 1_760_000_000_000;
+  const WINDOW = 7_200_000;
+  const busy = () =>
+    Array.from({ length: 400 }, (_, i) => ({
+      timestamp: T0 + Math.round((i / 400) * WINDOW),
+      entityId: i % 2 ? "sensor.temp" : "light.kitchen",
+      oldState: "a",
+      newState: i % 2 ? String(20 + (i % 9)) : i % 4 ? "on" : "off",
+      attributes: {},
+    }));
+
+  it("does not rebuild the markers when only the playhead moves", async () => {
+    // The markers used to carry a `passed` class computed from currentTime, so
+    // every one of them re-rendered on every frame of playback. Holding an
+    // element identity across a seek is what proves they no longer do.
+    const el = document.createElement("easy-floorplan-history-timeline") as HistoryTimeline;
+    el.startTime = T0;
+    el.endTime = T0 + WINDOW;
+    el.currentTime = T0;
+    el.events = busy();
+    document.body.appendChild(el);
+    await el.updateComplete;
+
+    const markersBefore = [...(el.shadowRoot?.querySelectorAll(".marker") ?? [])];
+    expect(markersBefore.length).toBeGreaterThan(100);
+
+    el.currentTime = T0 + WINDOW * 0.75;
+    await el.updateComplete;
+
+    const markersAfter = [...(el.shadowRoot?.querySelectorAll(".marker") ?? [])];
+    expect(markersAfter.length).toBe(markersBefore.length);
+    // Same nodes, not replacements.
+    expect(markersAfter.every((m, i) => m === markersBefore[i])).toBe(true);
+  });
+
+  it("publishes the playhead position for the markers to compare against", async () => {
+    // The whole "passed" effect is now one custom property on the container,
+    // which is why moving it costs nothing.
+    const el = document.createElement("easy-floorplan-history-timeline") as HistoryTimeline;
+    el.startTime = T0;
+    el.endTime = T0 + WINDOW;
+    el.currentTime = T0 + WINDOW / 4;
+    el.events = busy();
+    document.body.appendChild(el);
+    await el.updateComplete;
+
+    const track = el.shadowRoot?.querySelector(".timeline") as HTMLElement;
+    expect(track.style.getPropertyValue("--playhead-pct")).toBe("25");
+
+    el.currentTime = T0 + WINDOW / 2;
+    await el.updateComplete;
+    expect(track.style.getPropertyValue("--playhead-pct")).toBe("50");
+
+    const marker = el.shadowRoot?.querySelector(".marker") as HTMLElement;
+    expect(marker.style.getPropertyValue("--marker-pct")).not.toBe("");
+  });
+
+  it("rebuilds when the events themselves change", async () => {
+    const el = document.createElement("easy-floorplan-history-timeline") as HistoryTimeline;
+    el.startTime = T0;
+    el.endTime = T0 + WINDOW;
+    el.events = busy();
+    document.body.appendChild(el);
+    await el.updateComplete;
+    const before = (el.shadowRoot?.querySelectorAll(".marker") ?? []).length;
+
+    el.events = busy().slice(0, 50);
+    await el.updateComplete;
+    const after = (el.shadowRoot?.querySelectorAll(".marker") ?? []).length;
+    // The guard is keyed on the events, so a new list does redraw. (lit reuses
+    // the leading DOM nodes when it diffs, so the count is the honest signal
+    // here, not element identity.)
+    expect(after).toBeLessThan(before);
+  });
+});
+
 describe("FloorplanCard replay", () => {
   it("treats historyReplay.defaultSpeed as a real-time multiplier", () => {
     const card = document.createElement("easy-floorplan-card") as FloorplanCard;

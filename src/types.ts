@@ -1233,6 +1233,18 @@ export interface HistoryReplayConfig {
    * regardless — this flag only gates the running commentary.
    */
   debug?: boolean;
+  /**
+   * How finely a numeric sensor's drift is kept, as the number of levels its
+   * observed range is divided into. A busy plan can produce thousands of
+   * points a sensor never meaningfully moved through, and every one becomes a
+   * marker on the timeline; thinning them cuts the time to draw a freshly
+   * loaded window without changing the shape of the curve.
+   *
+   * Discrete states — lights, doors, covers — are never thinned, whatever this
+   * is set to: each one is a distinct thing that happened. Unset keeps
+   * everything.
+   */
+  numericSteps?: number;
 }
 
 export interface FloorplanCardConfig extends LovelaceCardConfig {

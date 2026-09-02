@@ -407,6 +407,7 @@ and remain valid for backward compatibility.
 | `lookbackSeconds` | number | `3600` | Initial replay window length in seconds. Must be positive. |
 | `defaultSpeed` | number | auto | Playback speed in simulated seconds per real second. `1` means real-time. |
 | `debug` | boolean | `false` | Log replay lifecycle (load, seek, play, pause) to the browser console. Off by default — seeking logs once per frame. |
+| `numericSteps` | number | unset | Thin numeric sensor drift to this many levels of each sensor's observed range, to cut the time a freshly loaded window takes to draw. Discrete states — lights, doors, covers — are never thinned. Unset keeps every point. |
 
 ### Floor
 
@@ -1429,6 +1430,17 @@ hideBadgeEntity: sensor.room_temperature
 hideBadgeMode: threshold
 hideBadgeOperator: "<"
 hideBadgeThreshold: 20
+```
+
+A busy plan can load thousands of points a numeric sensor never meaningfully moved
+through, and each one becomes a marker on the timeline. `numericSteps: 25` keeps the
+shape of every curve — including its peaks — while drawing far fewer of them:
+
+```yaml
+historyReplay:
+  enabled: true
+  lookbackSeconds: 7200
+  numericSteps: 25
 ```
 
 **When the sensor doesn't answer.** A condition that can't be evaluated never hides —
