@@ -267,15 +267,24 @@ export function openingForm(o: Opening, featuresOf: (entityId: string) => number
         : dropdown(opt("double", "Double (two leaves)"), opt("single", "Single sash")),
     });
   }
-  // How much of the frame actually opens (issue #218). Only a single sash has
+  // How much of the frame actually opens (issue #218). Only a single leaf has
   // a remainder to be fixed: a double already splits the opening between its
-  // two leaves. Left at 1 it writes nothing, so this appears in no YAML that
-  // has not asked for it.
+  // two. Left at 1 it writes nothing, so this appears in no YAML that has not
+  // asked for it.
+  //
+  // Offered on doors as well as windows, unlike `fixed` above. A door leaf
+  // narrower than its frame is an ordinary sidelight door, not a degenerate
+  // case, and `renderOpening` already draws that remainder as a solid panel
+  // rather than glass — so the only thing that would be window-only here is
+  // the wording, which is why the wording is what varies.
   if (motion === "swing" && openingSash(o) === "single") {
     fields.push({
       name: "sashSpan",
-      label: "Sash width",
-      helper: "Share of the opening that actually opens — the rest is fixed glass",
+      label: o.type === "door" ? "Leaf width" : "Sash width",
+      helper:
+        o.type === "door"
+          ? "Share of the opening that actually swings — the rest is a fixed panel"
+          : "Share of the opening that actually opens — the rest is fixed glass",
       selector: { number: { min: MIN_SASH_SPAN, max: 1, step: 0.05, mode: "slider" } },
     });
   }

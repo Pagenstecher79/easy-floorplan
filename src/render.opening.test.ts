@@ -1200,6 +1200,18 @@ describe("renderOpening — a sash narrower than its frame (issue #218)", () => 
     expect(full).not.toContain('y1="0" x2=45 y2="0"'); // no fixed pane
   });
 
+  it("a door's remainder is a solid panel, not glass (review of #218)", () => {
+    // A door leaf narrower than its frame is a sidelight door, so the field is
+    // offered on doors too — and what it draws beside the leaf has to be the
+    // door's own solid panel, not the window's thin glass line.
+    const d = svgOf({ type: "door", sash: "single", sashSpan: 0.4 }, { open: true });
+    expect(d).toContain('x1=-9 y1="0" x2=45');
+    expect(d).toContain("stroke-width=2.5"); // solid panel
+    expect(d).not.toContain("stroke-width=1.5"); // not glass
+    // And still no jambs — a door is drawn by its leaf and arc alone.
+    expect(d).not.toContain('stroke-width="2"');
+  });
+
   it("is ignored by a double sash, which has no leftover to fix", () => {
     const two = svgOf({ type: "window", sash: "double", sashSpan: 0.4 } as Partial<Opening>, {
       open: true,

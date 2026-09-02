@@ -104,11 +104,16 @@ export interface Opening {
    * a sash that swings the full width of the frame is a lie about how much
    * glass moves.
    *
-   * Read by **single-sash swing openings only**. A double is two sashes that
-   * already split the opening between them, so there is no leftover to be
-   * fixed; sliders and roll-ups have their own panel arithmetic. The sash
-   * hangs at the hinge jamb and the remainder is drawn as fixed glass, so
-   * `flipH` moves both — the operable half and the pane — as one.
+   * Read by **single-leaf swing openings**, doors included — a door leaf
+   * narrower than its frame is an ordinary sidelight door. The remainder
+   * follows the type the rest of the symbol does: thin for a window's glass,
+   * solid for a door's panel. A double is two leaves that already split the
+   * opening between them, so there is no leftover to be fixed; sliders and
+   * roll-ups have their own panel arithmetic. The leaf hangs at the hinge
+   * jamb and the remainder beside it, so `flipH` moves both as one.
+   *
+   * Clamped to {@link MIN_SASH_SPAN}..1: a leaf of no width is a fixed pane,
+   * which `motion: "fixed"` says properly.
    *
    * Sunlight and lamp glow are unaffected: glass admits its whole gap however
    * the sash sits, which is the rule {@link glowClearFraction} already

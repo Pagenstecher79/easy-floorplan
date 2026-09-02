@@ -145,6 +145,20 @@ describe("openingForm", () => {
     expect(names({ ...win, motion: "fixed" } as Opening)).not.toContain("sashSpan");
   });
 
+  it("names the field for the opening it is on (review of #218)", () => {
+    // Offered on doors as well — a sidelight door is ordinary — but a door's
+    // remainder is a panel, not glass, so the wording has to follow the type.
+    const win = openingForm({ ...door, type: "window", sash: "single" } as Opening);
+    const dr = openingForm({ ...door, sash: "single" } as Opening);
+    const f = (spec: ReturnType<typeof openingForm>) =>
+      spec.fields.find((x) => x.name === "sashSpan")!;
+    expect(f(win).label).toBe("Sash width");
+    expect(f(win).helper).toContain("glass");
+    expect(f(dr).label).toBe("Leaf width");
+    expect(f(dr).helper).toContain("panel");
+    expect(f(dr).helper).not.toContain("glass");
+  });
+
   it("keeps a full-width sash and a swing motion out of the YAML (issue #218)", () => {
     const form = openingForm({ ...door, type: "window", sash: "single" } as Opening);
     expect(form.toPatch({ sashSpan: 1 })).toEqual({ sashSpan: undefined });
