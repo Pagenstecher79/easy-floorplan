@@ -140,6 +140,8 @@ import {
   wallsLightPassesThrough,
   openingClearFraction,
   openingClearSpan,
+  openingSashSpan,
+  MIN_SASH_SPAN,
   glowClearSpan,
   glowClearFraction,
   renderGlowMask,
@@ -4583,6 +4585,69 @@ describe("lightBadgePaint (#106)", () => {
 // Issue #145 meets #143: a two-panel slider has two sensors and its leaves do
 // not travel the full width, so neither the amount nor the leaf count could be
 // read off `entity` alone.
+describe("a fixed opening and a partial sash, as gaps (issue #218)", () => {
+  const win = (extra: Partial<Opening>) =>
+    ({ id: "o", type: "window", x: 0, y: 0, length: 100, angle: 0, ...extra }) as Opening;
+
+  it("a fixed opening is never a gap, whatever a sensor says", () => {
+    const f = win({ motion: "fixed" });
+    expect(openingClearFraction(f, 0)).toBe(0);
+    expect(openingClearFraction(f, 1)).toBe(0);
+    expect(openingClearSpan(f, 1)).toEqual([0.5, 0.5]);
+  });
+
+  it("but it is still glass, so light goes straight through it", () => {
+    // The distinction the feature turns on: no *airflow* gap, full daylight.
+    const f = win({ motion: "fixed" });
+    expect(glowClearFraction(f, 0)).toBe(1);
+    expect(openingSunFraction(f, openingClearFraction(f, 0))).toBe(1);
+  });
+
+  it("an opaque fixed panel is neither a gap nor a window", () => {
+    const f = win({ motion: "fixed", glazed: false });
+    expect(glowClearFraction(f, 1)).toBe(0);
+    expect(openingSunFraction(f, openingClearFraction(f, 1))).toBe(0);
+  });
+
+  it("a half-width sash swung wide open clears half the opening", () => {
+    const half = win({ sash: "single", sashSpan: 0.5 });
+    expect(openingClearFraction(half, 1)).toBeCloseTo(0.5);
+    expect(openingClearFraction(half, 0.5)).toBeCloseTo(0.25);
+    expect(openingClearFraction(half, 0)).toBe(0);
+  });
+
+  it("and clears it at its own jamb, where the sash is — not in the middle", () => {
+    const half = win({ sash: "single", sashSpan: 0.5 });
+    expect(openingClearSpan(half, 1)).toEqual([0, 0.5]);
+    // flipH hangs the sash on the other jamb, so the clear half moves with it.
+    expect(openingClearSpan(win({ sash: "single", sashSpan: 0.5, flipH: true }), 1)).toEqual([
+      0.5, 1,
+    ]);
+  });
+
+  it("a full-width sash keeps the centred span every plan already lights by", () => {
+    const full = win({ sash: "single" });
+    expect(openingClearFraction(full, 1)).toBe(1);
+    expect(openingClearSpan(full, 0.5)).toEqual([0.25, 0.75]);
+  });
+
+  it("clamps a nonsense span rather than drawing a sliver or an inside-out sash", () => {
+    expect(openingSashSpan(win({ sash: "single", sashSpan: 0 }))).toBe(MIN_SASH_SPAN);
+    expect(openingSashSpan(win({ sash: "single", sashSpan: -3 }))).toBe(MIN_SASH_SPAN);
+    expect(openingSashSpan(win({ sash: "single", sashSpan: 4 }))).toBe(1);
+    expect(openingSashSpan(win({ sash: "single", sashSpan: NaN }))).toBe(1);
+  });
+
+  it("is ignored where there is no leftover pane to describe", () => {
+    // A double splits the frame between its leaves; a slider and a roll-up
+    // have panel arithmetic of their own.
+    expect(openingSashSpan(win({ sash: "double", sashSpan: 0.4 }))).toBe(1);
+    expect(openingSashSpan(win({ motion: "slide", sashSpan: 0.4 }))).toBe(1);
+    expect(openingSashSpan(win({ motion: "roll", sashSpan: 0.4 }))).toBe(1);
+    expect(openingClearFraction(win({ sash: "double", sashSpan: 0.4 }), 1, 1)).toBe(1);
+  });
+});
+
 describe("openingClearFraction (#145 / #143)", () => {
   const slider = (sliderStyle: string): Opening =>
     ({ id: "o", type: "window", motion: "slide", sliderStyle, x: 300, y: 300, length: 200, angle: 0 }) as Opening;

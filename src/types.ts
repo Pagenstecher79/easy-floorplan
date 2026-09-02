@@ -78,8 +78,49 @@ export interface Opening {
    * wall (see {@link sliderStyle}); `roll` is a roll-up cover — garage door,
    * roller shutter — whose slatted curtain leaves the floor plane (issue #45),
    * drawn thinning toward the track line as it opens.
+   *
+   * `fixed` is the one that does not move at all (issue #218): a bay window, a
+   * picture window, a glass-brick panel — a hole in the wall filled with glass
+   * and nothing hinged about it. It is a fourth *motion* rather than a flag
+   * because that is what it is the fourth of, and because every other way of
+   * saying it lies: a swing window with no sensor draws shut but still carries
+   * a leaf and an arc, and one bound to a sensor could be told to open.
+   *
+   * A fixed opening ignores `entity` **for its drawing** — nothing to animate —
+   * but keeps everything else an opening has: it is still tappable, still
+   * badges, and still glass to the light. What it never is, is a gap: see
+   * {@link openingClearFraction}, which answers 0 for it whatever a sensor says.
    */
-  motion?: "swing" | "slide" | "roll";
+  motion?: "swing" | "slide" | "roll" | "fixed";
+  /**
+   * How much of the opening the operable sash actually covers, as a fraction
+   * of `length` (0..1]. Default 1 — the sash fills the opening, which is what
+   * every window drew before this existed.
+   *
+   * The case it exists for (issue #218): a window where only part of it opens
+   * and the rest is a fixed pane — one tall casement beside a wide fixed
+   * light, the sash hung in a frame twice its width. Drawn shut the two are
+   * indistinguishable; drawn open the difference is the whole point, because
+   * a sash that swings the full width of the frame is a lie about how much
+   * glass moves.
+   *
+   * Read by **single-leaf swing openings**, doors included — a door leaf
+   * narrower than its frame is an ordinary sidelight door. The remainder
+   * follows the type the rest of the symbol does: thin for a window's glass,
+   * solid for a door's panel. A double is two leaves that already split the
+   * opening between them, so there is no leftover to be fixed; sliders and
+   * roll-ups have their own panel arithmetic. The leaf hangs at the hinge
+   * jamb and the remainder beside it, so `flipH` moves both as one.
+   *
+   * Clamped to {@link MIN_SASH_SPAN}..1: a leaf of no width is a fixed pane,
+   * which `motion: "fixed"` says properly.
+   *
+   * Sunlight and lamp glow are unaffected: glass admits its whole gap however
+   * the sash sits, which is the rule {@link glowClearFraction} already
+   * applies. What it does change is {@link openingClearFraction} — a half-width
+   * sash swung fully open clears half the opening, not all of it.
+   */
+  sashSpan?: number;
   x: number;
   y: number;
   /** Length along the wall, in virtual units. */
