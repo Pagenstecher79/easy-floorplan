@@ -452,6 +452,20 @@ export function isLocked(f: Floor, sel: Sel): boolean {
 }
 
 /**
+ * The selected elements that a move may actually touch — everything not pinned
+ * (issue #191).
+ *
+ * The editor asks this before spending an undo step: a nudge whose whole
+ * selection is locked must do nothing at all, rather than commit arrays that
+ * are freshly allocated but value-identical. `_commitFloor` pushes history
+ * unconditionally and clears the redo stack, so "nothing moved" and "nothing
+ * happened" have to be the same thing here.
+ */
+export function movableSelection(f: Floor, sel: readonly Sel[]): Sel[] {
+  return sel.filter((s) => !isLocked(f, s));
+}
+
+/**
  * The element a click should select, given the candidates under the cursor and
  * what is selected now (issue #52). Repeat clicks at the same spot step
  * *down* the stack and wrap; a click elsewhere restarts at the most specific

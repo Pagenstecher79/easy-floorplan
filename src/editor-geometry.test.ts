@@ -11,6 +11,7 @@ import {
   attachedCorners,
   elementsAtPoint,
   isLocked,
+  movableSelection,
   cyclePick,
 } from "./editor-geometry";
 import type { OrigPos } from "./editor-geometry";
@@ -502,6 +503,48 @@ describe("locked elements yield the click (issue #191)", () => {
     // A selection naming something that no longer exists is stale state, not
     // a pinned element — calling it locked would refuse to move its group.
     expect(isLocked(f, { kind: "wall", id: "gone" })).toBe(false);
+  });
+});
+
+describe("a nudge with nothing movable does nothing at all (review of #191)", () => {
+  // _commitFloor pushes history unconditionally and .map() hands it freshly
+  // allocated arrays, so "every selected element is locked" has to be caught
+  // before the commit or an arrow key spends an undo step on nothing — and
+  // clears the redo stack while doing it.
+  const floor = {
+    id: "f",
+    name: "F",
+    walls: [{ id: "pinned", x1: 0, y1: 0, x2: 100, y2: 0, locked: true }],
+    openings: [],
+    items: [{ id: "loose", entity: "light.a", x: 50, y: 50 }],
+    texts: [],
+    furniture: [],
+    trackers: [],
+    areas: [{ id: "room", points: [{ x: 0, y: 0 }], locked: true }],
+  } as unknown as Floor;
+
+  it("reports nothing movable when every selected element is pinned", () => {
+    expect(
+      movableSelection(floor, [
+        { kind: "wall", id: "pinned" },
+        { kind: "area", id: "room" },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("reports the loose ones when a selection is mixed", () => {
+    expect(
+      movableSelection(floor, [
+        { kind: "wall", id: "pinned" },
+        { kind: "item", id: "loose" },
+      ]),
+    ).toEqual([{ kind: "item", id: "loose" }]);
+  });
+
+  it("passes an ordinary selection through untouched", () => {
+    const sel = [{ kind: "item", id: "loose" }] as const;
+    expect(movableSelection(floor, sel)).toEqual([...sel]);
+    expect(movableSelection(floor, [])).toEqual([]);
   });
 });
 

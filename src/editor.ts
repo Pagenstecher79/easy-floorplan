@@ -134,6 +134,7 @@ import {
   elementsAtPoint,
   cyclePick,
   isLocked,
+  movableSelection,
   elementsInRect,
   layoutPointsInPolygon,
   nearestAreaSnapPoint,
@@ -1123,6 +1124,12 @@ export class FloorplanCardEditor extends LitElement {
   private _nudge(dx: number, dy: number): void {
     if (!this._selection.length) return;
     const f = this._floor();
+    // Every selected element is pinned, so there is nothing to move. Return
+    // before committing: `_commitFloor` pushes a history entry unconditionally
+    // and `.map()` below hands it freshly allocated arrays, so an arrow key on
+    // a locked selection would otherwise spend an undo step on nothing — and
+    // wipe the redo stack while doing it (issue #191).
+    if (!movableSelection(f, this._selection).length) return;
     // Pinned elements sit out the nudge as they sit out a drag (issue #191).
     // Filtered per kind rather than from the selection, because _idsOfKind
     // also feeds copy and delete, which a lock deliberately does not block.
