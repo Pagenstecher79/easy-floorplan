@@ -1176,10 +1176,10 @@ describe("overlay scaling", () => {
   // path: dropping the argument at one of the badge/item call sites would
   // otherwise still pass. renderRipple is exported, so it anchors the wiring.
   it("threads the mode through a real render path, not just the helper", () => {
-    expect(flattenMarkup(renderRipple(true, "#fff", 80, 3, "plan"))).toContain(
+    expect(flattenMarkup(renderRipple(true, "#fff", 80, 0, 360, 3, "plan"))).toContain(
       "width:calc(80 * var(--fp-u, 1px))"
     );
-    expect(flattenMarkup(renderRipple(true, "#fff", 80, 3, "fixed"))).toContain("width:80px");
+    expect(flattenMarkup(renderRipple(true, "#fff", 80, 0, 360, 3, "fixed"))).toContain("width:80px");
   });
 
   it("clamps the area name size to the same range item labels use", () => {

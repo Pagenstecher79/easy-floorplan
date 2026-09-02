@@ -37,6 +37,8 @@ import {
   DEFAULT_SUN_MAX,
   DEFAULT_PRESS_EFFECT,
   DEFAULT_OFFLINE_STYLE,
+  DEFAULT_RIPPLE_DIRECTION,
+  DEFAULT_RIPPLE_WIDTH,
 } from "./types";
 import {
   DEFAULT_LABEL_SIZE,
@@ -1019,6 +1021,20 @@ export function itemEffectsForm(it: FloorItem, deviceClass?: string): FormSpec |
           number: { min: 40, max: 400, step: 4, mode: "slider", unit_of_measurement: "px" },
         },
       });
+      fields.push({
+        name: "rippleDirection",
+        label: "Ripple direction",
+        selector: {
+          number: { min: 0, max: 360, step: 1, mode: "slider", unit_of_measurement: "°" },
+        },
+      });
+      fields.push({
+        name: "rippleWidth",
+        label: "Ripple Width",
+        selector: {
+          number: { min: 0, max: 360, step: 1, mode: "slider", unit_of_measurement: "°" },
+        },
+      });
     }
   }
   if (lights) {
@@ -1049,6 +1065,8 @@ export function itemEffectsForm(it: FloorItem, deviceClass?: string): FormSpec |
     data: {
       ripple,
       rippleSize: it.rippleSize ?? DEFAULT_RIPPLE_SIZE,
+      rippleDirection: it.rippleDirection ?? DEFAULT_RIPPLE_DIRECTION,
+      rippleWidth: it.rippleWidth ?? DEFAULT_RIPPLE_WIDTH,
       glow: it.glow ?? false,
       glowRadius: it.glowRadius ?? DEFAULT_GLOW_RADIUS,
       glowColor: it.glowColor ?? "",

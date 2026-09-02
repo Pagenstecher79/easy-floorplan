@@ -4628,6 +4628,8 @@ export function renderRipple(
   active: boolean,
   color: string,
   sizePx: number,
+  direction: number,
+  width: number,
   rings = 3,
   scale: OverlayScale = "fixed"
 ): TemplateResult {
@@ -4635,7 +4637,7 @@ export function renderRipple(
   return html`
     <div
       class="ripple ${active ? "active" : ""}"
-      style="width:${size};height:${size};--fp-ripple-color:${cssColorOr(color, SKIN_ACCENT)};"
+      style="width:${size};height:${size};--fp-ripple-color:${cssColorOr(color, SKIN_ACCENT)};--fp-ripple-direction:${direction};--fp-ripple-width:${width}"
     >
       <span class="dot"></span>
       ${Array.from(

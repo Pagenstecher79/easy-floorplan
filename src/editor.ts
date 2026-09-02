@@ -39,6 +39,8 @@ import {
   DEFAULT_WIDTH,
   DEFAULT_HEIGHT,
   DEFAULT_RIPPLE_SIZE,
+  DEFAULT_RIPPLE_DIRECTION,
+  DEFAULT_RIPPLE_WIDTH,
   DEFAULT_TRACKER_DOT_SIZE,
   configsEqual,
   emptyConfig,
@@ -4194,6 +4196,8 @@ export class FloorplanCardEditor extends LitElement {
     const rippleColor =
       it.rippleColor ?? stateColor ?? activeColor ?? SKIN_ACCENT;
     const rippleSize = it.rippleSize ?? DEFAULT_RIPPLE_SIZE;
+    const rippleDirection = it.rippleDirection ?? DEFAULT_RIPPLE_DIRECTION;
+    const rippleWidth = it.rippleWidth ?? DEFAULT_RIPPLE_WIDTH;
 
     // Live preview: the icon animates exactly when the card would animate it
     // (entity currently active), so the "Badge shows" dropdown shows its
@@ -4231,10 +4235,10 @@ export class FloorplanCardEditor extends LitElement {
     // Editor always previews the ripple animated so its effect is visible.
     let visual: TemplateResult;
     if (display === "ripple") {
-      visual = renderRipple(true, rippleColor, rippleSize, 3, scale);
+      visual = renderRipple(true, rippleColor, rippleSize, rippleDirection, rippleWidth, 3, scale);
     } else if (display === "iconRipple") {
       visual = html`<div class="stack">
-        ${renderRipple(true, rippleColor, rippleSize, 3, scale)}
+        ${renderRipple(true, rippleColor, rippleSize, rippleDirection, rippleWidth, 3, scale)}
         <div class="stack-icon">${badge}</div>
       </div>`;
     } else {
@@ -5851,6 +5855,20 @@ export class FloorplanCardEditor extends LitElement {
       border-radius: 50%;
       border: 2px solid var(--fp-ripple-color);
       opacity: 0;
+
+      /* Keep only the angular slice the ring should travel along */
+      -webkit-mask: conic-gradient(
+        from calc(var(--fp-ripple-direction) * 1deg - var(--fp-ripple-width) * 1deg / 2),
+        #000 0deg,
+        #000 calc(var(--fp-ripple-width) * 1deg),
+        transparent calc(var(--fp-ripple-width) * 1deg)
+      );
+      mask: conic-gradient(
+        from calc(var(--fp-ripple-direction) * 1deg - var(--fp-ripple-width) * 1deg / 2),
+        #000 0deg,
+        #000 calc(var(--fp-ripple-width) * 1deg),
+        transparent calc(var(--fp-ripple-width) * 1deg)
+      );
     }
     .ripple.active .ring {
       animation: fp-ripple 1.8s ease-out infinite;
