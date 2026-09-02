@@ -113,6 +113,17 @@ then pick the entity in the **Element** section below the canvas.
 - **Label position** — **Below** the badge (the default), or hung off its **left** or
   **right**. A reading under a badge grows in both directions and meets whatever sits
   beside it; hung off one side it grows one way only.
+  - **Label Color Customization**
+  By default, an item's label text automatically adapts its color based on state or active color rules. For some items,
+  this can impact readability or clash with your desired dashboard design.
+  You can disable this automatic coloring and optionally assign a fixed custom color using disableLabelColor, useCustomLabelColor, and labelCustomColor.
+  | YAML Key | Type | Description |
+  | : આધાર / Key : | :--- | :--- |
+  | disableLabelColor | boolean | Keeps the text in its default theme color, preventing it from inheriting active or state colors. |
+  | useCustomLabelColor | boolean | Activates a custom color option when disableLabelColor is enabled, allowing you to override the theme default. |
+  | labelCustomColor | string | The fixed custom color (e.g., #ff0000 or red) applied to the label text. |
+  The useCustomLabelColor toggle appears in the visual editor as "Own color" only once disableLabelColor is activated, and toggling it reveals the color picker for precise tuning.
+  Example: Disable automatic state coloring and apply a fixed custom color to a label:
 - **Badge shows** — one dropdown for what the device draws: *Icon* — **still**,
   **spinning** or **pulsing** — its *Value*, or *Nothing* (label only). **Value** draws
   the reading inside the badge — a thermostat reads `21°` in the circle your state rules
