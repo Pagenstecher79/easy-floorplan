@@ -10,7 +10,11 @@ import type {
   Floor,
   Area,
   OverlayScale,
+  RenderHass,
 } from "./types";
+import { buildRenderHass } from "./replay-history/render-state-service";
+import "./replay-history/history-timeline";
+import "./replay-history/replay-panel";
 import { cssColor, cssColorOr, cssNumber, cssIdent, cssEntityId, contrastText } from "./css-safe";
 import {
   DEFAULT_WIDTH,
@@ -132,6 +136,8 @@ import {
 } from "./skins";
 import { actionForGesture, executeAction, hasAction, itemIsInteractive } from "./actions";
 import { actionHandler } from "./action-handler";
+import { ReplayControllerImpl } from "./replay-history/replay-controller";
+import { createReplayPanelProps, renderReplayPanel } from "./replay-history/replay-panel";
 
 /**
  * Which floor each plan was last viewed on, keyed by its floor-id set (issue
@@ -166,6 +172,33 @@ export class FloorplanCard extends LitElement {
   private readonly _glowIdBase = `fp-glow-${FloorplanCard._nextGlowId++}`;
   /** Entity ids this plan actually displays; used to skip irrelevant hass updates. */
   private _watchedEntities: Set<string> = new Set();
+  private readonly _replayController = new ReplayControllerImpl({
+    getConfig: () => this._config,
+    getHass: () => this.hass,
+    getActiveFloorId: () => this._activeFloorId,
+    requestUpdate: () => this.requestUpdate(),
+  });
+
+  private _syncHistoryServiceContext(): void {
+    this._replayController.syncHistoryServiceContext();
+  }
+
+  /**
+   * What a cached history window depends on: the replay settings, and the set
+   * of entities a window is fetched for. Everything else in the config can
+   * change without invalidating what history was already loaded.
+   */
+  private _lastReplayCacheKey?: string;
+  private _replayCacheKey(): string {
+    const r = this._config?.historyReplay;
+    return JSON.stringify([
+      r?.enabled ?? false,
+      r?.lookbackSeconds ?? null,
+      r?.defaultSpeed ?? null,
+      [...this._watchedEntities].sort(),
+    ]);
+  }
+
 
   public setConfig(config: FloorplanCardConfig): void {
     // Cheap shape assertions so malformed YAML surfaces as HA's error card
@@ -193,6 +226,23 @@ export class FloorplanCard extends LitElement {
       furniture: config.furniture ?? [],
     };
     this._watchedEntities = collectWatchedEntities(this._config);
+    this._syncHistoryServiceContext();
+    this._replayController.clearConfigColorCache();
+    // HA calls setConfig on every keystroke in the config box. Clearing the
+    // history cache unconditionally meant one history query per character for
+    // anyone with replay enabled, so only drop it when something replay
+    // actually depends on has changed.
+    const replayKey = this._replayCacheKey();
+    if (replayKey !== this._lastReplayCacheKey) {
+      this._lastReplayCacheKey = replayKey;
+      this._replayController.historyService().clearCache();
+    }
+    if (!this._replayController.state.configured) {
+      this._replayController.pausePlayback();
+      this._replayController.stopReplayLoop();
+    } else if (this.hass) {
+      this._replayController.ensureStarted();
+    }
     // Restore the floor this plan was last viewed on (issue #81). Only when
     // this instance has no floor of its own yet — a live floor switch always
     // wins — and only if that floor still exists.
@@ -231,6 +281,19 @@ export class FloorplanCard extends LitElement {
     else this.removeAttribute("data-skin");
   }
 
+  protected updated(changed: PropertyValues): void {
+    super.updated(changed);
+    if (changed.has("hass") || changed.has("_activeFloorId")) {
+      this._syncHistoryServiceContext();
+    }
+    if (
+      (changed.has("hass") || changed.has("_activeFloorId"))
+      && this._replayController.shouldAutoStart()
+    ) {
+      this._replayController.ensureStarted();
+    }
+  }
+
   public getCardSize(): number {
     return 6;
   }
@@ -260,20 +323,20 @@ export class FloorplanCard extends LitElement {
     return { columns: 12, rows: 8, min_columns: 6, min_rows: 4 };
   }
 
-  private _isOn(item: FloorItem): boolean {
+  private _isOn(item: FloorItem, renderHass?: RenderHass): boolean {
     // Domain-aware: locks say "unlocked", vacuums "cleaning" — never "on".
-    return entityIsActive(item.entity, this.hass?.states[item.entity]?.state);
+    return entityIsActive(item.entity, renderHass?.states[item.entity]?.state);
   }
 
   /** How far open an opening should be drawn (0..1), from its entity (or default). */
-  private _openingAmount(o: Opening): number {
-    const state = o.entity ? this.hass?.states[o.entity] : undefined;
+  private _openingAmount(o: Opening, renderHass?: RenderHass): number {
+    const state = o.entity ? renderHass?.states[o.entity] : undefined;
     return resolveOpeningAmount(o, state);
   }
 
   /** Whether an opening wears its accent: drawn open, or a cover still in transit. */
-  private _openingActive(o: Opening): boolean {
-    const state = o.entity ? this.hass?.states[o.entity] : undefined;
+  private _openingActive(o: Opening, renderHass?: RenderHass): boolean {
+    const state = o.entity ? renderHass?.states[o.entity] : undefined;
     return openingIsActive(o, state);
   }
 
@@ -283,10 +346,10 @@ export class FloorplanCard extends LitElement {
    * `undefined` — no second sensor, or a shape with only one leaf — leaves both
    * on the first entity, so nothing about a single-sensor opening changes.
    */
-  private _openingSecond(o: Opening): { amount: number; active: boolean } | undefined {
+  private _openingSecond(o: Opening, renderHass?: RenderHass): { amount: number; active: boolean } | undefined {
     if (!o.secondaryEntity || !openingHasTwoLeaves(o)) return undefined;
     const leaf = secondLeafOf(o);
-    const state = this.hass?.states[o.secondaryEntity];
+    const state = renderHass?.states[o.secondaryEntity];
     return { amount: resolveOpeningAmount(leaf, state), active: openingIsActive(leaf, state) };
   }
 
@@ -296,27 +359,30 @@ export class FloorplanCard extends LitElement {
    * is drawn from `shutterAmount` / `shutterActive`, not the sash's — and only
    * for a `swing` shutter, since a roll curtain has no second panel to drive.
    */
-  private _shutterSecond(o: Opening): { amount: number; active: boolean } | undefined {
+  private _shutterSecond(o: Opening, renderHass?: RenderHass): { amount: number; active: boolean } | undefined {
     if (!o.shutterSecondaryEntity || shutterStyleOf(o) !== "swing") return undefined;
-    const state = this.hass?.states[o.shutterSecondaryEntity];
+    const state = renderHass?.states[o.shutterSecondaryEntity];
     return {
       amount: shutterAmount(state, o.shutterInvert),
       active: shutterActive(state, o.shutterInvert),
     };
   }
 
-  private _itemIcon(item: FloorItem): string {
+  private _itemIcon(item: FloorItem, renderHass?: RenderHass): string {
     return resolveItemIcon(
       item,
-      this.hass?.states[item.entity],
+      renderHass?.states[item.entity],
       this.hass?.entities?.[item.entity]?.icon,
     );
   }
 
-  private _label(item: FloorItem): string {
-    return (
-      item.name ?? this.hass?.states[item.entity]?.attributes?.friendly_name ?? item.entity ?? ""
-    );
+  private _label(item: FloorItem, renderHass?: RenderHass): string {
+    return item.name ?? renderHass?.states[item.entity]?.attributes?.friendly_name ?? item.entity ?? "";
+  }
+
+  public disconnectedCallback(): void {
+    this._replayController.stopReplayLoop();
+    super.disconnectedCallback();
   }
 
   private _handleItemAction(
@@ -378,10 +444,11 @@ export class FloorplanCard extends LitElement {
     o: Opening,
     c: FloorplanCardConfig,
     rot: PlanRotation,
-    scale: OverlayScale
+    scale: OverlayScale,
+    renderHass?: RenderHass
   ): TemplateResult {
     const id = o.shutterEntity!;
-    const st = this.hass?.states[id];
+    const st = renderHass?.states[id];
     const open = shutterAmount(st, o.shutterInvert) > 0;
     const active = shutterActive(st, o.shutterInvert);
     const icon = shutterMarkIcon(o, st, open, this.hass?.entities?.[id]?.icon);
@@ -398,7 +465,7 @@ export class FloorplanCard extends LitElement {
     const push = `translate(calc(${n.x} * ${step}), calc(${n.y} * ${step}))`;
     const box = overlayLength(SHUTTER_MARK_SIZE, scale);
     const name =
-      (this.hass?.states[id]?.attributes?.friendly_name as string | undefined) ?? id;
+      (renderHass?.states[id]?.attributes?.friendly_name as string | undefined) ?? id;
     return html`
       <div
         class="shutter-mark ${active ? "on" : "off"}"
@@ -406,7 +473,7 @@ export class FloorplanCard extends LitElement {
         style="left:${(p.x / d.w) * 100}%; top:${(p.y / d.h) * 100}%;
                width:${box};height:${box};
                transform:translate(-50%,-50%) ${push};--fp-active:${accent};"
-        title="${name} · ${entityStateText(this.hass, id)}"
+        title="${name} · ${entityStateText(renderHass, id)}"
         role="button"
         tabindex="0"
         @action=${() => {
@@ -439,12 +506,13 @@ export class FloorplanCard extends LitElement {
     o: Opening,
     c: FloorplanCardConfig,
     rot: PlanRotation,
-    scale: OverlayScale
+    scale: OverlayScale,
+    renderHass?: RenderHass
   ): TemplateResult {
     const id = o.entity!;
-    const st = this.hass?.states[id];
-    const open = this._openingAmount(o) > 0;
-    const active = this._openingActive(o);
+    const st = renderHass?.states[id];
+    const open = this._openingAmount(o, renderHass) > 0;
+    const active = this._openingActive(o, renderHass);
     const icon = openingMarkIcon(o, st, open, this.hass?.entities?.[id]?.icon);
     const accent = cssColor(o.activeColor) ?? SKIN_ACCENT;
     const at = openingMarkPoint(o);
@@ -455,7 +523,7 @@ export class FloorplanCard extends LitElement {
     const push = `translate(calc(${n.x} * ${step}), calc(${n.y} * ${step}))`;
     const box = overlayLength(SHUTTER_MARK_SIZE, scale);
     const name =
-      (this.hass?.states[id]?.attributes?.friendly_name as string | undefined) ?? id;
+      (renderHass?.states[id]?.attributes?.friendly_name as string | undefined) ?? id;
     return html`
       <div
         class="shutter-mark ${active ? "on" : "off"}"
@@ -463,7 +531,7 @@ export class FloorplanCard extends LitElement {
         style="left:${(p.x / d.w) * 100}%; top:${(p.y / d.h) * 100}%;
                width:${box};height:${box};
                transform:translate(-50%,-50%) ${push};--fp-active:${accent};"
-        title="${name} · ${entityStateText(this.hass, id)}"
+        title="${name} · ${entityStateText(renderHass, id)}"
         role="button"
         tabindex="0"
         @action=${() => {
@@ -487,9 +555,13 @@ export class FloorplanCard extends LitElement {
    * dropping a zoom that belonged to the floor being left.
    */
   private _goToFloor(floors: readonly Floor[], id: string): void {
+    const wasSameFloor = this._activeFloorId === id;
     this._activeFloorId = id;
     lastViewedFloor.set(floorMemoryKey(floors), id);
     this._zoomedAreaId = undefined;
+
+    if (wasSameFloor || !this.hass || !this._config?.historyReplay?.enabled) return;
+    this._replayController.resetForFloorChange();
   }
 
   /** Tapping a room zooms the plan in to it; tapping the same room again zooms back out. */
@@ -518,7 +590,7 @@ export class FloorplanCard extends LitElement {
     executeAction(this, this.hass, { entity: press.entity }, press.config);
   }
 
-  private _renderBadge(item: FloorItem, scale: OverlayScale): TemplateResult {
+  private _renderBadge(item: FloorItem, scale: OverlayScale, renderHass?: RenderHass): TemplateResult {
     const size = cssNumber(item.size, DEFAULT_ITEM_SIZE);
     const box = overlayLength(size, scale);
     // Animation goes on the inner ha-icon, not the badge: the badge carries
@@ -529,7 +601,7 @@ export class FloorplanCard extends LitElement {
     // "Show the reading, not a picture" (issue #106). Same badge — size, angle,
     // state colour, ripple stacking all unchanged — with the glyph swapped for
     // the number. A device with nothing numeric to show keeps its icon.
-    const value = badgeContentOf(item) === "value" ? badgeValue(this.hass, item) : undefined;
+    const value = badgeContentOf(item) === "value" ? badgeValue(renderHass, item) : undefined;
     return html`
       <div
         class="badge"
@@ -543,7 +615,7 @@ export class FloorplanCard extends LitElement {
             >`
           : html`<ha-icon
               class=${anim ? `anim-${anim}` : ""}
-              icon=${this._itemIcon(item)}
+              icon=${this._itemIcon(item, renderHass)}
               style="--mdc-icon-size:${overlayLength(itemIconSize(size), scale)};"
             ></ha-icon>`}
       </div>
@@ -580,15 +652,16 @@ export class FloorplanCard extends LitElement {
     item: FloorItem,
     c: FloorplanCardConfig,
     rot: PlanRotation,
-    scale: OverlayScale
+    scale: OverlayScale,
+    renderHass?: RenderHass
   ): TemplateResult {
-    const on = this._isOn(item);
+    const on = this._isOn(item, renderHass);
     // Name/state composition lives in itemBadgeLabel, including #39's
     // no-entity guard (an unbound device gets no state line).
-    const labelText = itemBadgeLabel(this.hass, item);
+    const labelText = itemBadgeLabel(renderHass, item);
     // Threshold color (issue #68), judged on the displayed value (attribute
     // when set, else the state). cssColor gates the config string (#64).
-    const st = item.entity ? this.hass?.states[item.entity] : undefined;
+    const st = item.entity ? renderHass?.states[item.entity] : undefined;
     const rawValue = itemRawValue(item, st);
     // One resolved colour drives the whole element (issue #79 follow-up): the
     // label *and* the badge. A sensor is never "on", so tying the badge to the
@@ -637,7 +710,7 @@ export class FloorplanCard extends LitElement {
     } else if (display === "iconRipple") {
       visual = html`<div class="stack" style="${hiddenStyle}">
         ${renderRipple(on, rippleColor, rippleSize, 3, scale)}
-        ${showIcon ? html`<div class="stack-icon">${this._renderBadge(item, scale)}</div>` : nothing}
+        ${showIcon ? html`<div class="stack-icon">${this._renderBadge(item, scale, renderHass)}</div>` : nothing}
       </div>`;
     } else if (showIcon) {
       visual = html`<span style="${hiddenStyle}">
@@ -673,7 +746,7 @@ export class FloorplanCard extends LitElement {
           : ""}${activeColor
           ? `--fp-active:${activeColor};`
           : ""}${badgeInk ? `--fp-ink:${badgeInk};` : ""}"
-        title=${this._label(item)}
+        title=${this._label(item, renderHass)}
         role=${interactive ? "button" : nothing}
         tabindex=${interactive ? "0" : nothing}
         @action=${(ev: CustomEvent<{ action: "tap" | "hold" | "double_tap" }>) =>
@@ -754,6 +827,8 @@ export class FloorplanCard extends LitElement {
   protected render(): TemplateResult {
     if (!this._config) return html`${nothing}`;
     const c = this._config;
+    const replayState = this._replayController.getRenderState();
+    const renderHass = buildRenderHass(this.hass, this._watchedEntities, this._replayController.historyService(), replayState.enabled, replayState.currentTime);
     const floors = getFloors(c);
     const active =
       floors.find((f) => f.id === this._activeFloorId) ??
@@ -772,7 +847,7 @@ export class FloorplanCard extends LitElement {
     // so every viewer sees the same picture regardless of their own timezone.
     const sunLevel = c.sunDimming
       ? sunBrightness(
-          this.hass?.states["sun.sun"]?.attributes?.elevation,
+          renderHass?.states["sun.sun"]?.attributes?.elevation,
           cssNumber(c.sunBrightnessMin, DEFAULT_SUN_MIN),
           cssNumber(c.sunBrightnessMax, DEFAULT_SUN_MAX)
         )
@@ -802,9 +877,9 @@ export class FloorplanCard extends LitElement {
           // does for sunlight.
           glowClearSpan(
             o,
-            this._openingAmount(o),
-            this._openingSecond(o)?.amount,
-            o.shutterEntity ? shutterAmount(this.hass?.states[o.shutterEntity], o.shutterInvert) : undefined
+            this._openingAmount(o, renderHass),
+            this._openingSecond(o, renderHass)?.amount,
+            o.shutterEntity ? shutterAmount(renderHass?.states[o.shutterEntity], o.shutterInvert) : undefined
           )
         )
       : active.walls;
@@ -815,7 +890,7 @@ export class FloorplanCard extends LitElement {
     const sunDimMask = c.sunDimming
       ? renderSunDimMask(
           active.items,
-          this.hass?.states,
+          renderHass?.states,
           c.width,
           c.height,
           sunDimMaskId,
@@ -846,12 +921,14 @@ export class FloorplanCard extends LitElement {
            shrink it — it declines it, and draws the title inside the stage
            instead, where it costs no layout height at all (issue #152). -->
       <ha-card .header=${compact ? nothing : (c.title ?? nothing)}>
-        <div
-          class="stage press-${pressEffectOf(c)} offline-${offlineStyleOf(c)} ${compactTitle
-            ? "compact-title"
-            : ""}"
-          style="aspect-ratio: ${dims.w} / ${dims.h};"
-        >
+        <div class="card-shell ${this._replayController.isHistoryVisible() ? "replay-visible" : ""}">
+          ${this._config.historyReplay?.enabled ? this._renderReplayPanel() : nothing}
+          <div
+            class="stage press-${pressEffectOf(c)} offline-${offlineStyleOf(c)} ${compactTitle
+              ? "compact-title"
+              : ""}"
+            style="aspect-ratio: ${dims.w} / ${dims.h};"
+          >
           <!-- The plan box: exactly the canvas ratio, fitted inside whatever
                height the card was actually given, and centred there (closes
                #115). Sized off the container's height so it shrinks when the
@@ -926,7 +1003,7 @@ export class FloorplanCard extends LitElement {
                       hasHold: hasAction(areaActionForGesture(a, "hold")?.config),
                       hasDoubleClick: hasAction(areaActionForGesture(a, "double_tap")?.config),
                     })}>
-                  ${renderArea(a, areaColor(a, a.entity ? this.hass?.states[a.entity]?.state : undefined))}
+                  ${renderArea(a, areaColor(a, a.entity ? renderHass?.states[a.entity]?.state : undefined))}
                 </g>`;
             })}
             <!-- Dead spaces (issue #88): the regions the walls seal off that no
@@ -954,7 +1031,7 @@ export class FloorplanCard extends LitElement {
                mask=${active.furniture.length ? `url(#${this._glowIdBase}-mask)` : nothing}>
               ${active.items.map((it, i) => {
                 if (!it.glow) return nothing;
-                const paint = glowPaint(it, this.hass?.states[it.entity]);
+                const paint = glowPaint(it, renderHass?.states[it.entity]);
                 // Walls block the pool (issue #108) — light stops at the room.
                 return paint
                   ? renderGlow(it, paint, `${this._glowIdBase}-${i}`, lightWalls)
@@ -964,7 +1041,7 @@ export class FloorplanCard extends LitElement {
             ${active.furniture.map((f) => {
               const drawn = renderFurniture(
                 f,
-                furnitureColor(f, f.entity ? this.hass?.states[f.entity]?.state : undefined),
+                furnitureColor(f, f.entity ? renderHass?.states[f.entity]?.state : undefined),
                 symbolCatalog(c.symbols)
               );
               // Stairs that go somewhere (issue #121). Only when there is a
@@ -1010,11 +1087,11 @@ export class FloorplanCard extends LitElement {
                       // see sunlightStrengthOf.
                       dir: sunLightDirection(
                         c,
-                        this.hass?.states["sun.sun"]?.attributes?.azimuth
+                        renderHass?.states["sun.sun"]?.attributes?.azimuth
                       ),
                       strength: sunlightStrengthOf(
                         c,
-                        this.hass?.states["sun.sun"]?.attributes?.elevation
+                        renderHass?.states["sun.sun"]?.attributes?.elevation
                       ),
                       // How far a patch carries, shortened as the sun climbs
                       // (issue #185): a midday sun drops its light almost
@@ -1030,7 +1107,7 @@ export class FloorplanCard extends LitElement {
                         cssNumber(c.sunReach, SUN_REACH) *
                         (sunIsPinned(c)
                           ? 1
-                          : sunReachScale(this.hass?.states["sun.sun"]?.attributes?.elevation)),
+                          : sunReachScale(renderHass?.states["sun.sun"]?.attributes?.elevation)),
                       // The gap each style actually clears, both leaves
                       // included — the same reading the lamps get above, and
                       // for the same reason (#145): `entity` alone leaves a
@@ -1041,15 +1118,15 @@ export class FloorplanCard extends LitElement {
                       openAmount: (o) =>
                         openingClearFraction(
                           o,
-                          this._openingAmount(o),
-                          this._openingSecond(o)?.amount
+                          this._openingAmount(o, renderHass),
+                          this._openingSecond(o, renderHass)?.amount
                         ),
                       // A shutter that is all the way down stops the light, as
                       // one does. Undefined where none is bound, so an opening
                       // without a shutter is judged on itself alone.
                       shutterOpen: (o) =>
                         o.shutterEntity
-                          ? shutterAmount(this.hass?.states[o.shutterEntity], o.shutterInvert)
+                          ? shutterAmount(renderHass?.states[o.shutterEntity], o.shutterInvert)
                           : undefined,
                       light: c.sunlightColor ?? SUN_LIGHT_COLOR,
                       shade: c.sunShade === false ? null : (c.sunShadeColor ?? SUN_SHADE_COLOR),
@@ -1077,7 +1154,7 @@ export class FloorplanCard extends LitElement {
               ${active.areas?.map((a, i) =>
                 renderAreaBorder(
                   a,
-                  areaColor(a, a.entity ? this.hass?.states[a.entity]?.state : undefined),
+                  areaColor(a, a.entity ? renderHass?.states[a.entity]?.state : undefined),
                   `${this._wallMaskId}-area-${i}`
                 )
               )}
@@ -1090,18 +1167,18 @@ export class FloorplanCard extends LitElement {
               active.openings,
               (o, i) => o.id || i,
               (o) => {
-              const amount = this._openingAmount(o);
+              const amount = this._openingAmount(o, renderHass);
               const shutterState = o.shutterEntity
-                ? this.hass?.states[o.shutterEntity]
+                ? renderHass?.states[o.shutterEntity]
                 : undefined;
               const symbol = renderOpening(o, {
                 color: SKIN_WALL,
                 open: amount > 0,
                 amount,
-                active: this._openingActive(o),
+                active: this._openingActive(o, renderHass),
                 accent: o.activeColor ?? SKIN_ACCENT,
                 // Per-leaf state for a two-sensor biparting slider (issue #145).
-                second: this._openingSecond(o),
+                second: this._openingSecond(o, renderHass),
                 // External roller shutter layer (issue #74). No entity bound
                 // yet → previewed shut, like a static plan.
                 shutter: o.shutterEntity
@@ -1115,7 +1192,7 @@ export class FloorplanCard extends LitElement {
                       flip: o.shutterFlipV,
                       // Per-panel state for a two-contact hinged shutter
                       // (issue #159).
-                      second: this._shutterSecond(o),
+                      second: this._shutterSecond(o, renderHass),
                     }
                   : undefined,
               });
@@ -1150,10 +1227,10 @@ export class FloorplanCard extends LitElement {
               (tr) =>
               renderTracker(tr, {
                 editing: false,
-                xReading: trackerSensorReading(this.hass?.states, tr.xSensor?.entity),
-                yReading: trackerSensorReading(this.hass?.states, tr.ySensor?.entity),
-                xPresent: trackerPresenceDetected(this.hass?.states, tr.xSensor?.presence),
-                yPresent: trackerPresenceDetected(this.hass?.states, tr.ySensor?.presence),
+                xReading: trackerSensorReading(renderHass?.states, tr.xSensor?.entity),
+                yReading: trackerSensorReading(renderHass?.states, tr.ySensor?.entity),
+                xPresent: trackerPresenceDetected(renderHass?.states, tr.xSensor?.presence),
+                yPresent: trackerPresenceDetected(renderHass?.states, tr.ySensor?.presence),
               })
             )}
             <!-- Sun dimming (issue #113). Last inside the rotated group, so it
@@ -1184,12 +1261,12 @@ export class FloorplanCard extends LitElement {
               // nodes rather than morph one floor's badges into another's.
               active.openings.filter((o) => hasShutterMark(o)),
               (o, i) => `${o.id || i}-shutter`,
-              (o) => this._renderShutterMark(o, c, rot, scale)
+              (o) => this._renderShutterMark(o, c, rot, scale, renderHass)
             )}
             ${repeat(
               active.openings.filter((o) => hasOpeningMark(o)),
               (o, i) => `${o.id || i}-opening`,
-              (o) => this._renderOpeningMark(o, c, rot, scale)
+              (o) => this._renderOpeningMark(o, c, rot, scale, renderHass)
             )}
             ${repeat(
               // No entity filter: devices that exist physically but have no HA
@@ -1201,11 +1278,11 @@ export class FloorplanCard extends LitElement {
                 (it) =>
                   !itemHiddenWhenInactive(
                     it,
-                    it.entity ? this.hass?.states[it.entity]?.state : undefined
+                    it.entity ? renderHass?.states[it.entity]?.state : undefined
                   )
               ),
               (it, i) => it.id || i,
-              (it) => this._renderItem(it, c, rot, scale)
+              (it) => this._renderItem(it, c, rot, scale, renderHass)
             )}
           </div>
           </div>
@@ -1222,8 +1299,14 @@ export class FloorplanCard extends LitElement {
           ${compactTitle ? html`<div class="plan-title">${c.title}</div>` : nothing}
           ${floors.length > 1 ? this._renderFloorSwitcher(floors, active, compact) : nothing}
         </div>
+        </div>
       </ha-card>
     `;
+  }
+
+
+  private _renderReplayPanel(): TemplateResult {
+    return renderReplayPanel(createReplayPanelProps(this._replayController));
   }
 
   private _renderFloorSwitcher(floors: Floor[], active: Floor, compact = false): TemplateResult {
@@ -1278,6 +1361,25 @@ export class FloorplanCard extends LitElement {
          header, and the plan is cut off by that much. */
       display: flex;
       flex-direction: column;
+    }
+    .card-shell {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      /* In fixed-height dashboards (e.g. Sections rows), replay controls can
+         extend past the visible card area. Keep content reachable by letting
+         this inner shell scroll inside the card instead of clipping. */
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
+    .card-shell.replay-visible {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+    }
+    .card-shell.replay-visible .stage {
+      min-height: 0;
     }
     .stage {
       position: relative;

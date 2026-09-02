@@ -1222,6 +1222,31 @@ export interface Floor {
 /** Sizing mode for the HTML overlay layer. See {@link FloorplanCardConfig.overlayScale}. */
 export type OverlayScale = "fixed" | "plan";
 
+export interface HistoryReplayConfig {
+  enabled?: boolean;
+  lookbackSeconds?: number;
+  defaultSpeed?: number;
+  /**
+   * Log replay lifecycle to the browser console. Off by default: these fire on
+   * every seek, so scrubbing the playhead would otherwise bury anything else
+   * in the console. Failures are reported through `console.warn`/`error`
+   * regardless — this flag only gates the running commentary.
+   */
+  debug?: boolean;
+  /**
+   * How finely a numeric sensor's drift is kept, as the number of levels its
+   * observed range is divided into. A busy plan can produce thousands of
+   * points a sensor never meaningfully moved through, and every one becomes a
+   * marker on the timeline; thinning them cuts the time to draw a freshly
+   * loaded window without changing the shape of the curve.
+   *
+   * Discrete states — lights, doors, covers — are never thinned, whatever this
+   * is set to: each one is a distinct thing that happened. Unset keeps
+   * everything.
+   */
+  numericSteps?: number;
+}
+
 export interface FloorplanCardConfig extends LovelaceCardConfig {
   type: string;
   title?: string;
@@ -1438,6 +1463,8 @@ export interface FloorplanCardConfig extends LovelaceCardConfig {
   floors?: Floor[];
   /** Id of the floor shown first. Falls back to the first floor. */
   defaultFloor?: string;
+  /** Optional history replay controls and playback defaults. */
+  historyReplay?: HistoryReplayConfig;
   walls?: Wall[];
   openings?: Opening[];
   items?: FloorItem[];

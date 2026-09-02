@@ -171,6 +171,7 @@ import {
   projectDeadSpaceForm,
   projectDisplayForm,
   projectPressForm,
+  projectReplayForm,
   projectSkinForm,
   projectSunForm,
   projectReliefForm,
@@ -4425,6 +4426,7 @@ export class FloorplanCardEditor extends LitElement {
           // under display, beside the card's rotation, which is not what it is
           // about.
           "Devices",
+          this._renderForm(projectReplayForm(c), patch),
           this._renderForm(formSlice(display, ["offlineStyle"]), patch),
           this._renderForm(projectPressForm(c), patch)
         )}
