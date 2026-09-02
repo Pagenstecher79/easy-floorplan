@@ -48,6 +48,7 @@ import {
   normalizePlanRotation,
   openingActionForGesture,
   openingMotion,
+  MIN_SASH_SPAN,
   openingHasTwoLeaves,
   sliderStyleHasTwoLeaves,
   pressEffectOf,
@@ -239,7 +240,13 @@ export function openingForm(o: Opening, featuresOf: (entityId: string) => number
         // Not "garage / shutter": an external shutter is the Shutter field
         // below, a layer over any opening, and naming it here read as the
         // place to set one up.
-        opt("roll", "Roll up (garage)")
+        opt("roll", "Roll up (garage)"),
+        // Windows only (issue #218). A bay or picture window is an ordinary
+        // thing to draw; a door that cannot open is a wall, and offering it
+        // here would only invite drawing one. A hand-written config may still
+        // set it on a door, and the card draws that honestly as a sealed
+        // panel — this is about what the editor suggests, not what it allows.
+        ...(o.type === "window" ? [opt("fixed", "Fixed (does not open)")] : [])
       ),
     },
     { name: "length", label: "Length", required: true, selector: { number: { min: 1, mode: "box" } } },
@@ -258,6 +265,18 @@ export function openingForm(o: Opening, featuresOf: (entityId: string) => number
       selector: door
         ? dropdown(opt("single", "Single (one leaf)"), opt("double", "Double (two leaves)"))
         : dropdown(opt("double", "Double (two leaves)"), opt("single", "Single sash")),
+    });
+  }
+  // How much of the frame actually opens (issue #218). Only a single sash has
+  // a remainder to be fixed: a double already splits the opening between its
+  // two leaves. Left at 1 it writes nothing, so this appears in no YAML that
+  // has not asked for it.
+  if (motion === "swing" && openingSash(o) === "single") {
+    fields.push({
+      name: "sashSpan",
+      label: "Sash width",
+      helper: "Share of the opening that actually opens — the rest is fixed glass",
+      selector: { number: { min: MIN_SASH_SPAN, max: 1, step: 0.05, mode: "slider" } },
     });
   }
   // Glass, for a door. A window never needs asking, and the only thing that
@@ -586,11 +605,17 @@ export function openingForm(o: Opening, featuresOf: (entityId: string) => number
           if (!v) out.icon = undefined;
         }
         else if (k === "motion") {
-          const motion = v === "slide" || v === "roll" ? (v as "slide" | "roll") : undefined;
+          const motion =
+            v === "slide" || v === "roll" || v === "fixed"
+              ? (v as "slide" | "roll" | "fixed")
+              : undefined;
           out.motion = motion;
           // sliderStyle only applies while sliding — drop it when switching
           // away (issue #145).
           if (v !== "slide") out.sliderStyle = undefined;
+          // Nothing swings any more, so the sash's share of the frame has
+          // nothing left to describe (issue #218).
+          if (v !== "swing") out.sashSpan = undefined;
           // The second leaf's sensor goes only if the opening this *becomes*
           // has no second leaf. Asked of the result rather than of the motion,
           // because since issue #159 a hinged double has one too: a two-sensor
@@ -601,6 +626,10 @@ export function openingForm(o: Opening, featuresOf: (entityId: string) => number
             sliderStyle: v === "slide" ? o.sliderStyle : undefined,
           } as Opening))
             out.secondaryEntity = undefined;
+        } else if (k === "sashSpan") {
+          // A full-width sash is what every opening drew before this field,
+          // so it is the default and stays out of the YAML (issue #218).
+          out.sashSpan = typeof v === "number" && v < 1 ? v : undefined;
         } else if (k === "sash") {
           // The two types default the other way round — a window opens with
           // two sashes, a door with one leaf — so only the value that is *not*
@@ -610,6 +639,9 @@ export function openingForm(o: Opening, featuresOf: (entityId: string) => number
           // drive (issue #159).
           if (!openingHasTwoLeaves({ ...o, sash: v as "single" | "double" } as Opening))
             out.secondaryEntity = undefined;
+          // Two sashes already split the opening between them, so there is no
+          // leftover pane for `sashSpan` to describe (issue #218).
+          if (v === "double") out.sashSpan = undefined;
         } else if (k === "shutterStyle") {
           out.shutterStyle = v;
           // Only a hinged pair has a second panel — a roll curtain is one

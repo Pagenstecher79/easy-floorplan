@@ -198,9 +198,14 @@ window, a `blind` → a slider, a `garage` or `shutter` → a roll-up); adjust a
   for one sash. The swing arc draws on as the leaf travels.
 - **Partial** — a `cover` reporting `current_position` (0–100) is drawn partly open and
   tracks the position live. Everything else uses the on/off behavior above.
-- **Motion** — **swing** (default), **slide**, or **roll** (a slatted curtain that thins
-  onto its track). Sliding openings take a **Style**, and which one you want comes down to
-  where the panels go and what is left clear:
+- **Motion** — **swing** (default), **slide**, **roll** (a slatted curtain that thins onto
+  its track), or **fixed** — a window that does not open at all: a bay window, a picture
+  window, a sealed pane. A fixed window is drawn as jambs and glass with no leaf and no
+  arc, ignores a bound sensor for its drawing (bind one anyway if you want the tap target
+  or the badge), and is never a gap — though it still lets the daylight straight through,
+  because it is still glass. Offered on windows; a door that cannot open is a wall.
+  Sliding openings take a **Style**, and which one you want comes down to where the panels
+  go and what is left clear:
 
   | Style | Panels | Where they go | What clears |
   | --- | --- | --- | --- |
@@ -222,6 +227,12 @@ window, a `blind` → a slider, a `garage` or `shutter` → a roll-up); adjust a
   switch covers both, and a tap still acts on the first. A lamp's pool follows the leaves
   too: with one open, the light comes through *that* leaf's half of the doorway rather
   than the middle.
+- **Sash width** — when only part of a window opens and the rest is fixed glass, set
+  **Sash width** to the share of the frame the sash actually covers. The sash is drawn at
+  that width, hinged at its own jamb, sweeping an arc to match, and the remainder is drawn
+  as a fixed pane — so a narrow casement in a wide frame stops swinging the whole width of
+  the glass. Single-sash swing openings only: a double already splits the frame between
+  its two leaves. **Hinge** moves the sash and its pane together.
 - **Orientation** — **Hinge** (left / right) and **Opens** (this side / other side) face a
   swing door any of four ways; they're pure mirrors (`flipH` / `flipV`), so the animation
   follows.
@@ -433,9 +444,10 @@ distorted anyway.
 | ------------- | --------------------------- | ------------------------------------------------------ |
 | `id`          | string                      | Unique id.                                             |
 | `type`        | `door` \| `window`          | The kind of opening.                                   |
-| `motion`      | `swing` \| `slide` \| `roll` | How it moves: hinged (default), sliding panels, or a roll-up curtain (garage / roller shutter). |
+| `motion`      | `swing` \| `slide` \| `roll` \| `fixed` | How it moves: hinged (default), sliding panels, a roll-up curtain (garage / roller shutter), or `fixed` — a window that does not open (bay, picture, sealed pane). A fixed opening draws no leaf and no arc, ignores `entity` for its drawing, and never counts as a gap; glazing still applies, so it passes daylight like the glass it is. |
 | `sunlight`    | boolean                     | `false` takes this opening out of [Sunlight](#sunlight) entirely — it admits no light and blocks it like wall, however open it is drawn. Editor: **Lets sunlight in**. For the solid door with no sensor, which the plan draws open. |
 | `glazed`      | boolean                     | Lets sunlight through even when shut. Defaults per type — a window is glass, a door is not. Set `true` on a **patio or French door**, which is drawn as a door because that is how it swings but is a wall of glass; set `false` on an opaque window like a glass-brick panel or a hatch, which then admits light only as far as it is open. Only [Sunlight](#sunlight) reads it. |
+| `sashSpan`    | number (0–1)                | Share of the opening the operable sash covers; the rest is drawn as a fixed pane. Default 1 (the sash fills the frame). Single-sash swing openings only — a double already splits the frame between its leaves. The sash hangs at the hinge jamb, so `flipH` moves it and its pane together, and a half-width sash swung wide open clears half the opening rather than all of it. |
 | `sash`        | `single` \| `double`        | Swing openings only: how many hinged leaves. The default differs by type, because the ordinary cases do — a window opens with `double` (two casement sashes), a door with `single` (one leaf across the opening). Set it to draw a single-sash window or a **double door**; both leaves then hinge at their own jamb and trace their own arc. Ignored by sliding and rolling openings. |
 | `shutterEntity` | string                     | An external shutter over the same gap (`cover` or contact), with its own open/closed state. With `entity` bound too, the card draws the shutter's own icon beside the opening — open/closed in both glyph and colour — and tapping that icon opens the shutter. |
 | `shutterStyle` | `swing` \| `roll`           | Louvered panels or a roll-up curtain. Defaults from the entity (contact → `swing`, `cover` → `roll`). |

@@ -66,6 +66,14 @@ import { OPENING_ON_WALL_EPS } from "./dead-space";
 
 export const WALL_THICKNESS = 8;
 
+/**
+ * The narrowest an operable sash may be drawn, as a fraction of its opening
+ * (issue #218). Not zero: a sash of no width is a fixed pane, which
+ * `motion: "fixed"` says outright, and one drawn at a hair's width would read
+ * as a rendering fault rather than as a choice.
+ */
+export const MIN_SASH_SPAN = 0.05;
+
 /** Shown in place of a reading when an entity is unset or absent from `hass`. */
 const NO_STATE = "—";
 
@@ -664,10 +672,18 @@ function clipWallToBox(
  * and the mean of it is itself.
  */
 export function openingClearFraction(o: Opening, amount: number, secondAmount?: number): number {
+  // Nothing moves, so nothing is ever clear — whatever a bound sensor says
+  // (issue #218). Asked before `amount` is even read, because a fixed pane
+  // with a contact on it is exactly the case that would otherwise open.
+  if (openingMotion(o) === "fixed") return 0;
   const a1 = Math.max(0, Math.min(1, amount));
   const a2 = Math.max(0, Math.min(1, secondAmount ?? amount));
+  // A sash narrower than its frame clears only its own share of the opening
+  // (issue #218): swung fully open, a half-width sash leaves half the glass
+  // still in place. `openingSashSpan` is 1 for everything else, so this is
+  // the identity for every opening that has always filled its frame.
   if (openingMotion(o) === "swing")
-    return openingSash(o) === "double" ? (a1 + a2) / 2 : a1;
+    return openingSash(o) === "double" ? (a1 + a2) / 2 : a1 * openingSashSpan(o);
   switch (sliderStyleOf(o)) {
     case "biparting":
       // Each leaf recesses into its own wall, so between them they can clear
@@ -774,6 +790,16 @@ export function openingClearSpan(
 ): [number, number] {
   const clear = openingClearFraction(o, amount, secondAmount);
   const centred: [number, number] = [(1 - clear) / 2, (1 + clear) / 2];
+  // A sash narrower than its frame is hinged at one jamb with fixed glass
+  // beside it, so what it clears is at *that* jamb — never in the middle,
+  // where the pane is (issue #218). Placed rather than centred because it can
+  // be: `sashSpan` is new config, so no existing plan can light up
+  // differently for it, which is exactly the argument that keeps the centred
+  // approximation for everything below.
+  if (openingSashSpan(o) < 1) {
+    const span: [number, number] = [0, clear];
+    return o.flipH ? [1 - span[1], 1 - span[0]] : span;
+  }
   if (openingMotion(o) !== "swing" || openingSash(o) !== "double") return centred;
   // Each leaf is hinged at its own jamb and covers its own half, so its
   // projection on the wall shrinks toward that jamb as it swings: the first
@@ -2399,11 +2425,29 @@ export function kindFromEntity(entity: string): ItemKind {
 }
 
 /**
- * How an opening moves — `swing` (hinged door / casement window) or `slide`
- * (panels travelling along the wall). Defaults to `swing`.
+ * How an opening moves — `swing` (hinged door / casement window), `slide`
+ * (panels travelling along the wall), `roll` (a curtain leaving the floor
+ * plane) or `fixed` (issue #218: it does not). Defaults to `swing`.
  */
-export function openingMotion(o: Opening): "swing" | "slide" | "roll" {
+export function openingMotion(o: Opening): "swing" | "slide" | "roll" | "fixed" {
   return o.motion ?? "swing";
+}
+
+/**
+ * How much of a single-sash opening its sash covers, 0..1 (issue #218).
+ * Clamped, and 1 for everything that has no leftover pane to speak of: a
+ * double sash splits the opening between its two leaves, and sliders and
+ * roll-ups have panel arithmetic of their own.
+ *
+ * A `sashSpan` of 0 would be a window with no opening part, which is what
+ * `motion: "fixed"` says properly — so it clamps to the smallest sash that
+ * still draws rather than silently becoming a fixed pane.
+ */
+export function openingSashSpan(o: Opening): number {
+  if (openingMotion(o) !== "swing" || openingSash(o) !== "single") return 1;
+  const raw = o.sashSpan;
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return 1;
+  return Math.max(MIN_SASH_SPAN, Math.min(1, raw));
 }
 
 /**
@@ -3253,9 +3297,12 @@ export function renderOpening(o: Opening, style: OpeningStyle): SVGTemplateResul
     // the same markup, which is how the door came to have no way of being a
     // double at all.
     const two = openingSash(o) === "double";
-    // One leaf spans the opening; two split it. The arc radius follows,
-    // because it is the path the leaf's own tip sweeps.
-    const leafW = two ? half : o.length;
+    // One leaf spans the opening; two split it. A single sash may also be
+    // narrower than its frame (issue #218), the rest of which is fixed glass.
+    // The arc radius follows, because it is the path the leaf's own tip
+    // sweeps — a half-width sash sweeps a half-width quarter-circle.
+    const span = openingSashSpan(o);
+    const leafW = two ? half : o.length * span;
     const arcLen = (Math.PI / 2) * leafW;
     // Revealed via stroke-dashoffset so each arc "draws on" as its leaf opens.
     // Each arc is drawn from its own leaf's state, so a pair of casement sashes
@@ -3284,7 +3331,19 @@ export function renderOpening(o: Opening, style: OpeningStyle): SVGTemplateResul
                 tone2,
                 amt2
               )}`
-            : arc(`M ${half} 0 A ${o.length} ${o.length} 0 0 0 ${-half} ${-o.length}`, tone, amt)
+            : // Hinged at the −x jamb, so the tip starts `leafW` along the wall
+              // and ends `leafW` out from it. At full span that is exactly the
+              // arc this drew before `sashSpan` existed.
+              arc(`M ${-half + leafW} 0 A ${leafW} ${leafW} 0 0 0 ${-half} ${-leafW}`, tone, amt)
+        }
+        ${
+          // The pane the sash does not cover: fixed glass, drawn in the base
+          // colour because it never opens and so is never the active part.
+          // Nothing at full span, which is every opening that predates this.
+          span < 1
+            ? svg`<line x1=${-half + leafW} y1="0" x2=${half} y2="0"
+              stroke=${color} stroke-width=${o.type === "window" ? 1.5 : 2.5} />`
+            : nothing
         }
         <!-- leaf hinged at the left jamb (flipH mirrors it to the right one) -->
         <g transform="translate(${-half} 0)">
@@ -3305,6 +3364,28 @@ export function renderOpening(o: Opening, style: OpeningStyle): SVGTemplateResul
             : nothing
         }
       `;
+  } else if (openingMotion(o) === "fixed") {
+    // A window that does not open (issue #218): a bay window, a picture
+    // window, a sealed pane. Jambs and glass, no leaf, no arc, no track —
+    // there is nothing here that could move, which is the whole statement.
+    //
+    // Drawn from `color` rather than `tone` on purpose: `tone` is the accent a
+    // moving part wears while it is open, and this one is never either. A
+    // fixed pane with a contact bound to it (people do bind them, for the tap
+    // target and the badge) must not light up as though it had swung.
+    const t = o.type === "window" ? 1.5 : 2.5; // glass vs solid panel
+    body = svg`
+        ${
+          o.type === "window"
+            ? svg`
+        <line x1=${-half} y1=${-cutH / 2} x2=${-half} y2=${cutH / 2}
+              stroke=${color} stroke-width="2" />
+        <line x1=${half} y1=${-cutH / 2} x2=${half} y2=${cutH / 2}
+              stroke=${color} stroke-width="2" />`
+            : nothing
+        }
+        <line x1=${-half} y1="0" x2=${half} y2="0"
+              stroke=${color} stroke-width=${t} />`;
   } else if (openingMotion(o) === "roll") {
     // Roll-up cover — garage door, roller shutter (issues #45 / #47). Unlike a
     // slider nothing travels along the wall: the curtain leaves the floor

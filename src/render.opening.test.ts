@@ -1142,3 +1142,69 @@ describe("renderOpening — the shutter's own accent (issue #74 follow-up)", () 
     expect(swing).toContain("fill:#00ff00");
   });
 });
+
+describe("renderOpening — a window that does not open (issue #218)", () => {
+  const fixed = { type: "window", motion: "fixed" } as Partial<Opening>;
+
+  it("draws jambs and glass, and nothing that could move", () => {
+    const s = svgOf(fixed, { open: true, amount: 1 });
+    expect(s).not.toContain("fp-door-leaf");
+    expect(s).not.toContain("fp-leaf-r");
+    expect(s).not.toContain("fp-door-arc");
+    // Jambs still say "window", and the pane still fills the gap.
+    expect(s).toContain('stroke-width="2"');
+    expect(s).toContain("stroke-width=1.5");
+  });
+
+  it("stays put when a bound sensor says open — there is nothing to open", () => {
+    // The case this exists for: people bind a contact to a fixed pane for the
+    // tap target and the badge. Shut and wide open must draw identically.
+    expect(svgOf(fixed, { open: true, amount: 1 })).toBe(svgOf(fixed, { open: false, amount: 0 }));
+  });
+
+  it("never wears the accent, because no part of it is ever the moving part", () => {
+    const s = svgOf(fixed, { open: true, amount: 1, active: true, accent: "#ff0000" });
+    expect(s).not.toContain("#ff0000");
+  });
+
+  it("a fixed door is a sealed panel: solid, and no jambs to read as glass", () => {
+    const s = svgOf({ type: "door", motion: "fixed" }, { open: true });
+    expect(s).toContain("stroke-width=2.5"); // solid, not the 1.5 of glass
+    expect(s).not.toContain('stroke-width="2"'); // no jambs
+  });
+});
+
+describe("renderOpening — a sash narrower than its frame (issue #218)", () => {
+  const partial = { type: "window", sash: "single", sashSpan: 0.4 } as Partial<Opening>;
+
+  it("draws the sash at its own width, not the frame's", () => {
+    const s = svgOf(partial, { open: true });
+    expect(s).toContain("width=36"); // 90 × 0.4
+    expect(s).not.toContain("width=90");
+  });
+
+  it("fills the rest of the frame with fixed glass", () => {
+    const s = svgOf(partial, { open: true });
+    // Pane runs from where the sash ends (-45 + 36 = -9) to the far jamb.
+    expect(s).toContain('x1=-9 y1="0" x2=45');
+  });
+
+  it("sweeps an arc the sash's own width, hinged at its own jamb", () => {
+    const s = svgOf(partial, { open: true });
+    expect(s).toContain("M -9 0 A 36 36 0 0 0 -45 -36");
+  });
+
+  it("a full-width sash is untouched — the arc it always drew", () => {
+    const full = svgOf({ type: "window", sash: "single" } as Partial<Opening>, { open: true });
+    expect(full).toContain("M 45 0 A 90 90 0 0 0 -45 -90");
+    expect(full).not.toContain('y1="0" x2=45 y2="0"'); // no fixed pane
+  });
+
+  it("is ignored by a double sash, which has no leftover to fix", () => {
+    const two = svgOf({ type: "window", sash: "double", sashSpan: 0.4 } as Partial<Opening>, {
+      open: true,
+    });
+    expect(two).toContain("fp-leaf-r");
+    expect(two).toContain("width=45"); // each leaf still half the opening
+  });
+});

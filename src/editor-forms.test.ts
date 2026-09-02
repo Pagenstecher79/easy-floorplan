@@ -122,6 +122,54 @@ describe("openingForm", () => {
     expect(names).not.toContain("slide");
   });
 
+  it("offers Fixed on a window and not on a door (issue #218)", () => {
+    // A door that cannot open is a wall; offering it would only invite one.
+    const optsOf = (o: Opening) => {
+      const f = openingForm(o).fields.find((x) => x.name === "motion")!;
+      return (f.selector as { select: { options: { value: string }[] } }).select.options.map(
+        (x) => x.value,
+      );
+    };
+    expect(optsOf({ ...door, type: "window" } as Opening)).toContain("fixed");
+    expect(optsOf(door)).not.toContain("fixed");
+  });
+
+  it("asks for the sash's share only where there is a leftover pane (issue #218)", () => {
+    const win = { ...door, type: "window" } as Opening;
+    const names = (o: Opening) => openingForm(o).fields.map((x) => x.name);
+    expect(names({ ...win, sash: "single" } as Opening)).toContain("sashSpan");
+    // A double already splits the frame between its two leaves.
+    expect(names({ ...win, sash: "double" } as Opening)).not.toContain("sashSpan");
+    // Sliders, roll-ups and a fixed pane have nothing that swings.
+    expect(names({ ...win, motion: "slide" } as Opening)).not.toContain("sashSpan");
+    expect(names({ ...win, motion: "fixed" } as Opening)).not.toContain("sashSpan");
+  });
+
+  it("keeps a full-width sash and a swing motion out of the YAML (issue #218)", () => {
+    const form = openingForm({ ...door, type: "window", sash: "single" } as Opening);
+    expect(form.toPatch({ sashSpan: 1 })).toEqual({ sashSpan: undefined });
+    expect(form.toPatch({ sashSpan: 0.4 })).toEqual({ sashSpan: 0.4 });
+  });
+
+  it("drops the sash's share when the opening stops swinging (issue #218)", () => {
+    const win = { ...door, type: "window", sash: "single", sashSpan: 0.4 } as Opening;
+    const form = openingForm(win);
+    expect(form.toPatch({ motion: "fixed" })).toMatchObject({
+      motion: "fixed",
+      sashSpan: undefined,
+    });
+    expect(form.toPatch({ motion: "slide" })).toMatchObject({ sashSpan: undefined });
+    // A patch says only what changes, so "cleared" is the key present and
+    // undefined — while *absent* means the sash keeps the width it had. Still
+    // swinging is the second of those, and asserting it loosely would not
+    // tell the two apart.
+    expect("sashSpan" in form.toPatch({ motion: "swing" })).toBe(false);
+    // And a second sash leaves no remainder to describe.
+    const twoSash = form.toPatch({ sash: "double" });
+    expect("sashSpan" in twoSash).toBe(true);
+    expect(twoSash.sashSpan).toBeUndefined();
+  });
+
   it("sliding opening shows slide + style, hides hinge; biparting hides slide", () => {
     const slide = openingForm({ ...door, motion: "slide" } as Opening).fields.map((x) => x.name);
     expect(slide).toContain("slide");
@@ -1727,7 +1775,7 @@ describe("areaForm — actions on rooms (issue #181)", () => {
 // each form can produce appears in exactly one of them.
 describe("every field lands in exactly one panel group", () => {
   const OPENING_GROUPS = [
-    ["type", "motion", "length", "sash", "hinge", "opens", "slide", "style", "angle"],
+    ["type", "motion", "length", "sash", "sashSpan", "hinge", "opens", "slide", "style", "angle"],
     ["entity", "secondaryEntity", "invert"],
     ["glazed", "sunlight"],
     [
@@ -1770,6 +1818,8 @@ describe("every field lands in exactly one panel group", () => {
       { type: "window", sash: "single", entity: "binary_sensor.a" },
       { motion: "slide", sliderStyle: "biparting", entity: "binary_sensor.a" },
       { motion: "roll", entity: "cover.g" },
+      { type: "window", motion: "fixed" },
+      { type: "window", sash: "single", sashSpan: 0.4 },
       { shutterEntity: "binary_sensor.s", shutterStyle: "swing" },
       { shutterEntity: "cover.s", shutterStyle: "roll", entity: "binary_sensor.a" },
       { entity: "binary_sensor.a", showIcon: true },

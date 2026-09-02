@@ -2118,7 +2118,7 @@ export class FloorplanCardEditor extends LitElement {
    */
   private static readonly OPENING_GROUPS = [
     // What it is, and how it is drawn.
-    ["Shape", ["type", "motion", "length", "sash", "hinge", "opens", "slide", "style", "angle"]],
+    ["Shape", ["type", "motion", "length", "sash", "sashSpan", "hinge", "opens", "slide", "style", "angle"]],
     // Which contacts drive it — the opening's own, before the shutter's.
     ["What it reads", ["entity", "secondaryEntity", "invert"]],
     // How it behaves toward the sun (issue #177), which is neither shape nor
