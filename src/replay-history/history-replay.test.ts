@@ -557,6 +557,52 @@ describe("timeline cost during playback", () => {
     expect(marker.style.getPropertyValue("--marker-pct")).not.toBe("");
   });
 
+  it("caps a numeric lane but draws every discrete change", async () => {
+    // A solid white bar tells you nothing: past ~150 markers a lane stops
+    // showing individual events, so the numeric lanes get a budget while the
+    // lights keep all of theirs.
+    const events = [
+      ...Array.from({ length: 1200 }, (_, i) => ({
+        timestamp: T0 + Math.round((i / 1200) * WINDOW),
+        entityId: "sensor.tracker_distance_x",
+        oldState: "0", newState: String(i % 90), attributes: {},
+      })),
+      ...Array.from({ length: 400 }, (_, i) => ({
+        timestamp: T0 + Math.round((i / 400) * WINDOW),
+        entityId: "light.kitchen",
+        oldState: "off", newState: i % 2 ? "on" : "off", attributes: {},
+      })),
+    ].sort((a, b) => a.timestamp - b.timestamp);
+
+    const el = document.createElement("easy-floorplan-history-timeline") as HistoryTimeline;
+    el.startTime = T0; el.endTime = T0 + WINDOW; el.currentTime = T0;
+    el.expanded = true;
+    el.events = events;
+    document.body.appendChild(el);
+    await el.updateComplete;
+
+    const lanes = [...(el.shadowRoot?.querySelectorAll(".lane-track") ?? [])];
+    const counts = lanes.map((l) => l.querySelectorAll(".marker").length).sort((a, b) => a - b);
+    expect(counts).toEqual([150, 400]);
+  });
+
+  it("shows the time the playhead is sitting on, and moves it", async () => {
+    const el = document.createElement("easy-floorplan-history-timeline") as HistoryTimeline;
+    el.startTime = T0; el.endTime = T0 + WINDOW; el.currentTime = T0;
+    el.events = busy();
+    document.body.appendChild(el);
+    await el.updateComplete;
+
+    const label = () => el.shadowRoot?.querySelector(".playhead-time")?.textContent?.trim();
+    const first = label();
+    expect(first).toBeTruthy();
+    expect(first).not.toBe("—");
+
+    el.currentTime = T0 + WINDOW / 2;
+    await el.updateComplete;
+    expect(label()).not.toBe(first);
+  });
+
   it("rebuilds when the events themselves change", async () => {
     const el = document.createElement("easy-floorplan-history-timeline") as HistoryTimeline;
     el.startTime = T0;
@@ -1179,7 +1225,10 @@ describe("FloorplanCard replay", () => {
 
     const showButton = getReplayPanelShadowRoot(card)?.querySelector(".replay-show-toggle") as HTMLButtonElement | null;
     expect(showButton).not.toBeNull();
-    expect(showButton?.textContent).toContain("Show replay history");
+    // Short visible label so the button matches the floor buttons beside it;
+    // the full description stays for screen readers.
+    expect(showButton?.textContent?.trim()).toBe("Replay");
+    expect(showButton?.getAttribute("aria-label")).toBe("Show replay history");
     expect(getReplayPanelShadowRoot(card)?.querySelector(".replay-hide-toggle")).toBeNull();
 
     showButton?.click();

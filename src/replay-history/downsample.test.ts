@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { downsampleHistory, downsampleSeries } from "./downsample";
+import { downsampleHistory, downsampleSeries, thinForDisplay } from "./downsample";
 import type { HistoryEventInput } from "./history-service";
 
 const T0 = 1_760_000_000_000;
@@ -82,5 +82,47 @@ describe("downsampleHistory", () => {
     // whole thing get thinned as if it were numbers.
     const mixed = [ev(0, "20.0"), ev(1, "unavailable"), ev(2, "21.0"), ev(3, "22.0")];
     expect(downsampleSeries(mixed, { numericSteps: 2 })).toBe(mixed);
+  });
+});
+
+describe("thinForDisplay", () => {
+  it("leaves a series that already fits", () => {
+    const few = Array.from({ length: 40 }, (_, i) => ev(i, String(i)));
+    expect(thinForDisplay(few, 150)).toBe(few);
+  });
+
+  it("caps a numeric lane at the budget", () => {
+    // The demo's distance trackers swing across their whole range several
+    // times a minute, so deadband thinning barely touches them — a budget is
+    // the only thing that makes the lane readable.
+    const sawtooth = Array.from({ length: 1400 }, (_, i) => ev(i, String(i % 100)));
+    const out = thinForDisplay(sawtooth, 150);
+    expect(out).toHaveLength(150);
+    expect(out[0]).toBe(sawtooth[0]);
+    expect(out[out.length - 1]).toBe(sawtooth[sawtooth.length - 1]);
+  });
+
+  it("spends the budget on the biggest moves", () => {
+    const quiet = Array.from({ length: 300 }, (_, i) => ev(i, (20 + (i % 3) * 0.01).toFixed(2)));
+    quiet[100] = ev(100, "90.0");
+    quiet[200] = ev(200, "5.0");
+    const kept = thinForDisplay(quiet, 10).map((e) => e.newState);
+    expect(kept).toContain("90.0");
+    expect(kept).toContain("5.0");
+  });
+
+  it("never thins a discrete lane, however long", () => {
+    // There is no "small" change between on and off, so there is no honest
+    // way to rank them — the lane keeps all of them.
+    const toggles = Array.from({ length: 900 }, (_, i) => ev(i, i % 2 ? "on" : "off", "light.kitchen"));
+    expect(thinForDisplay(toggles, 150)).toBe(toggles);
+  });
+
+  it("stays in chronological order", () => {
+    const wobble = Array.from({ length: 800 }, (_, i) => ev(i, String(Math.sin(i / 9) * 50)));
+    const out = thinForDisplay(wobble, 120);
+    for (let i = 1; i < out.length; i++) {
+      expect(out[i].timestamp).toBeGreaterThan(out[i - 1].timestamp);
+    }
   });
 });

@@ -2,6 +2,7 @@ import { LitElement, css, html, unsafeCSS } from "lit";
 import { guard } from "lit/directives/guard.js";
 import { customElement, property } from "lit/decorators.js";
 import { resolveReplayEventColor, type HistoryEventInput } from "./history-service";
+import { thinForDisplay } from "./downsample";
 import { SKIN_ACCENT } from "../skins";
 
 @customElement("easy-floorplan-history-timeline")
@@ -58,6 +59,12 @@ export class HistoryTimeline extends LitElement {
     return events.map((event) => this._formatEventTitle(event)).join("\n");
   }
 
+  /**
+   * How many markers one lane can carry before they stop being individually
+   * visible. A lane is around 1800px on a wide card and a marker is 8px.
+   */
+  private static readonly MAX_MARKERS_PER_LANE = 150;
+
   private _visibleEvents(): HistoryEventInput[] {
     if (!this.events.length) return [];
     const start = this.startTime;
@@ -65,8 +72,28 @@ export class HistoryTimeline extends LitElement {
     return this.events.filter((event) => event.timestamp >= start && event.timestamp <= end);
   }
 
+  /**
+   * The events this timeline draws — every discrete state change, and the
+   * largest moves of each numeric sensor up to what a lane can show. Replay
+   * itself still reads the full series; this only decides what gets a marker.
+   */
+  private _drawnEvents(): HistoryEventInput[] {
+    const visible = this._visibleEvents();
+    const byEntity = new Map<string, HistoryEventInput[]>();
+    for (const event of visible) {
+      const bucket = byEntity.get(event.entityId);
+      if (bucket) bucket.push(event);
+      else byEntity.set(event.entityId, [event]);
+    }
+    const keep = new Set<HistoryEventInput>();
+    for (const series of byEntity.values()) {
+      for (const event of thinForDisplay(series, HistoryTimeline.MAX_MARKERS_PER_LANE)) keep.add(event);
+    }
+    return visible.filter((event) => keep.has(event));
+  }
+
   private _groupEventsByTimestamp(): Array<{ timestamp: number; events: HistoryEventInput[]; left: string }> {
-    const visibleEvents = this._visibleEvents();
+    const visibleEvents = this._drawnEvents();
     const grouped = new Map<number, HistoryEventInput[]>();
     for (const event of visibleEvents) {
       const bucket = grouped.get(event.timestamp);
@@ -133,7 +160,7 @@ export class HistoryTimeline extends LitElement {
   }
 
   private _renderExpandedTimeline(span: number) {
-    const visibleEvents = this._visibleEvents();
+    const visibleEvents = this._drawnEvents();
     const entityGroups = new Map<string, HistoryEventInput[]>();
     for (const event of visibleEvents) {
       const bucket = entityGroups.get(event.entityId);
@@ -164,7 +191,9 @@ export class HistoryTimeline extends LitElement {
         @keydown=${this._handleKeyDown}
       >
         <div class="timeline-track-overlay" style="grid-row:1 / span ${entities.length};" aria-hidden="true">
-          <div class="playhead playhead-expanded" style="left:${playheadLeft}%"></div>
+          <div class="playhead playhead-expanded" style="left:${playheadLeft}%">
+            <span class="playhead-time">${this._formatTimestamp(this.currentTime)}</span>
+          </div>
         </div>
         ${guard([this.events, this.startTime, this.endTime], () =>
           entities.map((entityId, index) => {
@@ -244,7 +273,9 @@ export class HistoryTimeline extends LitElement {
         @keydown=${this._handleKeyDown}
       >
         <div class="track"></div>
-        <div class="playhead" style="left:${this._pct(this.currentTime)}%"></div>
+        <div class="playhead" style="left:${this._pct(this.currentTime)}%">
+          <span class="playhead-time">${this._formatTimestamp(this.currentTime)}</span>
+        </div>
         ${guard([this.events, this.startTime, this.endTime], () =>
           this._groupEventsByTimestamp().map((group) => html`
           <div
@@ -323,6 +354,25 @@ export class HistoryTimeline extends LitElement {
     .track { position: absolute; inset: 0; border-radius: 999px; background: var(--divider-color, #ddd); }
     .playhead { position: absolute; top: -2px; width: 2px; height: calc(100% + 4px); background: ${unsafeCSS(SKIN_ACCENT)}; }
     .playhead-expanded { top: 0; bottom: 0; height: auto; transform: translateX(-50%); }
+    /*
+     * The clock rides the playhead rather than sitting in the header: while a
+     * replay runs this is the only part of the card the eye is on, and a time
+     * three inches away from it does not read as "where we are now".
+     */
+    .playhead-time {
+      position: absolute;
+      bottom: calc(100% + 4px);
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      pointer-events: none;
+      background: ${unsafeCSS(SKIN_ACCENT)};
+      color: var(--fp-skin-accent-ink, var(--text-primary-color, #fff));
+    }
     .marker-cluster {
       position: absolute;
       top: 50%;

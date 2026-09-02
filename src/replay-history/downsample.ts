@@ -129,3 +129,45 @@ export function downsampleHistory(
   }
   return events.filter((event) => keep.has(event));
 }
+
+/**
+ * Thin a series down to what a lane can actually show, keeping the biggest
+ * moves.
+ *
+ * This is a *display* concern and deliberately separate from
+ * {@link downsampleHistory}, which changes the data replay reads. A sensor
+ * that genuinely swings across its whole range — the demo's distance trackers
+ * do, several times a minute — survives deadband thinning almost intact,
+ * because every one of those points really is a large move. It still cannot be
+ * drawn: a lane around 1800px wide fits about 225 markers before they touch,
+ * and past that the lane is a solid bar that says nothing.
+ *
+ * So the lane gets a budget instead of a threshold, and spends it on the
+ * largest changes. Replay still steps through every value it loaded; you just
+ * stop seeing a marker for each one.
+ *
+ * Discrete series are returned untouched at any budget — there is no such
+ * thing as a "small" change between `on` and `off`, so there is no honest way
+ * to rank them.
+ */
+export function thinForDisplay(events: HistoryEventInput[], maxMarkers: number): HistoryEventInput[] {
+  if (!(maxMarkers > 2) || events.length <= maxMarkers) return events;
+  if (!isNumericSeries(events)) return events;
+
+  const values = events.map((e) => numeric(e.newState) ?? 0);
+  // Rank the interior points by how far each moved from the one before it, and
+  // keep the biggest. The endpoints are always kept, so the lane still spans
+  // the window.
+  const ranked = [];
+  for (let i = 1; i < events.length - 1; i++) {
+    ranked.push({ i, delta: Math.abs(values[i] - values[i - 1]) });
+  }
+  ranked.sort((a, b) => b.delta - a.delta);
+
+  const keep = new Set<number>([0, events.length - 1]);
+  for (const { i } of ranked) {
+    if (keep.size >= maxMarkers) break;
+    keep.add(i);
+  }
+  return events.filter((_, i) => keep.has(i));
+}

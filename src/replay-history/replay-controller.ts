@@ -198,9 +198,12 @@ export class ReplayControllerImpl implements ReplayController {
   }
 
   public formatReplayTime(timestamp: number): string {
+    // Seconds, not minutes: at anything near real-time speed a minute-
+    // resolution clock sits on the same string for a long stretch of playback
+    // and reads as though replay is not running at all.
     return formatReplayTime(timestamp, new Intl.DateTimeFormat(undefined, {
       dateStyle: "short",
-      timeStyle: "short",
+      timeStyle: "medium",
     }));
   }
 

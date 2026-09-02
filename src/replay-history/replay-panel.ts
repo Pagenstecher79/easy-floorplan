@@ -180,18 +180,21 @@ export class ReplayPanel extends LitElement {
     }
     .replay-panel-toggle {
       display: flex;
-      justify-content: flex-end;
+      justify-content: flex-start;
       margin: 0 0 4px;
     }
+    /* Shaped like the floor buttons, and carrying the same skin tokens, so the
+       card's two bits of chrome read as one set rather than two. */
     .replay-hide-toggle,
     .replay-show-toggle {
-      border: 1px solid var(--divider-color, #ccc);
-      border-radius: 999px;
-      background: var(--card-background-color, #fff);
-      color: var(--primary-text-color);
-      padding: 4px 10px;
+      border: 1px solid var(--fp-skin-badge-border, var(--divider-color, #ccc));
+      border-radius: 6px;
+      background: var(--fp-skin-badge-bg, var(--card-background-color, #fff));
+      color: var(--fp-skin-text, var(--primary-text-color));
+      padding: 4px 8px;
       font-size: 12px;
-      line-height: 1.2;
+      line-height: 1;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
       cursor: pointer;
       white-space: nowrap;
     }
@@ -232,7 +235,8 @@ export class ReplayPanel extends LitElement {
     }
     .replay-time {
       font-size: 12px;
-      color: var(--secondary-text-color, #666);
+      font-variant-numeric: tabular-nums;
+      color: var(--primary-text-color);
     }
     .replay-status {
       font-size: 12px;
@@ -578,10 +582,11 @@ export class ReplayPanel extends LitElement {
           <button
             class="replay-show-toggle"
             aria-expanded="false"
+            aria-label="Show replay history"
             aria-controls=${this.panelId}
             @click=${() => this._dispatch("toggle-visible", { visible: true })}
           >
-            Show replay history
+            Replay
           </button>
         </div>
       `;

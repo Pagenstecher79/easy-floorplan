@@ -1443,6 +1443,12 @@ historyReplay:
   numericSteps: 25
 ```
 
+Separately from this, and not configurable: the timeline draws at most 150 markers
+per lane, spending them on each sensor's largest moves. A sensor that genuinely
+swings across its whole range — a distance tracker, say — survives `numericSteps`
+almost intact and would still paint the lane as one solid bar. Replay steps through
+every value it loaded either way; the cap only decides what gets a marker.
+
 **When the sensor doesn't answer.** A condition that can't be evaluated never hides —
 a device that vanishes is the one thing you can't debug from the plan. A missing value,
 a missing threshold, or a sensor gone `unavailable` under a numeric threshold all leave
