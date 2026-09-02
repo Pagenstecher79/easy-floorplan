@@ -1564,39 +1564,27 @@ npm install
 npm run build      # bundles to dist/easy-floorplan-card.js
 npm run watch      # rebuild on change
 npm run typecheck  # tsc --noEmit
-npm test           # vitest (pure-logic tests; no browser)
+npm test           # vitest in node (jsdom where a test file asks for it)
+npm run test:browser  # editor gesture tests, in headless Chromium (see CONTRIBUTING.md)
 ```
 
 Releases are built and attached automatically by GitHub Actions when a GitHub release
 is published.
 
-### What the suite does not cover
+### Two suites
 
-The tests run in node against the pure modules — geometry, config migration, rendering
-decisions, the frame coalescer with an injected scheduler. That covers most of the
-codebase, and it runs in about a second.
+`npm test` runs in node against the pure modules — geometry, config migration, rendering
+decisions, the frame coalescer with an injected scheduler — and takes a couple of seconds.
+A file that needs a document opts into jsdom per file.
 
-It does **not** cover the editor's gesture wiring in [`src/editor.ts`](src/editor.ts):
-the pointerdown/move/up listeners, pointer capture, what gets queued for the next frame,
-and what happens to an in-flight drag on teardown. Those are verified by reading and by
-hand, so a green suite says nothing about them (issue
-[#233](https://github.com/nicosandller/easy-floorplan/issues/233)).
-
-**Changing anything on a drag path therefore needs manual verification in a real
-browser** — [`npm run ha`](#local-home-assistant) is the way — and the check has to
-include a moving viewport, because that is where these bugs live. Drag an element while
-the canvas scrolls under it: positions are mapped through the SVG's live
-`getScreenCTM()`, so anything deferred by a frame resolves against a matrix that may have
-moved since. A 150px wheel scroll mid-drag is enough to turn an 8-unit move into a
-288-unit one.
-
-A DOM shim is not a shortcut past this. Both candidates were measured against these
-exact needs: jsdom has no `getScreenCTM` at all, and happy-dom has one that always
-returns the identity matrix with a canvas that can never scroll — so a regression test
-for the bug above would run, pass, and prove nothing. Real coverage here means a real
-browser (`@vitest/browser` with the Playwright provider, as a second vitest project);
-that has been prototyped successfully but is not wired up, and the CI weight is the open
-question. Until it is, this section is the honest version.
+The editor's gesture wiring in [`src/editor.ts`](src/editor.ts) — the pointer listeners,
+pointer capture, what gets queued for the next frame, and what happens to an in-flight
+drag on teardown — is tested separately, in real Chromium, by `npm run test:browser`.
+Positions there are mapped through the SVG's live `getScreenCTM()`, so a move deferred by
+a frame resolves against a matrix that may have moved since; a DOM shim cannot show that
+(jsdom has no `getScreenCTM`, happy-dom's is always the identity), which is why it is a
+browser and not a shim. Which changes need that suite, and how to run it, is in
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Local Home Assistant
 
