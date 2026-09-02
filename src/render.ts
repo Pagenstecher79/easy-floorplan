@@ -3517,7 +3517,8 @@ export function normalizePlanRotation(v: unknown): PlanRotation {
  * `rotation` is the answer for both orientations until one of the two
  * overrides says otherwise, so a config that sets neither behaves exactly as
  * it did before this existed — including a config that sets no rotation at
- * all, which is most of them.
+ * all, which is most of them. An override written with no value at all
+ * (`rotationPortrait:`, which YAML parses to `null`) counts as not set.
  *
  * `portrait` is `undefined` where the question cannot be asked (a card
  * rendered without a window, which is every test in this suite and the
@@ -3531,7 +3532,13 @@ export function resolvePlanRotation(
   const base = normalizePlanRotation(c.rotation);
   if (portrait === undefined) return base;
   const override = portrait ? c.rotationPortrait : c.rotationLandscape;
-  return override === undefined ? base : normalizePlanRotation(override);
+  // `== null`, not `=== undefined`: a key written with no value —
+  // `rotationPortrait:` — parses to `null`, and the card's own numeric guard
+  // lets it through (it only rejects non-numbers that are not nullish, the
+  // same way an empty `trackers:` is treated as unset rather than malformed).
+  // Read as a value it would normalize to 0 and *silently override* the base
+  // rotation, which is the one thing an unset override must never do.
+  return override == null ? base : normalizePlanRotation(override);
 }
 
 /**

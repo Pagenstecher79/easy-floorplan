@@ -3748,6 +3748,20 @@ describe("rotation that follows the screen (issue #237)", () => {
     expect(resolvePlanRotation(c, undefined)).toBe(90);
   });
 
+  it("reads an empty YAML override as unset, not as 0° (review of #237)", () => {
+    // `rotationPortrait:` with nothing after it parses to null, and the card's
+    // numeric guard lets nullish through. Read as a value it normalizes to 0
+    // and silently cancels the base rotation — the one thing an unset
+    // override must never do.
+    const c = { rotation: 270, rotationPortrait: null } as unknown as FloorplanCardConfig;
+    expect(resolvePlanRotation(c, true)).toBe(270);
+    expect(resolvePlanRotation(c, false)).toBe(270);
+    const l = { rotation: 90, rotationLandscape: null } as unknown as FloorplanCardConfig;
+    expect(resolvePlanRotation(l, false)).toBe(90);
+    // An explicit 0 is still an explicit 0 — that distinction is the point.
+    expect(resolvePlanRotation({ rotation: 270, rotationPortrait: 0 } as FloorplanCardConfig, true)).toBe(0);
+  });
+
   it("normalizes an override the same way `rotation` is normalized", () => {
     expect(resolvePlanRotation({ rotationPortrait: 450 } as FloorplanCardConfig, true)).toBe(90);
     expect(resolvePlanRotation({ rotationPortrait: -90 } as FloorplanCardConfig, true)).toBe(270);

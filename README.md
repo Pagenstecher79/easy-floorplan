@@ -1501,10 +1501,13 @@ rotationLandscape: 0   # desktop, wall tablet
   every plan did before these existed — a config that sets neither is completely
   unaffected.
 - `0` in an override is a real answer, not "unset". On a plan that is otherwise rotated,
-  `rotationLandscape: 0` says *don't* rotate on a desktop.
+  `rotationLandscape: 0` says *don't* rotate on a desktop. Writing the key with **no
+  value** (`rotationPortrait:`) is unset, though — not 0°.
 - It follows the **screen's** orientation, not the card's own box. That is what "my
   vertical devices" means, and it keeps a narrow card in a sidebar from rotating itself on
-  a landscape desktop. It updates live when the device is turned — no reload.
+  a landscape desktop. On any current browser it follows the device being turned live,
+  with no reload; on an older WebView without a subscribable `matchMedia` it is still
+  correct when the page loads and simply stops following turns after that.
 - Editing is unaffected. The editor always shows the plan as drawn, as it does for plain
   `rotation`.
 

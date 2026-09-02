@@ -1276,7 +1276,8 @@ export interface FloorplanCardConfig extends LovelaceCardConfig {
   /**
    * Rotation to use while the screen is **portrait**, overriding
    * {@link rotation} (issue #237). Unset — the default — means `rotation`
-   * applies whichever way the screen is.
+   * applies whichever way the screen is; a key written with no value at all
+   * (`rotationPortrait:`) is unset too, not 0°.
    *
    * The case it exists for: a plan of a rectangular flat wants the long side
    * across the screen, and which side that is changes with the device. The
