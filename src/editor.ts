@@ -173,6 +173,7 @@ import {
   projectDeadSpaceForm,
   projectDisplayForm,
   projectPressForm,
+  projectReplayForm,
   projectSkinForm,
   projectSunForm,
   projectReliefForm,
@@ -2120,7 +2121,7 @@ export class FloorplanCardEditor extends LitElement {
    */
   private static readonly OPENING_GROUPS = [
     // What it is, and how it is drawn.
-    ["Shape", ["type", "motion", "length", "sash", "hinge", "opens", "slide", "style", "angle"]],
+    ["Shape", ["type", "motion", "length", "sash", "sashSpan", "hinge", "opens", "slide", "style", "angle"]],
     // Which contacts drive it — the opening's own, before the shutter's.
     ["What it reads", ["entity", "secondaryEntity", "invert"]],
     // How it behaves toward the sun (issue #177), which is neither shape nor
@@ -4388,7 +4389,7 @@ export class FloorplanCardEditor extends LitElement {
           // How the card is framed on the dashboard, as opposed to what is
           // drawn inside it. Set once for a surface and rarely touched again.
           "Display",
-          this._renderForm(formSlice(display, ["rotation", "overlayScale", "compactHeader"]), patch)
+          this._renderForm(formSlice(display, ["rotation", "overlayScale", "compactHeader", "zoomedOverlayScale"]), patch)
         )}
         ${this._renderGroup(
           // Light through the openings (issue #177) — where it comes from and
@@ -4429,6 +4430,7 @@ export class FloorplanCardEditor extends LitElement {
           // under display, beside the card's rotation, which is not what it is
           // about.
           "Devices",
+          this._renderForm(projectReplayForm(c), patch),
           this._renderForm(formSlice(display, ["offlineStyle"]), patch),
           this._renderForm(projectPressForm(c), patch)
         )}
@@ -4831,7 +4833,13 @@ export class FloorplanCardEditor extends LitElement {
           // other element: the thing it *does*, after everything it *is*.
           "Behavior",
           this._renderForm(
-            formSlice(aSpec, ["tap_action", "hold_action", "double_tap_action"]),
+            formSlice(aSpec, [
+              "fitZoom",
+              "zoom",
+              "tap_action",
+              "hold_action",
+              "double_tap_action",
+            ]),
             aApply
           )
         )}
