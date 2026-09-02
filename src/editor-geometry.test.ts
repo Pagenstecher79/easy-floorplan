@@ -10,6 +10,7 @@ import {
   applyDelta,
   attachedCorners,
   elementsAtPoint,
+  isLocked,
   cyclePick,
 } from "./editor-geometry";
 import type { OrigPos } from "./editor-geometry";
@@ -435,5 +436,103 @@ describe("applyDelta (area case)", () => {
     expect(out.areas![0]).toMatchObject({
       points: [{ x: 5, y: 5 }, { x: 15, y: 5 }, { x: 15, y: 15 }],
     });
+  });
+});
+
+describe("locked elements yield the click (issue #191)", () => {
+  const opts = { itemSize: 34, textSize: 16, wallThickness: 8 };
+  // The reporter's case: a window sitting on a wall. Both are under the
+  // pointer at (300, 200).
+  const floor = {
+    id: "f",
+    name: "F",
+    walls: [{ id: "w", x1: 0, y1: 200, x2: 400, y2: 200 }],
+    openings: [{ id: "o", type: "door", x: 300, y: 200, length: 90, angle: 0 }],
+    items: [],
+    texts: [],
+    furniture: [],
+    trackers: [],
+    areas: [],
+  } as unknown as Floor;
+
+  const kindsAt = (f: Floor) => elementsAtPoint(f, 300, 200, opts).map((s) => s.kind);
+
+  it("an unlocked pair keeps the usual most-specific-first order", () => {
+    expect(kindsAt(floor)).toEqual(["opening", "wall"]);
+  });
+
+  it("a locked element sorts behind an unlocked one whatever its kind", () => {
+    // Lock the *opening* — normally the most specific — and the wall wins.
+    const f = {
+      ...floor,
+      openings: [{ ...floor.openings[0], locked: true }],
+    } as unknown as Floor;
+    expect(kindsAt(f)).toEqual(["wall", "opening"]);
+  });
+
+  it("a locked wall stops shadowing the window drawn on it", () => {
+    const f = { ...floor, walls: [{ ...floor.walls[0], locked: true }] } as unknown as Floor;
+    expect(kindsAt(f)[0]).toEqual("opening");
+  });
+
+  it("locked elements stay in the list, so cycling can still reach them", () => {
+    // Without this there would be no way to select one and unlock it again —
+    // this editor has no layers panel to unlock from.
+    const f = {
+      ...floor,
+      walls: [{ ...floor.walls[0], locked: true }],
+      openings: [{ ...floor.openings[0], locked: true }],
+    } as unknown as Floor;
+    expect(kindsAt(f)).toEqual(["opening", "wall"]);
+    expect(elementsAtPoint(f, 300, 200, opts)).toHaveLength(2);
+  });
+
+  it("isLocked answers for every kind, and calls a stale id unlocked", () => {
+    const f = {
+      ...floor,
+      walls: [{ ...floor.walls[0], locked: true }],
+      items: [{ id: "i", entity: "light.a", x: 0, y: 0 }],
+      areas: [{ id: "a", points: [{ x: 0, y: 0 }], locked: true }],
+      trackers: [{ id: "tr", x: 0, y: 0, w: 10, h: 10 }],
+    } as unknown as Floor;
+    expect(isLocked(f, { kind: "wall", id: "w" })).toBe(true);
+    expect(isLocked(f, { kind: "area", id: "a" })).toBe(true);
+    expect(isLocked(f, { kind: "item", id: "i" })).toBe(false);
+    expect(isLocked(f, { kind: "tracker", id: "tr" })).toBe(false);
+    // A selection naming something that no longer exists is stale state, not
+    // a pinned element — calling it locked would refuse to move its group.
+    expect(isLocked(f, { kind: "wall", id: "gone" })).toBe(false);
+  });
+});
+
+describe("a pinned element sits out a group drag (issue #191)", () => {
+  // The editor pins by leaving an element out of the drag snapshot, so this
+  // is the property that mechanism rests on: applyDelta moves exactly what
+  // the map names and nothing else. Asserted here because the editor's own
+  // gesture wiring has no test environment to assert it in (issue #233).
+  const floor = {
+    id: "f",
+    name: "F",
+    walls: [{ id: "pinned", x1: 0, y1: 0, x2: 100, y2: 0, locked: true }],
+    openings: [],
+    items: [{ id: "loose", entity: "light.a", x: 50, y: 50 }],
+    texts: [],
+    furniture: [],
+    trackers: [],
+    areas: [],
+  } as unknown as Floor;
+
+  it("moves what the snapshot names and leaves out what it does not", () => {
+    // What the editor builds for a two-element selection with one locked.
+    const orig = new Map<string, OrigPos>([["item:loose", { kind: "pt", x: 50, y: 50 }]]);
+    const out = applyDelta(floor, 10, -5, orig);
+    expect(out.items![0]).toMatchObject({ id: "loose", x: 60, y: 45 });
+    // The wall is returned untouched — the same object, not a moved copy.
+    expect(out.walls![0]).toBe(floor.walls[0]);
+  });
+
+  it("keeps the pinned element still even when it is the only thing selected", () => {
+    const out = applyDelta(floor, 25, 25, new Map());
+    expect(out.walls![0]).toMatchObject({ x1: 0, y1: 0, x2: 100, y2: 0 });
   });
 });

@@ -372,13 +372,13 @@ export function elementsAtPoint(
   y: number,
   opts: { itemSize: number; textSize: number; wallThickness: number; hass?: RenderHass }
 ): Sel[] {
-  const hits: { sel: Sel; rank: number; order: number }[] = [];
-  const push = (kind: SelKind, id: string, order: number) =>
-    hits.push({ sel: { kind, id }, rank: PICK_ORDER.indexOf(kind), order });
+  const hits: { sel: Sel; rank: number; order: number; locked: boolean }[] = [];
+  const push = (kind: SelKind, id: string, order: number, locked?: boolean) =>
+    hits.push({ sel: { kind, id }, rank: PICK_ORDER.indexOf(kind), order, locked: !!locked });
 
   f.items.forEach((it, i) => {
     const r = (it.size ?? opts.itemSize) / 2 + HIT.pad;
-    if (Math.abs(x - it.x) <= r && Math.abs(y - it.y) <= r) push("item", it.id, i);
+    if (Math.abs(x - it.x) <= r && Math.abs(y - it.y) <= r) push("item", it.id, i, it.locked);
   });
   f.texts.forEach((t, i) => {
     // Rough box: text is centered on (x, y); width scales with the string.
@@ -392,31 +392,63 @@ export function elementsAtPoint(
     const hw = (size * 0.6 * Math.max(1, textLabel(opts.hass, t).length)) / 2 + HIT.pad;
     const hh = size / 2 + HIT.pad;
     const p = toLocal(x, y, t.x, t.y, t.angle ?? 0);
-    if (Math.abs(p.x) <= hw && Math.abs(p.y) <= hh) push("text", t.id, i);
+    if (Math.abs(p.x) <= hw && Math.abs(p.y) <= hh) push("text", t.id, i, t.locked);
   });
   f.openings.forEach((o, i) => {
     const p = toLocal(x, y, o.x, o.y, o.angle ?? 0);
     if (Math.abs(p.x) <= o.length / 2 && Math.abs(p.y) <= opts.wallThickness / 2 + HIT.pad) {
-      push("opening", o.id, i);
+      push("opening", o.id, i, o.locked);
     }
   });
   f.furniture.forEach((fu, i) => {
     const p = toLocal(x, y, fu.x, fu.y, fu.angle ?? 0);
-    if (Math.abs(p.x) <= fu.w / 2 && Math.abs(p.y) <= fu.h / 2) push("furniture", fu.id, i);
+    if (Math.abs(p.x) <= fu.w / 2 && Math.abs(p.y) <= fu.h / 2) push("furniture", fu.id, i, fu.locked);
   });
   f.walls.forEach((w, i) => {
-    if (distToSegment(x, y, w) <= HIT.wall) push("wall", w.id, i);
+    if (distToSegment(x, y, w) <= HIT.wall) push("wall", w.id, i, w.locked);
   });
   (f.trackers ?? []).forEach((tr, i) => {
     const p = toLocal(x, y, tr.x + tr.w / 2, tr.y + tr.h / 2, tr.angle ?? 0);
-    if (Math.abs(p.x) <= tr.w / 2 && Math.abs(p.y) <= tr.h / 2) push("tracker", tr.id, i);
+    if (Math.abs(p.x) <= tr.w / 2 && Math.abs(p.y) <= tr.h / 2) push("tracker", tr.id, i, tr.locked);
   });
   (f.areas ?? []).forEach((a, i) => {
-    if (pointInPolygon(a.points, x, y)) push("area", a.id, i);
+    if (pointInPolygon(a.points, x, y)) push("area", a.id, i, a.locked);
   });
 
-  // Specific kinds first; within a kind, the last drawn sits on top.
-  return hits.sort((a, b) => a.rank - b.rank || b.order - a.order).map((h) => h.sel);
+  // Locked elements yield (issue #191): anything unlocked under the pointer is
+  // picked first, whatever kind it is, so an unlocked window on a locked wall
+  // selects the window. They stay in the list rather than dropping out of it —
+  // cycling must still reach a locked element, or there would be no way to
+  // select one and unlock it again.
+  //
+  // Then specific kinds first; within a kind, the last drawn sits on top.
+  return hits
+    .sort((a, b) => Number(a.locked) - Number(b.locked) || a.rank - b.rank || b.order - a.order)
+    .map((h) => h.sel);
+}
+
+/**
+ * Whether a selection names a locked element (issue #191). Unknown ids are not
+ * locked: an id that no longer resolves is stale selection state, and treating
+ * it as pinned would quietly refuse to move the rest of a group with it.
+ */
+export function isLocked(f: Floor, sel: Sel): boolean {
+  switch (sel.kind) {
+    case "wall":
+      return !!f.walls.find((x) => x.id === sel.id)?.locked;
+    case "opening":
+      return !!f.openings.find((x) => x.id === sel.id)?.locked;
+    case "item":
+      return !!f.items.find((x) => x.id === sel.id)?.locked;
+    case "text":
+      return !!f.texts.find((x) => x.id === sel.id)?.locked;
+    case "furniture":
+      return !!f.furniture.find((x) => x.id === sel.id)?.locked;
+    case "tracker":
+      return !!(f.trackers ?? []).find((x) => x.id === sel.id)?.locked;
+    case "area":
+      return !!(f.areas ?? []).find((x) => x.id === sel.id)?.locked;
+  }
 }
 
 /**

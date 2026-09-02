@@ -24,6 +24,7 @@ screen size.
 
 ## Features
 - **Visual editor** — draw walls, drop doors and windows that snap onto them, drag, nudge with arrow keys, multi-select, copy/paste, undo/redo, zoom.
+  - (${\color{red}NEW!}$) **Lock in place** — pin anything you have finished positioning. A locked element still selects and edits but never moves, and it yields the click to whatever is unlocked on top of it, so reaching for a window stops grabbing the wall behind it. See [Locking elements in place](#locking-elements-in-place).
   - (${\color{red}NEW!}$) **Apply** — save the plan to the dashboard *without* closing the editor, so you can judge a change on the real card (in a second tab, or by collapsing the editor) instead of in the small preview beside it, then carry straight on. Needs Home Assistant 2025.3 or newer; on anything older the button says so and Save still works.
 - **Devices** — bind any entity to an icon: tap to toggle or open more-info, live state or attribute label, custom icon, size, rotation.
   - **Presence ripples** — presence and vibration sensors drawn as animated rings instead of a static icon.
@@ -1446,6 +1447,36 @@ compactHeader: true
 Off by default, because the title then sits over the drawing — the right trade only when
 there is room for it, which is the author's call. Set it in the editor under
 **Project → Compact header**.
+
+## Locking elements in place
+
+Select anything and press the padlock in the **Element** header. It applies to every kind
+of element — walls, doors and windows, devices, text, furniture, trackers and rooms — and
+to a whole multi-selection at once.
+
+A locked element:
+
+- **still selects, still edits, still deletes.** Everything works except *moving* it.
+- **never moves.** Not by dragging, not by its endpoint or vertex handles (which stop
+  being drawn, so nothing on it pretends to be draggable), and not by arrow keys — alone
+  or as part of a group. Drag a group by an unlocked member and the locked ones stay put
+  while the rest travel.
+- **yields the click.** Anything unlocked under the pointer is picked first, whatever kind
+  it is. Lock the wall and a window drawn on it selects on the first click instead of
+  after cycling past the wall.
+
+Both halves are the point. Yielding alone would still let a stray drag move the wall;
+pinning alone would still cost a click to get past it. Together they answer the thing
+that prompted this: *"every time I want to move a window, I end up moving a wall
+instead"*.
+
+Locked elements stay selectable on purpose — a design tool hides them behind a layers
+panel to unlock from, and this editor has none, so an element you could not click would
+be one you could never unlock. Pasted copies are never locked: a duplicate lands offset
+and the first thing you do is position it.
+
+Nothing about the rendered card reads this — it is an editing aid, and `locked: true` in
+the YAML changes nothing a viewer sees.
 
 ## Styling hooks (card-mod)
 

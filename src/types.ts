@@ -52,6 +52,29 @@ export interface Wall {
    * cleared by its own opening. Raise the ceiling only alongside that mask.
    */
   thickness?: number;
+  /**
+   * Pinned in place in the editor (issue #191).
+   *
+   * A locked element still selects, still edits, still deletes — everything but
+   * *move*. It cannot be dragged, its handles do not stretch it, and arrow keys
+   * do not nudge it, alone or as part of a group. It also yields the click:
+   * anything unlocked under the pointer is picked first, so an unlocked window
+   * on a locked wall selects the window instead of the wall behind it.
+   *
+   * Both halves matter and neither is enough alone. Yielding the click without
+   * pinning still lets a determined mis-click drag the wall; pinning without
+   * yielding still costs a second click to get past it. Together they are what
+   * the reporter asked for: "every time I want to move a window, I end up moving
+   * a wall instead".
+   *
+   * Selectable on purpose, rather than untouchable the way a design tool's
+   * locked layer is: those tools have a layers panel to unlock from and this
+   * editor does not, so an element that could not be picked could never be
+   * unlocked either.
+   *
+   * The editor writes it; nothing about the rendered card reads it.
+   */
+  locked?: boolean;
 }
 
 export type OpeningType = "door" | "window";
@@ -298,6 +321,12 @@ export interface Opening {
    * Ignored for swinging openings.
    */
   sliderStyle?: SliderStyle;
+  /**
+   * Pinned in place in the editor (issue #191): selects and edits normally, but
+   * never moves, and yields the click to anything unlocked under the pointer.
+   * See {@link Wall.locked} for why it stays selectable.
+   */
+  locked?: boolean;
 }
 
 /**
@@ -615,6 +644,12 @@ export interface FloorItem {
   tap_action?: ActionConfig;
   hold_action?: ActionConfig;
   double_tap_action?: ActionConfig;
+  /**
+   * Pinned in place in the editor (issue #191): selects and edits normally, but
+   * never moves, and yields the click to anything unlocked under the pointer.
+   * See {@link Wall.locked} for why it stays selectable.
+   */
+  locked?: boolean;
 }
 
 export type ItemDisplay = "badge" | "ripple" | "iconRipple";
@@ -726,6 +761,12 @@ export interface FloorText {
   color?: string;
   /** Rotation in degrees. Default 0. */
   angle?: number;
+  /**
+   * Pinned in place in the editor (issue #191): selects and edits normally, but
+   * never moves, and yields the click to anything unlocked under the pointer.
+   * See {@link Wall.locked} for why it stays selectable.
+   */
+  locked?: boolean;
 }
 
 /**
@@ -825,6 +866,12 @@ export interface Furniture {
   stateColor?: StateColorRule[];
   /** Color while `entity` is active. Used when no {@link stateColor} rule matches. */
   activeColor?: string;
+  /**
+   * Pinned in place in the editor (issue #191): selects and edits normally, but
+   * never moves, and yields the click to anything unlocked under the pointer.
+   * See {@link Wall.locked} for why it stays selectable.
+   */
+  locked?: boolean;
 }
 
 /**
@@ -860,6 +907,12 @@ export interface Tracker {
   xSensor?: TrackerSensor;
   /** Distance sensor mapped to the Y axis (rectangle's vertical span). */
   ySensor?: TrackerSensor;
+  /**
+   * Pinned in place in the editor (issue #191): selects and edits normally, but
+   * never moves, and yields the click to anything unlocked under the pointer.
+   * See {@link Wall.locked} for why it stays selectable.
+   */
+  locked?: boolean;
 }
 
 /**
@@ -1005,6 +1058,12 @@ export interface Area {
   tap_action?: ActionConfig;
   hold_action?: ActionConfig;
   double_tap_action?: ActionConfig;
+  /**
+   * Pinned in place in the editor (issue #191): selects and edits normally, but
+   * never moves, and yields the click to anything unlocked under the pointer.
+   * See {@link Wall.locked} for why it stays selectable.
+   */
+  locked?: boolean;
 }
 
 /**
