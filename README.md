@@ -119,7 +119,7 @@ then pick the entity in the **Element** section below the canvas.
   With the new disableLabelColor boolean toggle (available in Group 3 of the item editor), you can 
   override this behavior per item. When set to true, the label text will stay locked to its default 
   theme color, while the icon and badge continue to reflect the dynamic state colors.
-  ### Label Color Customization
+  **Label Color Customization**
 
   By default, an item's label text automatically adapts its color based on the state or active color rules.
   For some items, this can impact readability or clash with the desired design. 
