@@ -27,6 +27,9 @@ import {
 import {
   DEFAULT_AREA_OPACITY,
   DEFAULT_AREA_LABEL_SIZE,
+  MAX_AREA_ZOOM,
+  MAX_AREA_ZOOM_FIT,
+  DEFAULT_ZOOMED_OVERLAY_SCALE,
   DEFAULT_GRID,
   DEFAULT_ITEM_SIZE,
   DEFAULT_RIPPLE_SIZE,
@@ -1559,6 +1562,43 @@ export function areaForm(a: Area): FormSpec {
         label: "Fill opacity",
         selector: { number: { min: 0, max: 1, step: 0.05, mode: "slider" } },
       },
+      // How close tapping the room goes (issue #222). Only worth asking while
+      // a tap still zooms: an area with its own `tap_action` has replaced the
+      // zoom outright, and a number that does nothing is worse than no number.
+      //
+      // A toggle *and* a slider, rather than the slider alone resting at the
+      // fit's ceiling. That earlier shape made "fit" and an explicit 4 the
+      // same position, so a room whose fit is 1.15 — the ordinary case, and
+      // the one this feature exists for — could not be told to zoom to 4 at
+      // all. "Fit" is not a number on this scale; it is the absence of one,
+      // and it needs its own control to say so.
+      ...(a.tap_action
+        ? []
+        : [
+            {
+              name: "fitZoom",
+              label: "Fit the room to the card",
+              helper: "Off lets you set how close a tap goes",
+              selector: { boolean: {} },
+            },
+            ...(a.zoom === undefined
+              ? []
+              : [
+                  {
+                    name: "zoom",
+                    label: "Zoom level",
+                    helper: "How close a tap goes",
+                    selector: {
+                      number: {
+                        min: 1,
+                        max: MAX_AREA_ZOOM,
+                        step: 0.5,
+                        mode: "slider" as const,
+                      },
+                    },
+                  },
+                ]),
+          ]),
       // Optional entity that makes the room itself live (issue #6) — a presence
       // sensor that lights the room while it is occupied. Last, because most
       // areas are just outlines and never bind anything.
@@ -1615,12 +1655,30 @@ export function areaForm(a: Area): FormSpec {
       entity: a.entity ?? "",
       activeOpacity: a.activeOpacity ?? a.opacity ?? DEFAULT_AREA_OPACITY,
       highlight: a.highlight ?? "fill",
+      // "Fit" is the absence of a number, so it gets its own boolean; the
+      // slider only appears once that is off, and then always shows a real
+      // stored value.
+      fitZoom: a.zoom === undefined,
+      zoom: a.zoom ?? MAX_AREA_ZOOM_FIT,
       tap_action: a.tap_action,
       hold_action: a.hold_action,
       double_tap_action: a.double_tap_action,
     },
-    // "fill" is the default, so keep it out of the YAML.
-    toPatch: (p) => ("highlight" in p && p.highlight === "fill" ? { ...p, highlight: undefined } : p),
+    toPatch: (p) => {
+      let out = p;
+      // "fill" is the default, so keep it out of the YAML.
+      if ("highlight" in out && out.highlight === "fill") out = { ...out, highlight: undefined };
+      // The toggle is a form-only control: it says whether `zoom` is written
+      // at all, and must never reach the config itself (issue #222).
+      if ("fitZoom" in out) {
+        const { fitZoom, ...rest } = out;
+        // Turning the fit off has to leave a number behind for the slider that
+        // is about to appear — the fit's own ceiling is the natural opening
+        // bid, and unlike before it is now a real, re-selectable value.
+        out = { ...rest, zoom: fitZoom ? undefined : MAX_AREA_ZOOM_FIT };
+      }
+      return out;
+    },
   };
 }
 
@@ -1802,6 +1860,13 @@ export function projectDisplayForm(c: FloorplanCardConfig): FormSpec {
         selector: { boolean: {} },
       },
       {
+        name: "zoomedOverlayScale",
+        label: "Zoomed badge size",
+        helper:
+          "Badges, labels and text while zoomed in to a room, as a multiple of their size at full plan. 1 keeps them the same",
+        selector: { number: { min: 0.5, max: 3, step: 0.1, mode: "slider" } },
+      },
+      {
         name: "offlineStyle",
         label: "Offline devices",
         helper: "How a device is drawn when its entity is unavailable or missing",
@@ -1816,6 +1881,7 @@ export function projectDisplayForm(c: FloorplanCardConfig): FormSpec {
       rotation: String(normalizePlanRotation(c.rotation)),
       overlayScale: normalizeOverlayScale(c.overlayScale),
       compactHeader: c.compactHeader ?? false,
+      zoomedOverlayScale: c.zoomedOverlayScale ?? DEFAULT_ZOOMED_OVERLAY_SCALE,
       offlineStyle: offlineStyleOf(c),
     },
     toPatch: (p) => {
@@ -1837,6 +1903,10 @@ export function projectDisplayForm(c: FloorplanCardConfig): FormSpec {
         out = { ...out, compactHeader: undefined };
       if ("offlineStyle" in out && out.offlineStyle === DEFAULT_OFFLINE_STYLE)
         out = { ...out, offlineStyle: undefined };
+      // Same again for the zoomed overlay: 1 means "no different while zoomed",
+      // which is what every plan did before this existed (issue #222).
+      if ("zoomedOverlayScale" in out && out.zoomedOverlayScale === DEFAULT_ZOOMED_OVERLAY_SCALE)
+        out = { ...out, zoomedOverlayScale: undefined };
       return out;
     },
   };

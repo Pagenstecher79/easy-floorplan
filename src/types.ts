@@ -931,6 +931,22 @@ export interface Area {
    * label wider than its room.
    */
   labelSize?: number;
+  /**
+   * How far the plan zooms when this room is tapped (issue #222). Absent — the
+   * default — fits the room to the card, capped at {@link MAX_AREA_ZOOM_FIT},
+   * which is what tapping a room has always done.
+   *
+   * Set it when the fit is not the framing you want. A small room fits at a
+   * scale that fills the card with one cupboard; a long thin one binds on its
+   * long axis and barely zooms at all. Neither is wrong as a fit, and both are
+   * sometimes the wrong picture, which is why this is per room rather than a
+   * single number for the plan.
+   *
+   * The room stays centred either way — this sets how close, not where.
+   * Clamped to 1..{@link MAX_AREA_ZOOM}: a value below 1 becomes 1, since
+   * zooming *out* past the whole plan is what the zoom-out button does.
+   */
+  zoom?: number;
   /** Fill color. Falls back to the theme primary color. */
   color?: string;
   /** Fill opacity, 0-1. Default {@link DEFAULT_AREA_OPACITY}. */
@@ -1079,6 +1095,35 @@ export const PRESS_IN_MS = 80;
 export const PRESS_OUT_MS = 260;
 
 export const DEFAULT_AREA_OPACITY = 0.25;
+
+/**
+ * How far tapping a room may zoom when it is left to fit the card by itself
+ * (issue #158). A cap rather than a target: most rooms bind on the canvas long
+ * before this, and the ones that do not are small enough that filling the card
+ * with them reads as a mistake.
+ */
+export const MAX_AREA_ZOOM_FIT = 4;
+/**
+ * The ceiling on a per-room {@link Area.zoom} (issue #222). Higher than the
+ * fit cap on purpose — asking for a closer look at one room is a choice, while
+ * the fit is a guess — but still bounded, because the plan is drawn once at
+ * canvas resolution and past this it is just a bigger blur.
+ */
+export const MAX_AREA_ZOOM = 10;
+
+/**
+ * How much bigger (or smaller) the overlay is drawn while the plan is zoomed
+ * in to a room (issue #222). Default 1: badges, labels, text and trackers hold
+ * the size they have at full plan, which is what zooming has always done —
+ * the overlay is counter-scaled against the zoom so it never balloons.
+ *
+ * The reason to change it is that "the same size" is not always the useful
+ * answer. Zoomed into one room the badges have room to breathe and a wall
+ * tablet at arm's length wants them bigger; a dense room read up close wants
+ * them out of the way. This scales the whole overlay rather than the icons
+ * alone, so a badge and the label under it stay one object.
+ */
+export const DEFAULT_ZOOMED_OVERLAY_SCALE = 1;
 /** Area name label size, matching the hard-coded value it replaces. */
 export const DEFAULT_AREA_LABEL_SIZE = 14;
 export const DEFAULT_AREA_BORDER_WIDTH = 3;
@@ -1315,6 +1360,15 @@ export interface FloorplanCardConfig extends LovelaceCardConfig {
    * text. See the README's "Where it helps, and where it costs".
    */
   overlayScale?: OverlayScale;
+  /**
+   * Overlay size while zoomed in to a room, as a multiple of its size at full
+   * plan (issue #222). Default {@link DEFAULT_ZOOMED_OVERLAY_SCALE} — no
+   * change, which is what zooming has always done. Applies to everything in
+   * the HTML overlay (device badges and their labels, room names, free text,
+   * trackers) so a badge and its label scale as one thing, and only while a
+   * room is actually zoomed: at full plan it does nothing at all.
+   */
+  zoomedOverlayScale?: number;
   /** Canvas background color (CSS / hex). Falls back to the skin's paper, then the card background. */
   background?: string;
   /**

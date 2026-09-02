@@ -38,6 +38,9 @@ import {
   DEFAULT_TRACKER_DOT_SIZE,
   DEFAULT_RIPPLE_SIZE,
   DEFAULT_AREA_OPACITY,
+  MAX_AREA_ZOOM_FIT,
+  MAX_AREA_ZOOM,
+  DEFAULT_ZOOMED_OVERLAY_SCALE,
   DEFAULT_AREA_LABEL_SIZE,
   DEFAULT_AREA_BORDER_WIDTH,
   SUN_ELEVATION_NIGHT,
@@ -4390,7 +4393,13 @@ export function areaZoomTransform(
   h: number,
   rot: PlanRotation,
   padFrac = 0.15,
-  maxScale = 4
+  maxScale = MAX_AREA_ZOOM_FIT,
+  /**
+   * A room's own zoom, overriding the fit (issue #222). Undefined keeps the
+   * fitted scale, which is every room that has not asked for something else.
+   * Pass it through {@link resolveAreaZoom} rather than raw config.
+   */
+  explicitScale?: number
 ): AreaZoomTransform {
   if (!points.length) return IDENTITY_ZOOM;
   const rotated = points.map((p) => rotatePlanPoint(p.x, p.y, w, h, rot));
@@ -4404,7 +4413,11 @@ export function areaZoomTransform(
   const pad = Math.max(maxX - minX, maxY - minY) * padFrac;
   const bw = Math.max(maxX - minX + pad * 2, 1);
   const bh = Math.max(maxY - minY + pad * 2, 1);
-  const scale = Math.max(1, Math.min(maxScale, Math.min(d.w / bw, d.h / bh)));
+  // The room's own zoom wins over the fit when it has one: the fit is a guess
+  // at a good framing, and this is someone saying the guess was wrong.
+  // Centring is unaffected — this sets how close, not where (issue #222).
+  const fitted = Math.max(1, Math.min(maxScale, Math.min(d.w / bw, d.h / bh)));
+  const scale = explicitScale ?? fitted;
   // A non-finite input (NaN/Infinity coordinates from a hand-edited config)
   // must never reach the style sink: --fp-inv-zoom:NaN invalidates the whole
   // custom property, and .item's transform is built from it, so every device
@@ -4420,6 +4433,47 @@ export function areaZoomTransform(
     txPercent: clamp(50 - scale * cxFrac * 100),
     tyPercent: clamp(50 - scale * cyFrac * 100),
   };
+}
+
+/**
+ * A room's configured zoom, clamped, or `undefined` when it has none and the
+ * fit should stand (issue #222).
+ *
+ * Below 1 is clamped **to 1**, not honoured and not refused: it would zoom
+ * *out* past the whole plan, which is what the zoom-out button is for, and 1
+ * is the nearest thing to it that means anything. A non-finite value is the
+ * one case that does fall back to the fit, on the same reasoning as {@link
+ * areaZoomTransform}'s own guard — a NaN scale reaches a style sink and takes
+ * the overlay's centring down with it.
+ */
+export function resolveAreaZoom(a: Pick<Area, "zoom">): number | undefined {
+  const raw = a.zoom;
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return undefined;
+  return Math.max(1, Math.min(MAX_AREA_ZOOM, raw));
+}
+
+/**
+ * What the overlay counter-scales by while the plan is zoomed — the value
+ * behind `--fp-inv-zoom` (issue #222).
+ *
+ * `1 / zoomScale` is the counter-scale that holds the overlay at the size it
+ * has at full plan, which is what zooming has always done. `zoomedOverlayScale`
+ * multiplies that, so 1 keeps today's behaviour exactly and 1.5 draws every
+ * badge, label and tracker half again as large *while zoomed only*.
+ *
+ * Unzoomed it returns 1 rather than the multiplier: the setting is about the
+ * zoomed view, and applying it at full plan would resize every plan that set
+ * it the moment it was set. A non-finite or non-positive multiplier is
+ * ignored for the same reason the transform guards its own scale — this value
+ * lands in a custom property that the badge transform is built from.
+ */
+export function zoomedOverlayScale(zoomScale: number, multiplier?: number): number {
+  if (!Number.isFinite(zoomScale) || zoomScale <= 1) return 1;
+  const m =
+    typeof multiplier === "number" && Number.isFinite(multiplier) && multiplier > 0
+      ? multiplier
+      : DEFAULT_ZOOMED_OVERLAY_SCALE;
+  return (1 / zoomScale) * m;
 }
 
 /**
