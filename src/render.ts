@@ -29,6 +29,7 @@ import type {
   RenderHass,
   HassEntity,
   FloorItem,
+  FloorText,
   OverlayScale,
   ActionConfig,
 } from "./types";
@@ -146,6 +147,12 @@ export function collectWatchedEntities(c: FloorplanCardConfig): Set<string> {
       if (it.hideBadgeEntity) ids.add(it.hideBadgeEntity);
       for (const r of itemReadings(it)) if (r.entity) ids.add(r.entity);
     }
+    // Entity-bound text (issue #225). Same trap as the furniture below and the
+    // areas after it: miss this and the number is painted once and then frozen,
+    // catching up only when some *other* watched entity happens to move.
+    for (const t of f.texts) {
+      if (t.entity) ids.add(t.entity);
+    }
     // Entity-bound furniture (issue #82) — without this the card never
     // re-renders when the soil sensor moves, and the plant stays its
     // first-painted color forever.
@@ -260,6 +267,37 @@ export function itemStateText(
   return item.attribute
     ? entityAttributeText(hass, item.entity, item.attribute)
     : entityStateText(hass, item.entity);
+}
+
+/**
+ * What a free text label actually draws (issue #225).
+ *
+ * Unbound it is the words as typed, which is every text on every plan drawn
+ * before this existed. Bound to an entity it is that entity's reading —
+ * formatted the way Home Assistant formats it anywhere else, so a power sensor
+ * reads `1.2 kW` and its display precision is the entity's own setting rather
+ * than something to configure again here.
+ *
+ * With **both**, the words are a prefix: `PV` and a reading of `1.2 kW` draw
+ * `PV 1.2 kW`. One rule rather than a placeholder syntax to learn, and it
+ * covers the two things people write — a bare number, or a number with a word
+ * in front of it saying which number it is.
+ *
+ * A joining space, not the ` · ` a device's label uses between its own
+ * readings: this is one reading with a name, not a list.
+ */
+export function textLabel(
+  hass: RenderHass | undefined,
+  t: Pick<FloorText, "text" | "entity" | "attribute">,
+): string {
+  // `?? ""` rather than `t.text`: an emptied optional text field is stored as
+  // absent, so an unbound label with no words has no `text` at all — and this
+  // returns a string to every caller, always.
+  if (!t.entity) return t.text ?? "";
+  const value = t.attribute
+    ? entityAttributeText(hass, t.entity, t.attribute)
+    : entityStateText(hass, t.entity);
+  return t.text ? `${t.text} ${value}` : value;
 }
 
 /**

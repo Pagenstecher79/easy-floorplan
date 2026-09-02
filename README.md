@@ -38,6 +38,7 @@ screen size.
   - (${\color{red}NEW!}$) **A sensor per leaf** — anything with two leaves takes a second contact and draws them independently: a casement window with one sash open and one shut, a double door ajar on one side, a pair of shutters with one folded back.
 - (${\color{red}NEW!}$) **Offline devices read as offline** — an entity that is unavailable, unknown, or gone from Home Assistant is dimmed (or crossed out), instead of looking exactly like a device someone switched off.
 - (${\color{red}NEW!}$) **Furniture** — 26 gray line-art diagrams (table, sofa, bed, stove, stairs, tv…), each bindable to an entity, in a searchable picker. Every one is a plain JSON file of numbers you can copy: draw your own in the editor's paste box, use it straight away, and open a PR when it's good. No SVG, so nothing you paste can run anything.
+- (${\color{red}NEW!}$) **Live text labels** — bind a text to an entity and it shows the reading: a power figure in the corner, a temperature over a room. Type words in front of it, or leave them out for the number alone.
 - **Areas** — trace room polygons that color live from an entity, and link them to Home Assistant areas to scope entity pickers and bulk-add devices.
 - **Live position trackers** — map one or two distance sensors (mmWave / radar) onto a marker that moves across the plan in real time.
 - (${\color{red}NEW!}$) **Dead spaces** — hatch the spaces your walls seal off that no door or window reaches: a service shaft, the void behind a boxed-in stairwell. Nothing to draw — the regions come from the walls and openings themselves, so cutting a doorway into one stops it being dead the moment you place the door.
@@ -556,8 +557,27 @@ without turning into the color of the light. Pools never intercept clicks.
 
 ### Text
 
-`{ id, x, y, text, size?, color?, angle? }` — `size` px (default 16), `color` CSS/hex,
-`angle` degrees.
+`{ id, x, y, text, entity?, attribute?, size?, color?, angle? }` — `size` px (default 16),
+`color` CSS/hex, `angle` degrees.
+
+Bind an **`entity`** and the label shows its current value (issue #225) — a power reading
+in the corner of the plan, a temperature over a room:
+
+```yaml
+texts:
+  # The reading on its own.
+  - { id: pv, x: 300, y: 80, text: "", entity: sensor.pv_output, size: 28 }
+  # Words in front of it: "Grid 0.4 kW".
+  - { id: grid, x: 300, y: 130, text: Grid, entity: sensor.grid_power }
+  # An attribute rather than the state: "Hall 21.5".
+  - { id: hall, x: 300, y: 180, text: Hall, entity: climate.hall, attribute: current_temperature }
+```
+
+`text` becomes a **prefix** when an entity is bound, and the value stands alone when you
+leave it empty. Values are formatted the way Home Assistant formats them anywhere else,
+units and display precision included — so rounding a reading is that entity's own
+**display precision** setting rather than anything to configure here. An entity that isn't
+there reads `—`, the same as a device's label.
 
 ### Furniture
 

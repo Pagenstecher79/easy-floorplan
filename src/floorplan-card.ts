@@ -80,6 +80,7 @@ import {
   trackerSensorReading,
   entityIsActive,
   itemBadgeLabel,
+  textLabel,
   resolveStateColor,
   itemRawValue,
   badgeContentOf,
@@ -747,7 +748,7 @@ export class FloorplanCard extends LitElement {
                color:${cssColorOr(t.color, SKIN_TEXT)};
                transform:translate(-50%,-50%) scale(var(--fp-inv-zoom,1)) rotate(${cssNumber(t.angle, 0)}deg);"
       >
-        ${t.text}
+        ${textLabel(this.hass, t)}
       </div>
     `;
   }

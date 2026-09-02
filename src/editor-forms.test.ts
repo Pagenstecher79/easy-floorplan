@@ -29,7 +29,7 @@ import {
 } from "./editor-forms";
 import { itemHasLabel } from "./render";
 import type { FormField } from "./editor-forms";
-import type { Area, Opening, FloorItem, Floor, Furniture, Tracker, FloorplanCardConfig } from "./types";
+import type { Area, FloorText, Opening, FloorItem, Floor, Furniture, Tracker, FloorplanCardConfig } from "./types";
 import { DEFAULT_GLOW_RADIUS, DEFAULT_PRESS_EFFECT } from "./types";
 import { DEFAULT_SKIN, SKINS, MAX_SKIN_WALL_WIDTH } from "./skins";
 import { DEFAULT_SUN_BEARING, SUN_REACH } from "./render";
@@ -882,9 +882,15 @@ describe("areaForm", () => {
 });
 
 describe("textForm / furnitureForm / trackerForm", () => {
-  it("text field is required (empty stays empty, not undefined)", () => {
-    const form = textForm({ id: "t", x: 0, y: 0, text: "hi" });
-    expect(form.fields.find((x) => x.name === "text")!.required).toBe(true);
+  it("text is required while nothing else fills the label (issue #225)", () => {
+    const req = (t: Partial<FloorText>) =>
+      textForm({ id: "t", x: 0, y: 0, text: "hi", ...t } as FloorText).fields.find(
+        (x) => x.name === "text"
+      )!.required;
+    // No entity: words are the only thing that can be on screen.
+    expect(req({})).toBe(true);
+    // A bound reading fills it, so the words become an optional prefix.
+    expect(req({ entity: "sensor.pv" })).toBe(false);
   });
 
   it("furniture type options carry human labels", () => {
