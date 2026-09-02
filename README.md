@@ -393,10 +393,23 @@ The editor writes this config for you; manual editing is optional.
 | `trackers`   | Tracker[]| `[]`               | Live position trackers (see [Tracker](#tracker)).    |
 | `areas`      | Area[]   | `[]`               | Named room polygons (see [Area](#area)).          |
 | `symbols`    | map      | —                  | Furniture symbols this plan defines for itself, merged over the shipped library. See [Drawing your own](#drawing-your-own). |
+| `historyReplay` | object | disabled | Optional history replay controls. Set `enabled: true` to show replay controls and load Home Assistant history for mapped entities only. |
 
 When `floors` is present each floor carries its own `walls`, `openings`, `items`, `texts`,
 `furniture`, `trackers` and `areas`. The top-level arrays describe a single implicit floor
 and remain valid for backward compatibility.
+
+### History replay
+
+`historyReplay` is optional and off by default.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `enabled` | boolean | `false` | Shows replay controls and enables loading history for mapped entities. |
+| `lookbackSeconds` | number | `3600` | Initial replay window length in seconds. Must be positive. |
+| `defaultSpeed` | number | auto | Playback speed in simulated seconds per real second. `1` means real-time. |
+| `debug` | boolean | `false` | Log replay lifecycle (load, seek, play, pause) to the browser console. Off by default — seeking logs once per frame. |
+| `numericSteps` | number | unset | Thin numeric sensor drift to this many levels of each sensor's observed range, to cut the time a freshly loaded window takes to draw. Discrete states — lights, doors, covers — are never thinned. Unset keeps every point. |
 
 ### Floor
 
@@ -1420,6 +1433,29 @@ hideBadgeMode: threshold
 hideBadgeOperator: "<"
 hideBadgeThreshold: 20
 ```
+
+A busy plan can load thousands of points a numeric sensor never meaningfully moved
+through, and each one becomes a marker on the timeline. `numericSteps: 25` keeps the
+shape of every curve — including its peaks — while drawing far fewer of them:
+
+```yaml
+historyReplay:
+  enabled: true
+  lookbackSeconds: 7200
+  numericSteps: 25
+```
+
+In the expanded lane view, clicking a lane's label switches that lane off — its
+markers go, and so does its contribution to the collapsed summary bar. The row stays
+behind, struck through, so you can click it again; a "Show all" control appears while
+anything is hidden, including after you collapse the lanes. It's a view preference for
+the session, not config.
+
+Separately from this, and not configurable: the timeline draws at most 150 markers
+per lane, spending them on each sensor's largest moves. A sensor that genuinely
+swings across its whole range — a distance tracker, say — survives `numericSteps`
+almost intact and would still paint the lane as one solid bar. Replay steps through
+every value it loaded either way; the cap only decides what gets a marker.
 
 **When the sensor doesn't answer.** A condition that can't be evaluated never hides —
 a device that vanishes is the one thing you can't debug from the plan. A missing value,
