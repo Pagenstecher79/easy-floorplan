@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { html, nothing } from "lit";
-import type { Area, Furniture, FurnitureType, ItemKind, ItemReading } from "./types";
+import type { Area, FloorText, Furniture, FurnitureType, ItemKind, ItemReading } from "./types";
 import { SKIN_ACCENT, SKIN_WALL, MAX_SKIN_WALL_WIDTH } from "./skins";
 import {
   DEFAULT_GLOW_RADIUS,
@@ -86,6 +86,7 @@ import {
   entityStateText,
   itemStateText,
   itemBadgeLabel,
+  textLabel,
   itemReadingText,
   itemReadings,
   badgeEntityIndex,
@@ -1785,6 +1786,59 @@ describe("resolveIconAnimation (issue #48)", () => {
     ).toBeUndefined();
     // Off never animates, fan_only override or not.
     expect(resolveIconAnimation({ entity: "climate.ac" }, "off")).toBeUndefined();
+  });
+
+  it("a climate entity animates only while hvac_action says it is working (issue #235)", () => {
+    // The reported case: an AC set to "cool" that has reached its setpoint
+    // reports state "cool" with hvac_action "idle". The mode is a setting,
+    // not moving air, so a spin there is a claim the unit is not making.
+    expect(
+      resolveIconAnimation({ entity: "climate.ac", iconAnimation: "spin" }, "cool", {
+        hvac_action: "idle",
+      }),
+    ).toBeUndefined();
+    // Same unit a minute later, actually cooling: the spin is true again.
+    expect(
+      resolveIconAnimation({ entity: "climate.ac", iconAnimation: "spin" }, "cool", {
+        hvac_action: "cooling",
+      }),
+    ).toBe("spin");
+    // Every other working action counts the same way.
+    for (const action of ["heating", "drying", "fan", "preheating", "defrosting"]) {
+      expect(
+        resolveIconAnimation({ entity: "climate.ac", iconAnimation: "pulse" }, "heat", {
+          hvac_action: action,
+        }),
+      ).toBe("pulse");
+    }
+    // "off" as an action is the same story as idle: nothing is running.
+    expect(
+      resolveIconAnimation({ entity: "climate.ac", iconAnimation: "spin" }, "cool", {
+        hvac_action: "off",
+      }),
+    ).toBeUndefined();
+    // fan_only's own spin is gated too — a stopped fan is not spinning
+    // whatever the mode says — but still plays while the fan runs.
+    expect(
+      resolveIconAnimation({ entity: "climate.ac" }, "fan_only", { hvac_action: "idle" }),
+    ).toBeUndefined();
+    expect(
+      resolveIconAnimation({ entity: "climate.ac" }, "fan_only", { hvac_action: "fan" }),
+    ).toBe("spin");
+    // An integration that reports no hvac_action at all keeps animating:
+    // the attribute is optional, and going quiet on those would be a second
+    // regression to fix the first.
+    expect(
+      resolveIconAnimation({ entity: "climate.ac", iconAnimation: "spin" }, "cool", {
+        current_temperature: 20,
+      }),
+    ).toBe("spin");
+    expect(resolveIconAnimation({ entity: "climate.ac" }, "fan_only", {})).toBe("spin");
+    // The gate is climate-only: a fan entity has no hvac_action to consult,
+    // and an unrelated domain that happens to carry one is not a thermostat.
+    expect(
+      resolveIconAnimation({ entity: "fan.ceiling" }, "on", { hvac_action: "idle" }),
+    ).toBe("spin");
   });
 
   it("a forced spin plays for a climate entity running in any mode (issue #206)", () => {
@@ -5517,6 +5571,69 @@ describe("stairs that change floor (issue #121)", () => {
     expect(furnitureFloorTarget(stairs("down"), two, "g")).toBeUndefined();
   });
 });
+
+describe("a text label can show an entity's value (issue #225)", () => {
+  const label = (t: Partial<FloorText>) =>
+    textLabel(livingArea(), { text: "", ...t } as FloorText);
+
+  it("draws the words as typed when nothing is bound", () => {
+    expect(label({ text: "Kitchen" })).toBe("Kitchen");
+    // Every text drawn before this existed keeps working, empty included.
+    expect(label({ text: "" })).toBe("");
+  });
+
+  it("always returns a string, even with no words stored at all", () => {
+    // The editor stores an emptied optional text field as absent rather than
+    // as "", so an unbound label can arrive with no `text` key — and callers
+    // interpolate the result straight into markup.
+    expect(textLabel(livingArea(), { entity: undefined } as FloorText)).toBe("");
+    expect(textLabel(livingArea(), {} as FloorText)).toBe("");
+    // …and with an entity bound, missing words just mean no prefix.
+    expect(textLabel(livingArea(), { entity: TEMP } as FloorText)).toBe("17.9 °C");
+  });
+
+  it("draws the reading when an entity is bound and there are no words", () => {
+    // HA's own formatter, so units and display precision come for free —
+    // which is what the reporter's `| round(1)` template was reaching for.
+    expect(label({ entity: TEMP })).toBe("17.9 °C");
+  });
+
+  it("uses the words as a prefix when both are given", () => {
+    expect(label({ text: "Outside", entity: TEMP })).toBe("Outside 17.9 °C");
+    // A space, not the " · " a device puts between its own readings: this is
+    // one reading with a name, not a list.
+    expect(label({ text: "Outside", entity: TEMP })).not.toContain("·");
+  });
+
+  it("reads an attribute instead of the state when asked", () => {
+    const h = livingArea();
+    (h.states[TEMP]!.attributes as Record<string, unknown>).battery = 84;
+    expect(textLabel(h, { text: "", entity: TEMP, attribute: "battery" } as FloorText)).toBe("84");
+    expect(textLabel(h, { text: "Batt", entity: TEMP, attribute: "battery" } as FloorText)).toBe(
+      "Batt 84"
+    );
+  });
+
+  it("says so when the entity is missing, rather than going blank", () => {
+    expect(label({ entity: "sensor.gone" })).toBe("—");
+    expect(label({ text: "PV", entity: "sensor.gone" })).toBe("PV —");
+  });
+
+  it("ignores an attribute with no entity to read it from", () => {
+    expect(label({ text: "Hall", attribute: "battery" })).toBe("Hall");
+  });
+
+  it("is watched, or the number would freeze on the plan", () => {
+    const got = collectWatchedEntities({
+      texts: [
+        { id: "t1", x: 0, y: 0, text: "PV", entity: TEMP },
+        { id: "t2", x: 0, y: 0, text: "just words" },
+      ],
+    } as unknown as FloorplanCardConfig);
+    expect([...got]).toEqual([TEMP]);
+  });
+});
+
 describe("hide by condition (checkHideCondition)", () => {
   // Signature: (evalState, mode, stateMatch, operator, threshold, invert)
 

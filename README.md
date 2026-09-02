@@ -38,6 +38,7 @@ screen size.
   - (${\color{red}NEW!}$) **A sensor per leaf** — anything with two leaves takes a second contact and draws them independently: a casement window with one sash open and one shut, a double door ajar on one side, a pair of shutters with one folded back.
 - (${\color{red}NEW!}$) **Offline devices read as offline** — an entity that is unavailable, unknown, or gone from Home Assistant is dimmed (or crossed out), instead of looking exactly like a device someone switched off.
 - (${\color{red}NEW!}$) **Furniture** — 26 gray line-art diagrams (table, sofa, bed, stove, stairs, tv…), each bindable to an entity, in a searchable picker. Every one is a plain JSON file of numbers you can copy: draw your own in the editor's paste box, use it straight away, and open a PR when it's good. No SVG, so nothing you paste can run anything.
+- (${\color{red}NEW!}$) **Live text labels** — bind a text to an entity and it shows the reading: a power figure in the corner, a temperature over a room. Type words in front of it, or leave them out for the number alone.
 - **Areas** — trace room polygons that color live from an entity, and link them to Home Assistant areas to scope entity pickers and bulk-add devices.
 - **Live position trackers** — map one or two distance sensors (mmWave / radar) onto a marker that moves across the plan in real time.
 - (${\color{red}NEW!}$) **Dead spaces** — hatch the spaces your walls seal off that no door or window reaches: a service shaft, the void behind a boxed-in stairwell. Nothing to draw — the regions come from the walls and openings themselves, so cutting a doorway into one stops it being dead the moment you place the door.
@@ -489,7 +490,7 @@ distorted anyway.
 | `size`        | number                                 | `34`         | Icon badge diameter (px).                              |
 | `angle`       | number                                 | `0`          | Icon rotation (deg).                                   |
 | `display`     | `badge` \| `ripple` \| `iconRipple`    | `badge`      | How the device is drawn. The editor spells this as the **Ripple** toggle (plus **Badge shows: Nothing** for `ripple`) and offers it only on devices that detect something where they sit (see [Presence ripples](#presence-ripples)); in YAML it works on any entity. |
-| `iconAnimation` | `auto` \| `none` \| `spin` \| `pulse` | `auto`       | Animate the icon while active. `auto`: fan spins; media player / vacuum pulse. The editor spells this as the icon options of **Badge shows**, showing `auto` as whatever it resolves to. |
+| `iconAnimation` | `auto` \| `none` \| `spin` \| `pulse` | `auto`       | Animate the icon while active. `auto`: fan spins; media player / vacuum pulse. A `climate` entity animates only while its `hvac_action` says it is working — an AC holding `cool` at temperature keeps its colour but stops moving. The editor spells this as the icon options of **Badge shows**, showing `auto` as whatever it resolves to. |
 | `activeColor` | string                                 | theme color  | Badge color while on. Ignored while `stateColor` rules match. |
 | `rippleColor` | string                                 | `activeColor`| Ripple ring color, falling back to `activeColor` then the primary color. |
 | `rippleSize`  | number                                 | `80`         | Max ripple diameter (px).                              |
@@ -568,8 +569,27 @@ without turning into the color of the light. Pools never intercept clicks.
 
 ### Text
 
-`{ id, x, y, text, size?, color?, angle? }` — `size` px (default 16), `color` CSS/hex,
-`angle` degrees.
+`{ id, x, y, text, entity?, attribute?, size?, color?, angle? }` — `size` px (default 16),
+`color` CSS/hex, `angle` degrees.
+
+Bind an **`entity`** and the label shows its current value (issue #225) — a power reading
+in the corner of the plan, a temperature over a room:
+
+```yaml
+texts:
+  # The reading on its own.
+  - { id: pv, x: 300, y: 80, text: "", entity: sensor.pv_output, size: 28 }
+  # Words in front of it: "Grid 0.4 kW".
+  - { id: grid, x: 300, y: 130, text: Grid, entity: sensor.grid_power }
+  # An attribute rather than the state: "Hall 21.5".
+  - { id: hall, x: 300, y: 180, text: Hall, entity: climate.hall, attribute: current_temperature }
+```
+
+`text` becomes a **prefix** when an entity is bound, and the value stands alone when you
+leave it empty. Values are formatted the way Home Assistant formats them anywhere else,
+units and display precision included — so rounding a reading is that entity's own
+**display precision** setting rather than anything to configure here. An entity that isn't
+there reads `—`, the same as a device's label.
 
 ### Furniture
 
@@ -1517,6 +1537,34 @@ npm test           # vitest (pure-logic tests; no browser)
 
 Releases are built and attached automatically by GitHub Actions when a GitHub release
 is published.
+
+### What the suite does not cover
+
+The tests run in node against the pure modules — geometry, config migration, rendering
+decisions, the frame coalescer with an injected scheduler. That covers most of the
+codebase, and it runs in about a second.
+
+It does **not** cover the editor's gesture wiring in [`src/editor.ts`](src/editor.ts):
+the pointerdown/move/up listeners, pointer capture, what gets queued for the next frame,
+and what happens to an in-flight drag on teardown. Those are verified by reading and by
+hand, so a green suite says nothing about them (issue
+[#233](https://github.com/nicosandller/easy-floorplan/issues/233)).
+
+**Changing anything on a drag path therefore needs manual verification in a real
+browser** — [`npm run ha`](#local-home-assistant) is the way — and the check has to
+include a moving viewport, because that is where these bugs live. Drag an element while
+the canvas scrolls under it: positions are mapped through the SVG's live
+`getScreenCTM()`, so anything deferred by a frame resolves against a matrix that may have
+moved since. A 150px wheel scroll mid-drag is enough to turn an 8-unit move into a
+288-unit one.
+
+A DOM shim is not a shortcut past this. Both candidates were measured against these
+exact needs: jsdom has no `getScreenCTM` at all, and happy-dom has one that always
+returns the identity matrix with a canvas that can never scroll — so a regression test
+for the bug above would run, pass, and prove nothing. Real coverage here means a real
+browser (`@vitest/browser` with the Playwright provider, as a second vitest project);
+that has been prototyped successfully but is not wired up, and the CI weight is the open
+question. Until it is, this section is the honest version.
 
 ### Local Home Assistant
 

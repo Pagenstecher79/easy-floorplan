@@ -112,6 +112,7 @@ import {
   resolveIconAnimation,
   itemIconSize,
   itemLabelSize,
+  textLabel,
   labelPositionOf,
   itemReadings,
   itemHasLabel,
@@ -1392,6 +1393,7 @@ export class FloorplanCardEditor extends LitElement {
       itemSize: DEFAULT_ITEM_SIZE,
       textSize: DEFAULT_TEXT_SIZE,
       wallThickness: WALL_THICKNESS,
+      hass: this.hass,
     });
     const sameSpot =
       !!this._pickAnchor &&
@@ -4197,7 +4199,7 @@ export class FloorplanCardEditor extends LitElement {
     // Live preview: the icon animates exactly when the card would animate it
     // (entity currently active), so the "Badge shows" dropdown shows its
     // effect without leaving the editor.
-    const anim = resolveIconAnimation(it, st?.state);
+    const anim = resolveIconAnimation(it, st?.state, st?.attributes);
     // Every measure the card expresses in canvas units, expressed the same way
     // here (issue #192) — the badge box, the value inside it, the glyph, the
     // ripple and the label below.
@@ -4291,7 +4293,7 @@ export class FloorplanCardEditor extends LitElement {
         @pointerup=${this._onOverlayUp}
         @pointercancel=${this._onPointerCancel}
       >
-        ${t.text || "…"}
+        ${textLabel(this.hass, t) || "…"}
       </div>
     `;
   }
@@ -4707,7 +4709,7 @@ export class FloorplanCardEditor extends LitElement {
       const t = this._floor().texts.find((x) => x.id === sel.id);
       if (!t) return html`${nothing}`;
       return html`
-        ${this._renderForm(textForm(t), (patch, live) =>
+        ${this._renderForm(textForm(t, this._areaEntitiesAt(t.x, t.y)), (patch, live) =>
           this._applyElementPatch("text", t.id, patch, live)
         )}
         ${this._renderColorRow({

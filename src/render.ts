@@ -29,6 +29,7 @@ import type {
   RenderHass,
   HassEntity,
   FloorItem,
+  FloorText,
   OverlayScale,
   ActionConfig,
 } from "./types";
@@ -146,6 +147,12 @@ export function collectWatchedEntities(c: FloorplanCardConfig): Set<string> {
       if (it.hideBadgeEntity) ids.add(it.hideBadgeEntity);
       for (const r of itemReadings(it)) if (r.entity) ids.add(r.entity);
     }
+    // Entity-bound text (issue #225). Same trap as the furniture below and the
+    // areas after it: miss this and the number is painted once and then frozen,
+    // catching up only when some *other* watched entity happens to move.
+    for (const t of f.texts) {
+      if (t.entity) ids.add(t.entity);
+    }
     // Entity-bound furniture (issue #82) — without this the card never
     // re-renders when the soil sensor moves, and the plant stays its
     // first-painted color forever.
@@ -260,6 +267,37 @@ export function itemStateText(
   return item.attribute
     ? entityAttributeText(hass, item.entity, item.attribute)
     : entityStateText(hass, item.entity);
+}
+
+/**
+ * What a free text label actually draws (issue #225).
+ *
+ * Unbound it is the words as typed, which is every text on every plan drawn
+ * before this existed. Bound to an entity it is that entity's reading —
+ * formatted the way Home Assistant formats it anywhere else, so a power sensor
+ * reads `1.2 kW` and its display precision is the entity's own setting rather
+ * than something to configure again here.
+ *
+ * With **both**, the words are a prefix: `PV` and a reading of `1.2 kW` draw
+ * `PV 1.2 kW`. One rule rather than a placeholder syntax to learn, and it
+ * covers the two things people write — a bare number, or a number with a word
+ * in front of it saying which number it is.
+ *
+ * A joining space, not the ` · ` a device's label uses between its own
+ * readings: this is one reading with a name, not a list.
+ */
+export function textLabel(
+  hass: RenderHass | undefined,
+  t: Pick<FloorText, "text" | "entity" | "attribute">,
+): string {
+  // `?? ""` rather than `t.text`: an emptied optional text field is stored as
+  // absent, so an unbound label with no words has no `text` at all — and this
+  // returns a string to every caller, always.
+  if (!t.entity) return t.text ?? "";
+  const value = t.attribute
+    ? entityAttributeText(hass, t.entity, t.attribute)
+    : entityStateText(hass, t.entity);
+  return t.text ? `${t.text} ${value}` : value;
 }
 
 /**
@@ -1750,27 +1788,65 @@ export function domainIconAnimation(entity: string | undefined): "spin" | "pulse
 }
 
 /**
+ * The `hvac_action` values that mean a climate entity is switched on but not
+ * moving any air or heat right now — HA's own HVACAction enum, whose other
+ * members (heating, cooling, drying, preheating, defrosting, fan) all
+ * describe work in progress.
+ */
+const CLIMATE_IDLE_ACTIONS = new Set(["idle", "off"]);
+
+/**
+ * Whether a climate entity is doing something *right now*, as opposed to
+ * merely being set to a mode (issue #235, @GhislainC). Its state is the mode
+ * the user asked for — a thermostat sitting at temperature reads "cool" all
+ * night — while `hvac_action` is what the hardware is doing about it, so a
+ * unit that has reached its setpoint reports `cool` / `idle` together.
+ *
+ * An entity that reports no `hvac_action` at all is treated as working: the
+ * attribute is optional in HA, and the alternative is to silently stop
+ * animating every integration that omits it.
+ */
+function climateIsWorking(attributes: Record<string, unknown> | undefined): boolean {
+  const action = attributes?.["hvac_action"];
+  if (typeof action !== "string") return true;
+  return !CLIMATE_IDLE_ACTIONS.has(action);
+}
+
+/**
  * Which animation an item's icon should play right now, or undefined for
  * none. Shared by card and editor. Never animates an inactive (or
  * unavailable) entity — including when the config forces "spin"/"pulse": a
  * spinning fan icon is a claim that the fan is running, so it obeys the same
  * fail-closed rule as the active highlight ({@link entityIsActive}).
  *
+ * A climate entity extends that same claim one step further (issue #235): its
+ * mode is a *setting*, not a fact about moving air, so an idle unit holding
+ * "cool" animates nothing however `iconAnimation` is set. The badge still
+ * lights — {@link entityIsActive} is untouched, so the AC still reads as on,
+ * it just stops pretending to blow. Only the animation is gated, and only
+ * when the entity actually reports `hvac_action`.
+ *
  * A climate entity in `fan_only` spins regardless of `iconAnimation`
  * (issue #206 follow-up) — its own fan is what's actually running, the same
  * physical fact that makes a `fan` domain entity spin by default, just
  * decided from this entity's *state* rather than its domain. `none` still
  * wins over it: that is a decision to show no animation at all, not a
- * preference between spin and pulse for this one to override.
+ * preference between spin and pulse for this one to override. It is gated by
+ * `hvac_action` like every other mode: a fan that has stopped is not spinning
+ * whatever the mode says.
  */
 export function resolveIconAnimation(
   item: { entity?: string; iconAnimation?: IconAnimation },
   state: string | undefined,
+  attributes?: Record<string, unknown>,
 ): "spin" | "pulse" | undefined {
   const mode = item.iconAnimation ?? "auto";
   if (mode === "none") return undefined;
   if (!entityIsActive(item.entity, state)) return undefined;
-  if (item.entity?.split(".")[0] === "climate" && state === "fan_only") return "spin";
+  if (item.entity?.split(".")[0] === "climate") {
+    if (!climateIsWorking(attributes)) return undefined;
+    if (state === "fan_only") return "spin";
+  }
   if (mode === "spin" || mode === "pulse") return mode;
   return domainIconAnimation(item.entity);
 }
