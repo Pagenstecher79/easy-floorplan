@@ -596,16 +596,19 @@ export class FloorplanCard extends LitElement {
   private _renderBadge(item: FloorItem, scale: OverlayScale, renderHass?: RenderHass): TemplateResult {
     const size = cssNumber(item.size, DEFAULT_ITEM_SIZE);
     const box = overlayLength(size, scale);
+    
+    // Use renderHass when available to keep state context consistent, fallback to this.hass
+    const hassContext = renderHass ?? this.hass;
+
     // Animation goes on the inner ha-icon, not the badge: the badge carries
     // the user's `angle` rotation, and a spin on the same element would
     // overwrite it.
-    const st = item.entity ? this.hass?.states[item.entity] : undefined;
+    const st = item.entity ? hassContext?.states[item.entity] : undefined;
     const anim = resolveIconAnimation(item, st?.state, st?.attributes);
     // "Show the reading, not a picture" (issue #106). Same badge — size, angle,
     // state colour, ripple stacking all unchanged — with the glyph swapped for
     // the number. A device with nothing numeric to show keeps its icon.
-    const value = badgeContentOf(item) === "value" ? badgeValue(this.hass, item) : undefined;
-    console.log("Card Badge Debug -> Content:", badgeContentOf(item), "Value:", value, "Scale:", scale);
+    const value = badgeContentOf(item) === "value" ? badgeValue(hassContext, item) : undefined;
     return html`
       <div
         class="badge"
@@ -619,7 +622,7 @@ export class FloorplanCard extends LitElement {
             >`
           : html`<ha-icon
               class=${anim ? `anim-${anim}` : ""}
-              icon=${this._itemIcon(item, renderHass)}
+              icon=${this._itemIcon(item, hassContext)}
               style="--mdc-icon-size:${overlayLength(itemIconSize(size), scale)};"
             ></ha-icon>`}
       </div>
