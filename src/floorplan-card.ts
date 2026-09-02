@@ -604,7 +604,8 @@ export class FloorplanCard extends LitElement {
     // "Show the reading, not a picture" (issue #106). Same badge — size, angle,
     // state colour, ripple stacking all unchanged — with the glyph swapped for
     // the number. A device with nothing numeric to show keeps its icon.
-    const value = badgeContentOf(item) === "value" ? badgeValue(renderHass, item) : undefined;
+    const value = badgeContentOf(item) === "value" ? badgeValue(this.hass, item) : undefined;
+    console.log("Card Badge Debug -> Content:", badgeContentOf(item), "Value:", value, "Scale:", scale);
     return html`
       <div
         class="badge"
