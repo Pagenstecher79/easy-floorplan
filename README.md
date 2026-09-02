@@ -1443,6 +1443,12 @@ historyReplay:
   numericSteps: 25
 ```
 
+In the expanded lane view, clicking a lane's label switches that lane off — its
+markers go, and so does its contribution to the collapsed summary bar. The row stays
+behind, struck through, so you can click it again; a "Show all" control appears while
+anything is hidden, including after you collapse the lanes. It's a view preference for
+the session, not config.
+
 Separately from this, and not configurable: the timeline draws at most 150 markers
 per lane, spending them on each sensor's largest moves. A sensor that genuinely
 swings across its whole range — a distance tracker, say — survives `numericSteps`

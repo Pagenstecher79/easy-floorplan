@@ -1,6 +1,6 @@
-import { LitElement, css, html, unsafeCSS } from "lit";
+import { LitElement, css, html, nothing, unsafeCSS } from "lit";
 import { guard } from "lit/directives/guard.js";
-import { customElement, property } from "lit/decorators.js";
+import { customElement, property, state } from "lit/decorators.js";
 import { resolveReplayEventColor, type HistoryEventInput } from "./history-service";
 import { thinForDisplay } from "./downsample";
 import { SKIN_ACCENT } from "../skins";
@@ -13,6 +13,24 @@ export class HistoryTimeline extends LitElement {
   @property({ type: Number }) public currentTime = 0;
   @property({ type: Boolean }) public expanded = false;
   private _dragging = false;
+  /**
+   * Lanes the reader has switched off. A view preference rather than config:
+   * it answers "not while I am looking at this", not "never show me this".
+   *
+   * Replaced rather than mutated on every toggle, because the marker list is
+   * memoized on identity and an in-place Set edit would not redraw it.
+   */
+  @state() private _hidden: ReadonlySet<string> = new Set();
+
+  private _toggleLane(entityId: string): void {
+    const next = new Set(this._hidden);
+    if (!next.delete(entityId)) next.add(entityId);
+    this._hidden = next;
+  }
+
+  private _showAllLanes(): void {
+    this._hidden = new Set();
+  }
 
   private _seek(timestamp: number): void {
     this.dispatchEvent(new CustomEvent("seek", { detail: { timestamp }, bubbles: true, composed: true }));
@@ -77,19 +95,34 @@ export class HistoryTimeline extends LitElement {
    * largest moves of each numeric sensor up to what a lane can show. Replay
    * itself still reads the full series; this only decides what gets a marker.
    */
-  private _drawnEvents(): HistoryEventInput[] {
-    const visible = this._visibleEvents();
+  /** Each entity's lane, display-thinned. Hidden lanes are still in here, so
+   *  the expanded view can keep their label on screen to switch back on. */
+  private _laneSeries(): Map<string, HistoryEventInput[]> {
     const byEntity = new Map<string, HistoryEventInput[]>();
-    for (const event of visible) {
+    for (const event of this._visibleEvents()) {
       const bucket = byEntity.get(event.entityId);
       if (bucket) bucket.push(event);
       else byEntity.set(event.entityId, [event]);
     }
-    const keep = new Set<HistoryEventInput>();
-    for (const series of byEntity.values()) {
-      for (const event of thinForDisplay(series, HistoryTimeline.MAX_MARKERS_PER_LANE)) keep.add(event);
+    for (const [entityId, series] of byEntity) {
+      byEntity.set(entityId, thinForDisplay(series, HistoryTimeline.MAX_MARKERS_PER_LANE));
     }
-    return visible.filter((event) => keep.has(event));
+    return byEntity;
+  }
+
+  /**
+   * What the summary bar draws: every lane that is switched on. Hiding a lane
+   * takes its events out of here too, which is the point — a summary that
+   * still counted a lane you had switched off would not be a summary of what
+   * you are looking at.
+   */
+  private _drawnEvents(): HistoryEventInput[] {
+    const out: HistoryEventInput[] = [];
+    for (const [entityId, series] of this._laneSeries()) {
+      if (this._hidden.has(entityId)) continue;
+      out.push(...series);
+    }
+    return out.sort((a, b) => a.timestamp - b.timestamp);
   }
 
   private _groupEventsByTimestamp(): Array<{ timestamp: number; events: HistoryEventInput[]; left: string }> {
@@ -159,17 +192,24 @@ export class HistoryTimeline extends LitElement {
     }
   }
 
+  /**
+   * The way back. Switching a lane off in the expanded view and then
+   * collapsing would otherwise strand it: the summary bar has no labels to
+   * click, so nothing on screen would say anything was missing.
+   */
+  private _renderHiddenNotice() {
+    if (!this._hidden.size) return nothing;
+    const n = this._hidden.size;
+    return html`
+      <div class="lanes-hidden">
+        <span>${n} lane${n === 1 ? "" : "s"} hidden</span>
+        <button class="lanes-hidden-show" @click=${() => this._showAllLanes()}>Show all</button>
+      </div>
+    `;
+  }
+
   private _renderExpandedTimeline(span: number) {
-    const visibleEvents = this._drawnEvents();
-    const entityGroups = new Map<string, HistoryEventInput[]>();
-    for (const event of visibleEvents) {
-      const bucket = entityGroups.get(event.entityId);
-      if (bucket) {
-        bucket.push(event);
-      } else {
-        entityGroups.set(event.entityId, [event]);
-      }
-    }
+    const entityGroups = this._laneSeries();
     const entities = Array.from(entityGroups.keys());
     const playheadLeft = ((this.currentTime - this.startTime) / span) * 100;
     return html`
@@ -195,15 +235,25 @@ export class HistoryTimeline extends LitElement {
             <span class="playhead-time">${this._formatTimestamp(this.currentTime)}</span>
           </div>
         </div>
-        ${guard([this.events, this.startTime, this.endTime], () =>
+        ${guard([this.events, this.startTime, this.endTime, this._hidden], () =>
           entities.map((entityId, index) => {
           const laneEvents = entityGroups.get(entityId) ?? [];
           const row = index + 1;
           const label = this._getEntityLabel(laneEvents[0]);
+          const off = this._hidden.has(entityId);
           return html`
-            <div class="lane-label" style="grid-row:${row};">${label}</div>
-            <div class="lane lane-track" style="grid-row:${row};">
-              ${laneEvents.map((event) => {
+            <button
+              class="lane-label ${off ? "lane-off" : ""}"
+              style="grid-row:${row};"
+              aria-pressed=${off ? "false" : "true"}
+              title=${off ? `Show ${label} on the timeline` : `Hide ${label} from the timeline`}
+              @click=${(ev: Event) => {
+                ev.stopPropagation();
+                this._toggleLane(entityId);
+              }}
+            ><span class="lane-dot" aria-hidden="true"></span><span class="lane-name">${label}</span></button>
+            <div class="lane lane-track ${off ? "lane-off" : ""}" style="grid-row:${row};">
+              ${(off ? [] : laneEvents).map((event) => {
                 const color = resolveReplayEventColor(event);
                 const left = this._getMarkerLeftClamped(event.timestamp, 4);
                 return html`
@@ -251,10 +301,11 @@ export class HistoryTimeline extends LitElement {
     }
     const span = Math.max(1, this.endTime - this.startTime);
     if (this.expanded) {
-      return this._renderExpandedTimeline(span);
+      return html`${this._renderHiddenNotice()}${this._renderExpandedTimeline(span)}`;
     }
 
     return html`
+      ${this._renderHiddenNotice()}
       <div
         class="timeline timeline-interactive"
         style="--playhead-pct:${this._pct(this.currentTime)}"
@@ -336,14 +387,78 @@ export class HistoryTimeline extends LitElement {
       width: 100%;
       min-width: 0;
     }
+    /*
+     * The lane label is the switch for its lane, so it has to look like one
+     * before it is hovered: a button box, a pointer cursor, and a dot standing
+     * in for the lane's markers that fills when the lane is on and hollows out
+     * when it is off. Discoverability is the whole point — a bare text label
+     * that happens to be clickable is not discoverable.
+     */
     .lane-label {
       grid-column: 1;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font: inherit;
       font-size: 11px;
+      text-align: left;
       color: var(--secondary-text-color, #666);
+      background: none;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      padding: 1px 4px;
+      margin: 0;
+      cursor: pointer;
       overflow: hidden;
-      text-overflow: ellipsis;
       white-space: nowrap;
       min-width: 0;
+    }
+    .lane-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .lane-dot {
+      flex: none;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      border: 1px solid currentColor;
+      background: currentColor;
+    }
+    .lane-label:hover,
+    .lane-label:focus-visible {
+      color: var(--primary-text-color);
+      border-color: var(--divider-color, #ccc);
+      background: var(--secondary-background-color, rgba(127, 127, 127, 0.12));
+    }
+    /* Switched off: the row stays, so there is something to click to get it
+       back, but it reads as absent rather than empty. */
+    .lane-label.lane-off {
+      opacity: 0.55;
+      text-decoration: line-through;
+    }
+    .lane-label.lane-off .lane-dot {
+      background: transparent;
+    }
+    .lane-track.lane-off {
+      opacity: 0.35;
+    }
+    .lanes-hidden {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 4px;
+      font-size: 11px;
+      color: var(--secondary-text-color, #666);
+    }
+    .lanes-hidden-show {
+      font: inherit;
+      cursor: pointer;
+      padding: 1px 6px;
+      border-radius: 4px;
+      border: 1px solid var(--divider-color, #ccc);
+      background: var(--card-background-color, #fff);
+      color: var(--primary-text-color);
     }
     .lane-track {
       position: relative;

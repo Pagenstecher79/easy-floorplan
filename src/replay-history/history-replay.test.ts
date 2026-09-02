@@ -603,6 +603,73 @@ describe("timeline cost during playback", () => {
     expect(label()).not.toBe(first);
   });
 
+  it("switches a lane off by clicking its label, summary bar included", async () => {
+    const events = [
+      ...Array.from({ length: 60 }, (_, i) => ({
+        timestamp: T0 + Math.round((i / 60) * WINDOW),
+        entityId: "sensor.noisy", oldState: "0", newState: String(i % 40), attributes: {},
+      })),
+      ...Array.from({ length: 20 }, (_, i) => ({
+        timestamp: T0 + Math.round((i / 20) * WINDOW) + 7,
+        entityId: "light.kitchen", oldState: "off", newState: i % 2 ? "on" : "off", attributes: {},
+      })),
+    ].sort((a, b) => a.timestamp - b.timestamp);
+
+    const el = document.createElement("easy-floorplan-history-timeline") as HistoryTimeline;
+    el.startTime = T0; el.endTime = T0 + WINDOW; el.currentTime = T0;
+    el.expanded = true;
+    el.events = events;
+    document.body.appendChild(el);
+    await el.updateComplete;
+
+    const labels = [...(el.shadowRoot?.querySelectorAll(".lane-label") ?? [])] as HTMLButtonElement[];
+    expect(labels).toHaveLength(2);
+    expect(labels.every((l) => l.tagName === "BUTTON")).toBe(true);
+
+    const noisy = labels.find((l) => l.textContent?.includes("noisy"))!;
+    expect(noisy.getAttribute("aria-pressed")).toBe("true");
+    noisy.click();
+    await el.updateComplete;
+
+    // The row stays, so it can be switched back on — but it draws nothing.
+    const after = [...(el.shadowRoot?.querySelectorAll(".lane-label") ?? [])] as HTMLButtonElement[];
+    expect(after).toHaveLength(2);
+    const offLabel = after.find((l) => l.textContent?.includes("noisy"))!;
+    expect(offLabel.classList.contains("lane-off")).toBe(true);
+    expect(offLabel.getAttribute("aria-pressed")).toBe("false");
+    const lanes = [...(el.shadowRoot?.querySelectorAll(".lane-track") ?? [])];
+    const offLane = lanes.find((l) => l.classList.contains("lane-off"))!;
+    expect(offLane.querySelectorAll(".marker")).toHaveLength(0);
+
+    // And it is gone from the summary bar too, which is the point.
+    el.expanded = false;
+    await el.updateComplete;
+    expect(el.shadowRoot?.querySelectorAll(".marker")).toHaveLength(20);
+  });
+
+  it("offers a way back once a lane is hidden", async () => {
+    // Hiding a lane and then collapsing would otherwise strand it: the summary
+    // bar has no labels to click.
+    const el = document.createElement("easy-floorplan-history-timeline") as HistoryTimeline;
+    el.startTime = T0; el.endTime = T0 + WINDOW; el.expanded = true;
+    el.events = busy();
+    document.body.appendChild(el);
+    await el.updateComplete;
+    expect(el.shadowRoot?.querySelector(".lanes-hidden")).toBeNull();
+
+    (el.shadowRoot?.querySelector(".lane-label") as HTMLButtonElement).click();
+    await el.updateComplete;
+    expect(el.shadowRoot?.querySelector(".lanes-hidden")?.textContent).toContain("1 lane hidden");
+
+    el.expanded = false;
+    await el.updateComplete;
+    const showAll = el.shadowRoot?.querySelector(".lanes-hidden-show") as HTMLButtonElement;
+    expect(showAll).not.toBeNull();
+    showAll.click();
+    await el.updateComplete;
+    expect(el.shadowRoot?.querySelector(".lanes-hidden")).toBeNull();
+  });
+
   it("rebuilds when the events themselves change", async () => {
     const el = document.createElement("easy-floorplan-history-timeline") as HistoryTimeline;
     el.startTime = T0;

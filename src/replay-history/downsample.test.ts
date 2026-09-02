@@ -77,11 +77,33 @@ describe("downsampleHistory", () => {
     expect(downsampleSeries(two, { numericSteps: 10 })).toBe(two);
   });
 
-  it("treats a series that is not numeric throughout as discrete", () => {
-    // `unavailable` in the middle of a temperature series must not make the
-    // whole thing get thinned as if it were numbers.
-    const mixed = [ev(0, "20.0"), ev(1, "unavailable"), ev(2, "21.0"), ev(3, "22.0")];
-    expect(downsampleSeries(mixed, { numericSteps: 2 })).toBe(mixed);
+  it("still thins a numeric sensor that drops out, and keeps the drop-outs", () => {
+    // A sensor going `unavailable` does not stop it being a numeric sensor.
+    // Treating it as discrete exempts it from every kind of thinning, which is
+    // how the flakiest entity on the plan ended up as the only lane still
+    // drawing all of its points.
+    const drift: HistoryEventInput[] = [];
+    for (let i = 0; i < 400; i++) {
+      drift.push(ev(i, i % 97 === 0 ? "unavailable" : (20 + Math.sin(i / 30) * 4).toFixed(3)));
+    }
+    const out = downsampleSeries(drift, { numericSteps: 20 });
+    expect(out.length).toBeLessThan(drift.length / 2);
+    // Every outage survives.
+    const outages = out.filter((e) => e.newState === "unavailable");
+    expect(outages).toHaveLength(drift.filter((e) => e.newState === "unavailable").length);
+  });
+
+  it("keeps the reading that ends an outage", () => {
+    // Nothing to have drifted from, and it is the point that says the sensor
+    // came back.
+    const evs = [ev(0, "20.0"), ev(1, "unavailable"), ev(2, "20.01"), ev(3, "20.02"), ev(4, "30.0")];
+    const out = downsampleSeries(evs, { numericSteps: 4 });
+    expect(out.map((e) => e.newState)).toContain("20.01");
+  });
+
+  it("does not treat a genuinely non-numeric series as numeric", () => {
+    const words = [ev(0, "home"), ev(1, "unavailable"), ev(2, "away"), ev(3, "home")];
+    expect(downsampleSeries(words, { numericSteps: 2 })).toBe(words);
   });
 });
 
@@ -124,5 +146,18 @@ describe("thinForDisplay", () => {
     for (let i = 1; i < out.length; i++) {
       expect(out[i].timestamp).toBeGreaterThan(out[i - 1].timestamp);
     }
+  });
+});
+
+describe("a flaky numeric sensor on the lane", () => {
+  it("is capped like any other numeric lane, with its outages intact", () => {
+    const flaky: HistoryEventInput[] = [];
+    for (let i = 0; i < 430; i++) {
+      flaky.push(ev(i, i % 18 === 0 ? "unavailable" : (33 + Math.sin(i / 11) * 10).toFixed(1)));
+    }
+    const drawn = thinForDisplay(flaky, 150);
+    expect(drawn.length).toBeLessThanOrEqual(150);
+    expect(drawn.filter((e) => e.newState === "unavailable"))
+      .toHaveLength(flaky.filter((e) => e.newState === "unavailable").length);
   });
 });

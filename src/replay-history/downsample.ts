@@ -38,6 +38,17 @@ export interface DownsampleOptions {
 
 const DEFAULT_MAX_GAP_MS = 60_000;
 
+/**
+ * States that mean "the sensor did not answer" rather than a value. They are
+ * kept whatever the resolution: an outage is a discrete thing that happened,
+ * and on a flaky sensor it is usually the most interesting thing on the lane.
+ */
+const OUTAGE_STATES = new Set(["unavailable", "unknown"]);
+
+function isOutage(value: string): boolean {
+  return OUTAGE_STATES.has(value);
+}
+
 function numeric(value: string): number | undefined {
   if (value === "") return undefined;
   const n = Number(value);
@@ -48,14 +59,25 @@ function numeric(value: string): number | undefined {
  * Whether this entity's series is numeric drift rather than discrete states.
  * Judged from the events themselves rather than the entity id, because a
  * `sensor.` can be either and an `input_number.` is always the former.
+ *
+ * Outages do not disqualify a series. A sensor that drops out is still a
+ * numeric sensor, and treating it as discrete because of one `unavailable`
+ * exempts it from every kind of thinning — which is how the demo's flaky
+ * sensor, the one entity most likely to be noisy, ended up as the only lane
+ * still drawing all of its points.
+ *
+ * The whole series is scanned rather than a prefix: a sensor whose outage
+ * happens to fall in the first few events is exactly the case this needs to
+ * get right.
  */
 function isNumericSeries(events: HistoryEventInput[]): boolean {
-  let seen = 0;
+  let numericSeen = 0;
   for (const e of events) {
+    if (isOutage(e.newState)) continue;
     if (numeric(e.newState) === undefined) return false;
-    if (++seen >= 20) break;
+    numericSeen++;
   }
-  return seen > 0;
+  return numericSeen > 0;
 }
 
 function thinNumeric(
@@ -63,24 +85,46 @@ function thinNumeric(
   steps: number,
   maxGapMs: number,
 ): HistoryEventInput[] {
-  const values = events.map((e) => numeric(e.newState)!);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const deadband = (max - min) / steps;
+  const values = events.map((e) => numeric(e.newState));
+  const readings = values.filter((v): v is number => v !== undefined);
+  if (!readings.length) return events;
+  const deadband = (Math.max(...readings) - Math.min(...readings)) / steps;
   // A series that never moves has no shape to preserve: first and last is all
-  // the information there is.
-  if (!(deadband > 0)) return events.length ? [events[0], events[events.length - 1]] : [];
+  // the information there is — but only if nothing ever went wrong in between,
+  // because an outage is not a value it failed to move away from.
+  if (!(deadband > 0) && !events.some((e) => isOutage(e.newState))) {
+    return events.length ? [events[0], events[events.length - 1]] : [];
+  }
 
   const kept: HistoryEventInput[] = [events[0]];
-  let lastKept = values[0];
+  let lastKept: number | undefined = values[0];
   let lastTime = events[0].timestamp;
 
   for (let i = 1; i < events.length - 1; i++) {
     const v = values[i];
+    // Going out, and coming back, are both events in their own right.
+    if (v === undefined) {
+      kept.push(events[i]);
+      lastKept = undefined;
+      lastTime = events[i].timestamp;
+      continue;
+    }
+    // The first reading after an outage is always kept: there is no previous
+    // value to have drifted from, and it is what ends the gap.
+    if (lastKept === undefined) {
+      kept.push(events[i]);
+      lastKept = v;
+      lastTime = events[i].timestamp;
+      continue;
+    }
+    const prev = values[i - 1];
+    const next = values[i + 1];
     // A local extremum is the one point that must not be smoothed away, or a
-    // thinned spike reads as a plateau.
+    // thinned spike reads as a plateau. Undefined neighbours are an outage
+    // rather than a turning point, so they do not make one.
     const extremum =
-      (v > values[i - 1] && v >= values[i + 1]) || (v < values[i - 1] && v <= values[i + 1]);
+      prev !== undefined && next !== undefined &&
+      ((v > prev && v >= next) || (v < prev && v <= next));
     if (
       Math.abs(v - lastKept) >= deadband ||
       (extremum && Math.abs(v - lastKept) >= deadband / 2) ||
@@ -154,17 +198,32 @@ export function thinForDisplay(events: HistoryEventInput[], maxMarkers: number):
   if (!(maxMarkers > 2) || events.length <= maxMarkers) return events;
   if (!isNumericSeries(events)) return events;
 
-  const values = events.map((e) => numeric(e.newState) ?? 0);
-  // Rank the interior points by how far each moved from the one before it, and
-  // keep the biggest. The endpoints are always kept, so the lane still spans
-  // the window.
-  const ranked = [];
-  for (let i = 1; i < events.length - 1; i++) {
-    ranked.push({ i, delta: Math.abs(values[i] - values[i - 1]) });
+  const values = events.map((e) => numeric(e.newState));
+  const keep = new Set<number>([0, events.length - 1]);
+
+  // Outages are kept before anything competes for the budget. On a flaky
+  // sensor the drop-outs are the story, and they are the points a reader most
+  // wants to be able to click.
+  for (let i = 0; i < events.length; i++) {
+    if (values[i] === undefined) keep.add(i);
+  }
+
+  // Then rank the remaining interior points by how far each moved from the
+  // previous reading, and spend what is left of the budget on the biggest.
+  const ranked: { i: number; delta: number }[] = [];
+  let previous: number | undefined;
+  for (let i = 0; i < events.length; i++) {
+    const v = values[i];
+    if (v === undefined) {
+      previous = undefined;
+      continue;
+    }
+    if (i > 0 && i < events.length - 1 && previous !== undefined) {
+      ranked.push({ i, delta: Math.abs(v - previous) });
+    }
+    previous = v;
   }
   ranked.sort((a, b) => b.delta - a.delta);
-
-  const keep = new Set<number>([0, events.length - 1]);
   for (const { i } of ranked) {
     if (keep.size >= maxMarkers) break;
     keep.add(i);
