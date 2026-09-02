@@ -111,6 +111,7 @@ import {
   resolveIconAnimation,
   itemIconSize,
   resolvePlanRotation,
+  subscribeOrientation,
   rotatedCanvasSize,
   rotatePlanPoint,
   planRotationTransform,
@@ -173,9 +174,11 @@ export class FloorplanCard extends LitElement {
    * the plain `rotation` rather than guessing.
    */
   @state() private _portrait?: boolean;
-  /** The query behind {@link _portrait}, kept so the listener can be removed. */
-  private _orientationQuery?: MediaQueryList;
-  private readonly _onOrientation = (e: MediaQueryListEvent | MediaQueryList): void => {
+  /** Undoes the orientation subscription; set while connected (issue #237). */
+  private _unsubscribeOrientation?: () => void;
+  // Takes the narrowest thing it uses, so it fits both a `MediaQueryList` read
+  // directly on load and the `change` event that follows.
+  private readonly _onOrientation = (e: { matches: boolean }): void => {
     this._portrait = e.matches;
   };
 
@@ -185,14 +188,18 @@ export class FloorplanCard extends LitElement {
     // the config can change under a live card, and a query that is listened
     // to but never read costs nothing.
     if (typeof window === "undefined" || !window.matchMedia) return;
-    this._orientationQuery = window.matchMedia("(orientation: portrait)");
-    this._onOrientation(this._orientationQuery);
-    this._orientationQuery.addEventListener("change", this._onOrientation);
+    const q = window.matchMedia("(orientation: portrait)");
+    // Read first, subscribe second — deliberately in that order. The initial
+    // read is what gets the rotation right on load, and it works even on a
+    // WebView that offers no subscription at all, so the worst case is a plan
+    // that is correct until the device is turned rather than one that is wrong.
+    this._onOrientation(q);
+    this._unsubscribeOrientation = subscribeOrientation(q, this._onOrientation);
   }
 
   public disconnectedCallback(): void {
-    this._orientationQuery?.removeEventListener("change", this._onOrientation);
-    this._orientationQuery = undefined;
+    this._unsubscribeOrientation?.();
+    this._unsubscribeOrientation = undefined;
     super.disconnectedCallback();
   }
 

@@ -3534,6 +3534,52 @@ export function resolvePlanRotation(
   return override === undefined ? base : normalizePlanRotation(override);
 }
 
+/**
+ * The two ways a `MediaQueryList` can be listened to. Duck-typed rather than
+ * taking the DOM interface, so this is reachable from a node test — which is
+ * the whole reason it is a function instead of four lines inside the card's
+ * `connectedCallback` (issue #237).
+ */
+export interface OrientationQuery {
+  addEventListener?: (type: "change", fn: (e: { matches: boolean }) => void) => void;
+  removeEventListener?: (type: "change", fn: (e: { matches: boolean }) => void) => void;
+  addListener?: (fn: (e: { matches: boolean }) => void) => void;
+  removeListener?: (fn: (e: { matches: boolean }) => void) => void;
+}
+
+/**
+ * Subscribe to a media query, returning the matching unsubscribe (issue #237).
+ *
+ * `MediaQueryList` has only been an `EventTarget` since Safari 14 / Chrome 39;
+ * older WebViews carry the deprecated `addListener` alone. That matters here
+ * more than it usually would, because the devices this feature exists for —
+ * wall tablets, an old phone propped in a hallway — are exactly the ones
+ * likely to be running one, and calling a missing method would throw out of
+ * `connectedCallback` and take the card's whole render with it.
+ *
+ * Add and remove are chosen the same way, so a listener registered through the
+ * legacy API is removed through it too: crossing them leaves the listener
+ * attached to a card that is gone.
+ *
+ * Where neither exists this subscribes to nothing and returns a no-op. The
+ * card reads the query's current value *before* calling this, so that case is
+ * still right on load — it just stops following the device being turned.
+ */
+export function subscribeOrientation(
+  q: OrientationQuery,
+  fn: (e: { matches: boolean }) => void
+): () => void {
+  if (typeof q.addEventListener === "function") {
+    q.addEventListener("change", fn);
+    return () => q.removeEventListener?.("change", fn);
+  }
+  if (typeof q.addListener === "function") {
+    q.addListener(fn);
+    return () => q.removeListener?.(fn);
+  }
+  return () => {};
+}
+
 /** Canvas size as displayed: 90°/270° swap width and height. */
 export function rotatedCanvasSize(
   w: number,

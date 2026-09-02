@@ -121,6 +121,7 @@ import {
   itemIconSize,
   normalizePlanRotation,
   resolvePlanRotation,
+  subscribeOrientation,
   rotatedCanvasSize,
   rotatePlanPoint,
   planRotationTransform,
@@ -3757,6 +3758,65 @@ describe("rotation that follows the screen (issue #237)", () => {
     expect(resolvePlanRotation({} as FloorplanCardConfig, true)).toBe(0);
     expect(resolvePlanRotation({} as FloorplanCardConfig, false)).toBe(0);
     expect(resolvePlanRotation({} as FloorplanCardConfig, undefined)).toBe(0);
+  });
+});
+
+describe("subscribing to the screen's orientation (review of #237)", () => {
+  // MediaQueryList only became an EventTarget in Safari 14 / Chrome 39, and
+  // the devices this feature is for — wall tablets, old phones — are the ones
+  // most likely to predate that. Calling a missing method would throw out of
+  // connectedCallback and take the card's whole render with it.
+  const fn = () => {};
+
+  it("uses the modern API when it is there, and unsubscribes through it", () => {
+    const calls: string[] = [];
+    const q = {
+      addEventListener: (t: string) => calls.push(`add:${t}`),
+      removeEventListener: (t: string) => calls.push(`remove:${t}`),
+      // Present too, as on any current browser — and must not be the one used.
+      addListener: () => calls.push("legacy-add"),
+      removeListener: () => calls.push("legacy-remove"),
+    };
+    subscribeOrientation(q, fn)();
+    expect(calls).toEqual(["add:change", "remove:change"]);
+  });
+
+  it("falls back to addListener where that is all there is", () => {
+    const calls: string[] = [];
+    const q = {
+      addListener: () => calls.push("add"),
+      removeListener: () => calls.push("remove"),
+    };
+    subscribeOrientation(q, fn)();
+    expect(calls).toEqual(["add", "remove"]);
+  });
+
+  it("never crosses the two — a legacy listener is removed the legacy way", () => {
+    // Crossing them leaves the listener attached to a card that is gone.
+    const seen: string[] = [];
+    const q = {
+      addListener: () => seen.push("add"),
+      removeListener: () => seen.push("remove"),
+      removeEventListener: () => seen.push("WRONG"),
+    };
+    subscribeOrientation(q, fn)();
+    expect(seen).not.toContain("WRONG");
+  });
+
+  it("subscribes to nothing, quietly, when neither API exists", () => {
+    // The card reads the query before subscribing, so this case still renders
+    // at the right rotation — it just stops following the device being turned.
+    expect(() => subscribeOrientation({}, fn)()).not.toThrow();
+  });
+
+  it("hands the listener straight through, so it is the one removed", () => {
+    let held: unknown;
+    const q = {
+      addEventListener: (_t: string, f: unknown) => { held = f; },
+      removeEventListener: (_t: string, f: unknown) => { expect(f).toBe(held); },
+    };
+    subscribeOrientation(q, fn)();
+    expect(held).toBe(fn);
   });
 });
 
