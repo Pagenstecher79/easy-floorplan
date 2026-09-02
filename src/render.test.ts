@@ -120,6 +120,7 @@ import {
   isRippleEntity,
   itemIconSize,
   normalizePlanRotation,
+  resolvePlanRotation,
   rotatedCanvasSize,
   rotatePlanPoint,
   planRotationTransform,
@@ -3713,6 +3714,49 @@ describe("polygonCentroid", () => {
 
   it("returns the origin for an empty polygon", () => {
     expect(polygonCentroid([])).toEqual({ x: 0, y: 0 });
+  });
+});
+
+describe("rotation that follows the screen (issue #237)", () => {
+  it("uses `rotation` for both orientations until an override says otherwise", () => {
+    const c = { rotation: 270 } as FloorplanCardConfig;
+    expect(resolvePlanRotation(c, true)).toBe(270);
+    expect(resolvePlanRotation(c, false)).toBe(270);
+  });
+
+  it("takes the override for the orientation it names, and only that one", () => {
+    const c = { rotation: 0, rotationPortrait: 270 } as FloorplanCardConfig;
+    expect(resolvePlanRotation(c, true)).toBe(270);
+    expect(resolvePlanRotation(c, false)).toBe(0); // landscape keeps the base
+    const both = { rotation: 0, rotationPortrait: 270, rotationLandscape: 90 } as FloorplanCardConfig;
+    expect(resolvePlanRotation(both, true)).toBe(270);
+    expect(resolvePlanRotation(both, false)).toBe(90);
+  });
+
+  it("honours an override of 0 rather than reading it as unset", () => {
+    // "0° on a portrait screen" is a real instruction on a plan that is
+    // otherwise rotated — the case the reporter is in.
+    const c = { rotation: 270, rotationPortrait: 0 } as FloorplanCardConfig;
+    expect(resolvePlanRotation(c, true)).toBe(0);
+    expect(resolvePlanRotation(c, false)).toBe(270);
+  });
+
+  it("stays on the base rotation when the orientation is unknown", () => {
+    // No window to ask. Guessing would rotate the plan on a wrong guess.
+    const c = { rotation: 90, rotationPortrait: 180 } as FloorplanCardConfig;
+    expect(resolvePlanRotation(c, undefined)).toBe(90);
+  });
+
+  it("normalizes an override the same way `rotation` is normalized", () => {
+    expect(resolvePlanRotation({ rotationPortrait: 450 } as FloorplanCardConfig, true)).toBe(90);
+    expect(resolvePlanRotation({ rotationPortrait: -90 } as FloorplanCardConfig, true)).toBe(270);
+    expect(resolvePlanRotation({ rotationPortrait: 45 } as FloorplanCardConfig, true)).toBe(0);
+  });
+
+  it("a config with no rotation at all is unaffected, whatever the screen", () => {
+    expect(resolvePlanRotation({} as FloorplanCardConfig, true)).toBe(0);
+    expect(resolvePlanRotation({} as FloorplanCardConfig, false)).toBe(0);
+    expect(resolvePlanRotation({} as FloorplanCardConfig, undefined)).toBe(0);
   });
 });
 

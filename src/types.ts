@@ -1249,6 +1249,30 @@ export interface FloorplanCardConfig extends LovelaceCardConfig {
    */
   rotation?: number;
   /**
+   * Rotation to use while the screen is **portrait**, overriding
+   * {@link rotation} (issue #237). Unset — the default — means `rotation`
+   * applies whichever way the screen is.
+   *
+   * The case it exists for: a plan of a rectangular flat wants the long side
+   * across the screen, and which side that is changes with the device. The
+   * reporter was rotating 270° for their phone and then living with the
+   * result on a desktop and a tablet, because one number cannot be right for
+   * both. This is the second number.
+   *
+   * Read from the **screen's** orientation, not the card's own box (see
+   * {@link resolvePlanRotation}), which is what "my vertical devices" means
+   * and what keeps a narrow card in a sidebar from rotating on a landscape
+   * desktop. Editing is unaffected either way: the editor always shows the
+   * plan as drawn.
+   */
+  rotationPortrait?: number;
+  /**
+   * Rotation to use while the screen is **landscape**, overriding
+   * {@link rotation} (issue #237). Unset means `rotation` applies. The
+   * mirror of {@link rotationPortrait}; set either, or both.
+   */
+  rotationLandscape?: number;
+  /**
    * Built-in skin id (issue #122), e.g. `odnetnin`, `pastel`, `tron`. Restyles
    * the whole plan at once — paper, walls, badges, accents — by supplying the
    * fallbacks every element already reads.

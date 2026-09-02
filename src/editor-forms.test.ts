@@ -977,10 +977,36 @@ describe("wallForm / projectForm / floorImageForm", () => {
     expect((width.selector.number as { min: number }).min).toBe(1);
   });
 
+  it("rests both orientation overrides at \"same as above\" (issue #237)", () => {
+    const form = projectDisplayForm({ type: "t", width: 1000, height: 600 } as FloorplanCardConfig);
+    expect(form.data.rotationPortrait).toBe("");
+    expect(form.data.rotationLandscape).toBe("");
+    // Back to "same as above" clears the override.
+    expect(form.toPatch({ rotationPortrait: "" })).toEqual({ rotationPortrait: undefined });
+    expect(form.toPatch({ rotationPortrait: "270" })).toEqual({ rotationPortrait: 270 });
+    // 0 is kept, unlike `rotation` — on a rotated plan it is a real answer.
+    expect(form.toPatch({ rotationLandscape: "0" })).toEqual({ rotationLandscape: 0 });
+  });
+
+  it("shows an override the config already has (issue #237)", () => {
+    const form = projectDisplayForm({
+      type: "t",
+      width: 1000,
+      height: 600,
+      rotation: 270,
+      rotationLandscape: 0,
+    } as FloorplanCardConfig);
+    expect(form.data.rotation).toBe("270");
+    expect(form.data.rotationLandscape).toBe("0");
+    expect(form.data.rotationPortrait).toBe("");
+  });
+
   it("rotation lives in the bottom-row display form, defaults to 0°, and patches as a number", () => {
     const form = projectDisplayForm({ type: "t", width: 1000, height: 600 } as FloorplanCardConfig);
     expect(form.fields.map((x) => x.name)).toEqual([
       "rotation",
+      "rotationPortrait",
+      "rotationLandscape",
       "overlayScale",
       "compactHeader",
       "offlineStyle",
@@ -1784,7 +1810,7 @@ describe("every field lands in exactly one panel group", () => {
     // offlineStyle as one form with one toPatch, but the panel renders the
     // first three under "Display" and the last under "Devices". Miss it in
     // both slices and the control silently disappears.
-    const DISPLAY = ["rotation", "overlayScale", "compactHeader"];
+    const DISPLAY = ["rotation", "rotationPortrait", "rotationLandscape", "overlayScale", "compactHeader"];
     const DEVICES = ["offlineStyle"];
     const cfg = { type: "t", width: 1000, height: 600 } as FloorplanCardConfig;
     check(projectDisplayForm(cfg).fields, [DISPLAY, DEVICES], "project display");

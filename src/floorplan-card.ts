@@ -110,7 +110,7 @@ import {
   resolveItemIcon,
   resolveIconAnimation,
   itemIconSize,
-  normalizePlanRotation,
+  resolvePlanRotation,
   rotatedCanvasSize,
   rotatePlanPoint,
   planRotationTransform,
@@ -166,6 +166,35 @@ export class FloorplanCard extends LitElement {
   private readonly _glowIdBase = `fp-glow-${FloorplanCard._nextGlowId++}`;
   /** Entity ids this plan actually displays; used to skip irrelevant hass updates. */
   private _watchedEntities: Set<string> = new Set();
+  /**
+   * Whether the screen is portrait, for the per-orientation rotations (issue
+   * #237). `undefined` until asked, and where there is nothing to ask —
+   * `resolvePlanRotation` reads that as "no orientation known" and stays on
+   * the plain `rotation` rather than guessing.
+   */
+  @state() private _portrait?: boolean;
+  /** The query behind {@link _portrait}, kept so the listener can be removed. */
+  private _orientationQuery?: MediaQueryList;
+  private readonly _onOrientation = (e: MediaQueryListEvent | MediaQueryList): void => {
+    this._portrait = e.matches;
+  };
+
+  public connectedCallback(): void {
+    super.connectedCallback();
+    // Subscribed unconditionally rather than only when an override is set:
+    // the config can change under a live card, and a query that is listened
+    // to but never read costs nothing.
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    this._orientationQuery = window.matchMedia("(orientation: portrait)");
+    this._onOrientation(this._orientationQuery);
+    this._orientationQuery.addEventListener("change", this._onOrientation);
+  }
+
+  public disconnectedCallback(): void {
+    this._orientationQuery?.removeEventListener("change", this._onOrientation);
+    this._orientationQuery = undefined;
+    super.disconnectedCallback();
+  }
 
   public setConfig(config: FloorplanCardConfig): void {
     // Cheap shape assertions so malformed YAML surfaces as HA's error card
@@ -178,7 +207,7 @@ export class FloorplanCard extends LitElement {
       if (raw[key] != null && !Array.isArray(raw[key]))
         throw new Error(`Invalid configuration: "${key}" must be a list`);
     }
-    for (const key of ["width", "height", "grid", "rotation"]) {
+    for (const key of ["width", "height", "grid", "rotation", "rotationPortrait", "rotationLandscape"]) {
       if (raw[key] != null && typeof raw[key] !== "number")
         throw new Error(`Invalid configuration: "${key}" must be a number`);
     }
@@ -762,7 +791,7 @@ export class FloorplanCard extends LitElement {
     // Whole-plan display rotation (issue #33): the SVG rotates via one group
     // transform below; the HTML overlay remaps per point in _renderItem /
     // _renderText. Both must use the same mapping (rotatePlanPoint).
-    const rot = normalizePlanRotation(c.rotation);
+    const rot = resolvePlanRotation(c, this._portrait);
     const dims = rotatedCanvasSize(cssNumber(c.width, DEFAULT_WIDTH), cssNumber(c.height, DEFAULT_HEIGHT), rot);
     const rotTransform = planRotationTransform(c.width, c.height, rot);
     // Overlay sizing mode. --fp-plan-w is the canvas width *as displayed*, so a

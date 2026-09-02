@@ -3510,6 +3510,30 @@ export function normalizePlanRotation(v: unknown): PlanRotation {
   return r === 90 || r === 180 || r === 270 ? r : 0;
 }
 
+/**
+ * The rotation a plan is actually drawn at, given which way the screen is
+ * (issue #237).
+ *
+ * `rotation` is the answer for both orientations until one of the two
+ * overrides says otherwise, so a config that sets neither behaves exactly as
+ * it did before this existed — including a config that sets no rotation at
+ * all, which is most of them.
+ *
+ * `portrait` is `undefined` where the question cannot be asked (a card
+ * rendered without a window, which is every test in this suite and the
+ * server-side pass in some setups). That falls back to `rotation` rather than
+ * guessing an orientation, because guessing wrong rotates the plan.
+ */
+export function resolvePlanRotation(
+  c: Pick<FloorplanCardConfig, "rotation" | "rotationPortrait" | "rotationLandscape">,
+  portrait?: boolean
+): PlanRotation {
+  const base = normalizePlanRotation(c.rotation);
+  if (portrait === undefined) return base;
+  const override = portrait ? c.rotationPortrait : c.rotationLandscape;
+  return override === undefined ? base : normalizePlanRotation(override);
+}
+
 /** Canvas size as displayed: 90°/270° swap width and height. */
 export function rotatedCanvasSize(
   w: number,
