@@ -38,6 +38,9 @@ import {
   DEFAULT_TRACKER_DOT_SIZE,
   DEFAULT_RIPPLE_SIZE,
   DEFAULT_AREA_OPACITY,
+  MAX_AREA_ZOOM_FIT,
+  MAX_AREA_ZOOM,
+  DEFAULT_ZOOMED_OVERLAY_SCALE,
   DEFAULT_AREA_LABEL_SIZE,
   DEFAULT_AREA_BORDER_WIDTH,
   SUN_ELEVATION_NIGHT,
@@ -65,6 +68,14 @@ import { SKIN_ACCENT, SKIN_PAPER, SKIN_WALL, MAX_SKIN_WALL_WIDTH } from "./skins
 import { OPENING_ON_WALL_EPS } from "./dead-space";
 
 export const WALL_THICKNESS = 8;
+
+/**
+ * The narrowest an operable sash may be drawn, as a fraction of its opening
+ * (issue #218). Not zero: a sash of no width is a fixed pane, which
+ * `motion: "fixed"` says outright, and one drawn at a hair's width would read
+ * as a rendering fault rather than as a choice.
+ */
+export const MIN_SASH_SPAN = 0.05;
 
 /** Shown in place of a reading when an entity is unset or absent from `hass`. */
 const NO_STATE = "—";
@@ -664,10 +675,18 @@ function clipWallToBox(
  * and the mean of it is itself.
  */
 export function openingClearFraction(o: Opening, amount: number, secondAmount?: number): number {
+  // Nothing moves, so nothing is ever clear — whatever a bound sensor says
+  // (issue #218). Asked before `amount` is even read, because a fixed pane
+  // with a contact on it is exactly the case that would otherwise open.
+  if (openingMotion(o) === "fixed") return 0;
   const a1 = Math.max(0, Math.min(1, amount));
   const a2 = Math.max(0, Math.min(1, secondAmount ?? amount));
+  // A sash narrower than its frame clears only its own share of the opening
+  // (issue #218): swung fully open, a half-width sash leaves half the glass
+  // still in place. `openingSashSpan` is 1 for everything else, so this is
+  // the identity for every opening that has always filled its frame.
   if (openingMotion(o) === "swing")
-    return openingSash(o) === "double" ? (a1 + a2) / 2 : a1;
+    return openingSash(o) === "double" ? (a1 + a2) / 2 : a1 * openingSashSpan(o);
   switch (sliderStyleOf(o)) {
     case "biparting":
       // Each leaf recesses into its own wall, so between them they can clear
@@ -774,6 +793,16 @@ export function openingClearSpan(
 ): [number, number] {
   const clear = openingClearFraction(o, amount, secondAmount);
   const centred: [number, number] = [(1 - clear) / 2, (1 + clear) / 2];
+  // A sash narrower than its frame is hinged at one jamb with fixed glass
+  // beside it, so what it clears is at *that* jamb — never in the middle,
+  // where the pane is (issue #218). Placed rather than centred because it can
+  // be: `sashSpan` is new config, so no existing plan can light up
+  // differently for it, which is exactly the argument that keeps the centred
+  // approximation for everything below.
+  if (openingSashSpan(o) < 1) {
+    const span: [number, number] = [0, clear];
+    return o.flipH ? [1 - span[1], 1 - span[0]] : span;
+  }
   if (openingMotion(o) !== "swing" || openingSash(o) !== "double") return centred;
   // Each leaf is hinged at its own jamb and covers its own half, so its
   // projection on the wall shrinks toward that jamb as it swings: the first
@@ -2399,11 +2428,29 @@ export function kindFromEntity(entity: string): ItemKind {
 }
 
 /**
- * How an opening moves — `swing` (hinged door / casement window) or `slide`
- * (panels travelling along the wall). Defaults to `swing`.
+ * How an opening moves — `swing` (hinged door / casement window), `slide`
+ * (panels travelling along the wall), `roll` (a curtain leaving the floor
+ * plane) or `fixed` (issue #218: it does not). Defaults to `swing`.
  */
-export function openingMotion(o: Opening): "swing" | "slide" | "roll" {
+export function openingMotion(o: Opening): "swing" | "slide" | "roll" | "fixed" {
   return o.motion ?? "swing";
+}
+
+/**
+ * How much of a single-sash opening its sash covers, 0..1 (issue #218).
+ * Clamped, and 1 for everything that has no leftover pane to speak of: a
+ * double sash splits the opening between its two leaves, and sliders and
+ * roll-ups have panel arithmetic of their own.
+ *
+ * A `sashSpan` of 0 would be a window with no opening part, which is what
+ * `motion: "fixed"` says properly — so it clamps to the smallest sash that
+ * still draws rather than silently becoming a fixed pane.
+ */
+export function openingSashSpan(o: Opening): number {
+  if (openingMotion(o) !== "swing" || openingSash(o) !== "single") return 1;
+  const raw = o.sashSpan;
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return 1;
+  return Math.max(MIN_SASH_SPAN, Math.min(1, raw));
 }
 
 /**
@@ -3253,9 +3300,12 @@ export function renderOpening(o: Opening, style: OpeningStyle): SVGTemplateResul
     // the same markup, which is how the door came to have no way of being a
     // double at all.
     const two = openingSash(o) === "double";
-    // One leaf spans the opening; two split it. The arc radius follows,
-    // because it is the path the leaf's own tip sweeps.
-    const leafW = two ? half : o.length;
+    // One leaf spans the opening; two split it. A single sash may also be
+    // narrower than its frame (issue #218), the rest of which is fixed glass.
+    // The arc radius follows, because it is the path the leaf's own tip
+    // sweeps — a half-width sash sweeps a half-width quarter-circle.
+    const span = openingSashSpan(o);
+    const leafW = two ? half : o.length * span;
     const arcLen = (Math.PI / 2) * leafW;
     // Revealed via stroke-dashoffset so each arc "draws on" as its leaf opens.
     // Each arc is drawn from its own leaf's state, so a pair of casement sashes
@@ -3284,7 +3334,19 @@ export function renderOpening(o: Opening, style: OpeningStyle): SVGTemplateResul
                 tone2,
                 amt2
               )}`
-            : arc(`M ${half} 0 A ${o.length} ${o.length} 0 0 0 ${-half} ${-o.length}`, tone, amt)
+            : // Hinged at the −x jamb, so the tip starts `leafW` along the wall
+              // and ends `leafW` out from it. At full span that is exactly the
+              // arc this drew before `sashSpan` existed.
+              arc(`M ${-half + leafW} 0 A ${leafW} ${leafW} 0 0 0 ${-half} ${-leafW}`, tone, amt)
+        }
+        ${
+          // The pane the sash does not cover: fixed glass, drawn in the base
+          // colour because it never opens and so is never the active part.
+          // Nothing at full span, which is every opening that predates this.
+          span < 1
+            ? svg`<line x1=${-half + leafW} y1="0" x2=${half} y2="0"
+              stroke=${color} stroke-width=${o.type === "window" ? 1.5 : 2.5} />`
+            : nothing
         }
         <!-- leaf hinged at the left jamb (flipH mirrors it to the right one) -->
         <g transform="translate(${-half} 0)">
@@ -3305,6 +3367,28 @@ export function renderOpening(o: Opening, style: OpeningStyle): SVGTemplateResul
             : nothing
         }
       `;
+  } else if (openingMotion(o) === "fixed") {
+    // A window that does not open (issue #218): a bay window, a picture
+    // window, a sealed pane. Jambs and glass, no leaf, no arc, no track —
+    // there is nothing here that could move, which is the whole statement.
+    //
+    // Drawn from `color` rather than `tone` on purpose: `tone` is the accent a
+    // moving part wears while it is open, and this one is never either. A
+    // fixed pane with a contact bound to it (people do bind them, for the tap
+    // target and the badge) must not light up as though it had swung.
+    const t = o.type === "window" ? 1.5 : 2.5; // glass vs solid panel
+    body = svg`
+        ${
+          o.type === "window"
+            ? svg`
+        <line x1=${-half} y1=${-cutH / 2} x2=${-half} y2=${cutH / 2}
+              stroke=${color} stroke-width="2" />
+        <line x1=${half} y1=${-cutH / 2} x2=${half} y2=${cutH / 2}
+              stroke=${color} stroke-width="2" />`
+            : nothing
+        }
+        <line x1=${-half} y1="0" x2=${half} y2="0"
+              stroke=${color} stroke-width=${t} />`;
   } else if (openingMotion(o) === "roll") {
     // Roll-up cover — garage door, roller shutter (issues #45 / #47). Unlike a
     // slider nothing travels along the wall: the curtain leaves the floor
@@ -4467,7 +4551,13 @@ export function areaZoomTransform(
   h: number,
   rot: PlanRotation,
   padFrac = 0.15,
-  maxScale = 4
+  maxScale = MAX_AREA_ZOOM_FIT,
+  /**
+   * A room's own zoom, overriding the fit (issue #222). Undefined keeps the
+   * fitted scale, which is every room that has not asked for something else.
+   * Pass it through {@link resolveAreaZoom} rather than raw config.
+   */
+  explicitScale?: number
 ): AreaZoomTransform {
   if (!points.length) return IDENTITY_ZOOM;
   const rotated = points.map((p) => rotatePlanPoint(p.x, p.y, w, h, rot));
@@ -4481,7 +4571,11 @@ export function areaZoomTransform(
   const pad = Math.max(maxX - minX, maxY - minY) * padFrac;
   const bw = Math.max(maxX - minX + pad * 2, 1);
   const bh = Math.max(maxY - minY + pad * 2, 1);
-  const scale = Math.max(1, Math.min(maxScale, Math.min(d.w / bw, d.h / bh)));
+  // The room's own zoom wins over the fit when it has one: the fit is a guess
+  // at a good framing, and this is someone saying the guess was wrong.
+  // Centring is unaffected — this sets how close, not where (issue #222).
+  const fitted = Math.max(1, Math.min(maxScale, Math.min(d.w / bw, d.h / bh)));
+  const scale = explicitScale ?? fitted;
   // A non-finite input (NaN/Infinity coordinates from a hand-edited config)
   // must never reach the style sink: --fp-inv-zoom:NaN invalidates the whole
   // custom property, and .item's transform is built from it, so every device
@@ -4497,6 +4591,47 @@ export function areaZoomTransform(
     txPercent: clamp(50 - scale * cxFrac * 100),
     tyPercent: clamp(50 - scale * cyFrac * 100),
   };
+}
+
+/**
+ * A room's configured zoom, clamped, or `undefined` when it has none and the
+ * fit should stand (issue #222).
+ *
+ * Below 1 is clamped **to 1**, not honoured and not refused: it would zoom
+ * *out* past the whole plan, which is what the zoom-out button is for, and 1
+ * is the nearest thing to it that means anything. A non-finite value is the
+ * one case that does fall back to the fit, on the same reasoning as {@link
+ * areaZoomTransform}'s own guard — a NaN scale reaches a style sink and takes
+ * the overlay's centring down with it.
+ */
+export function resolveAreaZoom(a: Pick<Area, "zoom">): number | undefined {
+  const raw = a.zoom;
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return undefined;
+  return Math.max(1, Math.min(MAX_AREA_ZOOM, raw));
+}
+
+/**
+ * What the overlay counter-scales by while the plan is zoomed — the value
+ * behind `--fp-inv-zoom` (issue #222).
+ *
+ * `1 / zoomScale` is the counter-scale that holds the overlay at the size it
+ * has at full plan, which is what zooming has always done. `zoomedOverlayScale`
+ * multiplies that, so 1 keeps today's behaviour exactly and 1.5 draws every
+ * badge, label and tracker half again as large *while zoomed only*.
+ *
+ * Unzoomed it returns 1 rather than the multiplier: the setting is about the
+ * zoomed view, and applying it at full plan would resize every plan that set
+ * it the moment it was set. A non-finite or non-positive multiplier is
+ * ignored for the same reason the transform guards its own scale — this value
+ * lands in a custom property that the badge transform is built from.
+ */
+export function zoomedOverlayScale(zoomScale: number, multiplier?: number): number {
+  if (!Number.isFinite(zoomScale) || zoomScale <= 1) return 1;
+  const m =
+    typeof multiplier === "number" && Number.isFinite(multiplier) && multiplier > 0
+      ? multiplier
+      : DEFAULT_ZOOMED_OVERLAY_SCALE;
+  return (1 / zoomScale) * m;
 }
 
 /**

@@ -198,9 +198,14 @@ window, a `blind` → a slider, a `garage` or `shutter` → a roll-up); adjust a
   for one sash. The swing arc draws on as the leaf travels.
 - **Partial** — a `cover` reporting `current_position` (0–100) is drawn partly open and
   tracks the position live. Everything else uses the on/off behavior above.
-- **Motion** — **swing** (default), **slide**, or **roll** (a slatted curtain that thins
-  onto its track). Sliding openings take a **Style**, and which one you want comes down to
-  where the panels go and what is left clear:
+- **Motion** — **swing** (default), **slide**, **roll** (a slatted curtain that thins onto
+  its track), or **fixed** — a window that does not open at all: a bay window, a picture
+  window, a sealed pane. A fixed window is drawn as jambs and glass with no leaf and no
+  arc, ignores a bound sensor for its drawing (bind one anyway if you want the tap target
+  or the badge), and is never a gap — though it still lets the daylight straight through,
+  because it is still glass. Offered on windows; a door that cannot open is a wall.
+  Sliding openings take a **Style**, and which one you want comes down to where the panels
+  go and what is left clear:
 
   | Style | Panels | Where they go | What clears |
   | --- | --- | --- | --- |
@@ -222,6 +227,14 @@ window, a `blind` → a slider, a `garage` or `shutter` → a roll-up); adjust a
   switch covers both, and a tap still acts on the first. A lamp's pool follows the leaves
   too: with one open, the light comes through *that* leaf's half of the doorway rather
   than the middle.
+- **Sash width** (**Leaf width** on a door) — when only part of the opening actually
+  moves and the rest is fixed, set this to the share of the frame the operable leaf
+  covers, `0.05`–`1`. The leaf is drawn at that width, hinged at its own jamb, sweeping an
+  arc to match, and the remainder is drawn as a fixed pane — so a narrow casement in a
+  wide frame stops swinging the whole width of the glass, and a sidelight door stops
+  swinging its fixed panel. The pane follows the type: thin glass on a window, solid on a
+  door. Single-leaf swing openings only — a double already splits the frame between its
+  two leaves. **Hinge** moves the leaf and its pane together.
 - **Orientation** — **Hinge** (left / right) and **Opens** (this side / other side) face a
   swing door any of four ways; they're pure mirrors (`flipH` / `flipV`), so the animation
   follows.
@@ -382,6 +395,7 @@ The editor writes this config for you; manual editing is optional.
 | `offlineStyle`| string  | `dim`              | How a device whose entity is **offline** is drawn: `dim`, `strike` (dimmed with a diagonal through the badge) or `none`. See [Offline devices](#offline-devices). |
 | `compactHeader`| boolean | `false`           | Draw the title inside the plan and the floor buttons in a row, instead of spending a card header row on them. See [Compact header](#compact-header). |
 | `overlayScale`| string  | `fixed`; `plan` in new plans | How badges, labels, room names and text are sized: `plan` = canvas units so they scale with the drawing, `fixed` = screen pixels. A card added from the picker is created with `plan`; a config that doesn't say renders `fixed`, which is what every plan drawn before the option existed was laid out in. See [Overlay scale](#overlay-scale). |
+| `zoomedOverlayScale` | number | `1` | Overlay size while zoomed in to a room, as a multiple of its size at full plan. `1` — the default — holds badges, labels and text at the size they have unzoomed, which is what zooming has always done. Raise it for a wall tablet read at arm's length, lower it to get a dense room's badges out of the way. Applies to the whole overlay so a badge and its label scale as one thing, and does nothing at full plan. |
 | `background` | string   | skin / card bg     | Canvas background color (CSS / hex). Overrides the skin's paper. |
 | `floors`     | Floor[]  | —                  | Per-floor element groups (see [Floor](#floor)).   |
 | `defaultFloor`| string  | first floor        | Id of the floor shown first.                 |
@@ -448,9 +462,10 @@ distorted anyway.
 | ------------- | --------------------------- | ------------------------------------------------------ |
 | `id`          | string                      | Unique id.                                             |
 | `type`        | `door` \| `window`          | The kind of opening.                                   |
-| `motion`      | `swing` \| `slide` \| `roll` | How it moves: hinged (default), sliding panels, or a roll-up curtain (garage / roller shutter). |
+| `motion`      | `swing` \| `slide` \| `roll` \| `fixed` | How it moves: hinged (default), sliding panels, a roll-up curtain (garage / roller shutter), or `fixed` — a window that does not open (bay, picture, sealed pane). A fixed opening draws no leaf and no arc, ignores `entity` for its drawing, and never counts as a gap; glazing still applies, so it passes daylight like the glass it is. |
 | `sunlight`    | boolean                     | `false` takes this opening out of [Sunlight](#sunlight) entirely — it admits no light and blocks it like wall, however open it is drawn. Editor: **Lets sunlight in**. For the solid door with no sensor, which the plan draws open. |
 | `glazed`      | boolean                     | Lets sunlight through even when shut. Defaults per type — a window is glass, a door is not. Set `true` on a **patio or French door**, which is drawn as a door because that is how it swings but is a wall of glass; set `false` on an opaque window like a glass-brick panel or a hatch, which then admits light only as far as it is open. Only [Sunlight](#sunlight) reads it. |
+| `sashSpan`    | number (0.05–1)             | Share of the opening the operable leaf covers; the rest is drawn as a fixed pane — thin glass on a window, a solid panel on a door. Default 1 (the leaf fills the frame). Single-**leaf** swing openings, doors included — a double already splits the frame between its leaves. The leaf hangs at the hinge jamb, so `flipH` moves it and its pane together, and a half-width leaf swung wide open clears half the opening rather than all of it. Values below `0.05` are clamped to it: a leaf of no width is a fixed pane, which `motion: fixed` says properly. |
 | `sash`        | `single` \| `double`        | Swing openings only: how many hinged leaves. The default differs by type, because the ordinary cases do — a window opens with `double` (two casement sashes), a door with `single` (one leaf across the opening). Set it to draw a single-sash window or a **double door**; both leaves then hinge at their own jamb and trace their own arc. Ignored by sliding and rolling openings. |
 | `shutterEntity` | string                     | An external shutter over the same gap (`cover` or contact), with its own open/closed state. With `entity` bound too, the card draws the shutter's own icon beside the opening — open/closed in both glyph and colour — and tapping that icon opens the shutter. |
 | `shutterStyle` | `swing` \| `roll`           | Louvered panels or a roll-up curtain. Defaults from the entity (contact → `swing`, `cover` → `roll`). |
@@ -707,6 +722,13 @@ animated inside a rectangular tracked area:
   down the middle, an exterior wall colors on its inside face only. `borderWidth` is the
   width seen on the room's own side and defaults to `4` here; widen it and the band runs
   past the wall onto the floor.
+- `zoom` — how close a tap goes, `1`–`10`. Unset, the room is fitted to the card (capped
+  at `4`), which is what tapping a room has always done. Set it when the fit is not the
+  picture you want: a small room fits at a scale that fills the card with one cupboard, and
+  a long thin one binds on its long axis and barely zooms at all. The room stays centred
+  either way — this sets how close, not where. A value below `1` becomes `1`; zooming out
+  past the whole plan is what the zoom-out button does. In the editor, turn
+  **Fit the room to the card** off and the **Zoom level** slider appears.
 - `tap_action` / `hold_action` / `double_tap_action` — standard Lovelace actions on the
   room itself. **Tap already does something** — it zooms the plan to the room — so setting
   `tap_action` *replaces* that zoom; leaving it unset keeps it. Put the action on hold or

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { html, nothing } from "lit";
 import type { Area, FloorText, Furniture, FurnitureType, ItemKind, ItemReading } from "./types";
 import { SKIN_ACCENT, SKIN_WALL, MAX_SKIN_WALL_WIDTH } from "./skins";
+import { MAX_AREA_ZOOM, DEFAULT_ZOOMED_OVERLAY_SCALE } from "./types";
 import {
   DEFAULT_GLOW_RADIUS,
   DEFAULT_GLOW_COLOR,
@@ -127,6 +128,8 @@ import {
   planRotationTransform,
   polygonCentroid,
   areaZoomTransform,
+  resolveAreaZoom,
+  zoomedOverlayScale,
   IDENTITY_ZOOM,
   renderArea,
   renderAreaBorder,
@@ -139,6 +142,8 @@ import {
   wallsLightPassesThrough,
   openingClearFraction,
   openingClearSpan,
+  openingSashSpan,
+  MIN_SASH_SPAN,
   glowClearSpan,
   glowClearFraction,
   renderGlowMask,
@@ -3834,6 +3839,69 @@ describe("subscribing to the screen's orientation (review of #237)", () => {
   });
 });
 
+describe("a room's own zoom level (issue #222)", () => {
+  // A 10x10 room in the middle of a 100x100 canvas: fits at the 4x cap, so
+  // every difference below is the explicit scale rather than the fit.
+  const room = [{ x: 45, y: 45 }, { x: 55, y: 45 }, { x: 55, y: 55 }, { x: 45, y: 55 }];
+
+  it("uses the room's scale instead of the fit, and still centres it", () => {
+    const t = areaZoomTransform(room, 100, 100, 0, undefined, undefined, 7);
+    expect(t.scale).toBe(7);
+    // Centre stays the centre — this sets how close, not where.
+    expect(t.txPercent).toBeCloseTo(50 - 7 * 0.5 * 100);
+    expect(t.tyPercent).toBeCloseTo(50 - 7 * 0.5 * 100);
+  });
+
+  it("can ask for less than the fit as well as more", () => {
+    // The long-thin-room case in reverse: the fit is not always too far out.
+    expect(areaZoomTransform(room, 100, 100, 0, undefined, undefined, 1.5).scale).toBe(1.5);
+  });
+
+  it("falls back to the fit when the room has no zoom of its own", () => {
+    expect(areaZoomTransform(room, 100, 100, 0, undefined, undefined, undefined)).toEqual(
+      areaZoomTransform(room, 100, 100, 0),
+    );
+  });
+
+  it("resolves and clamps what a config may hold", () => {
+    expect(resolveAreaZoom({ zoom: 6 })).toBe(6);
+    expect(resolveAreaZoom({ zoom: 99 })).toBe(MAX_AREA_ZOOM);
+    // Below 1 would zoom out past the whole plan; that is the zoom-out button.
+    expect(resolveAreaZoom({ zoom: 0.2 })).toBe(1);
+    // No zoom, and nonsense from a hand-edited config, both leave the fit be.
+    expect(resolveAreaZoom({})).toBeUndefined();
+    expect(resolveAreaZoom({ zoom: NaN })).toBeUndefined();
+    expect(resolveAreaZoom({ zoom: Infinity })).toBeUndefined();
+  });
+});
+
+describe("overlay size while zoomed (issue #222)", () => {
+  it("holds the overlay at its full-plan size by default, as it always has", () => {
+    expect(zoomedOverlayScale(4)).toBeCloseTo(0.25);
+    expect(zoomedOverlayScale(4, DEFAULT_ZOOMED_OVERLAY_SCALE)).toBeCloseTo(0.25);
+  });
+
+  it("multiplies that counter-scale, so badges can grow when zoomed in", () => {
+    expect(zoomedOverlayScale(4, 2)).toBeCloseTo(0.5); // twice full-plan size
+    expect(zoomedOverlayScale(4, 0.5)).toBeCloseTo(0.125); // half of it
+  });
+
+  it("does nothing at full plan — the setting is about the zoomed view", () => {
+    // Otherwise setting it would resize every plan the moment it was set.
+    expect(zoomedOverlayScale(1, 2)).toBe(1);
+    expect(zoomedOverlayScale(0.5, 2)).toBe(1);
+  });
+
+  it("ignores a value that would poison the custom property it lands in", () => {
+    // --fp-inv-zoom:NaN invalidates the property, and .item's transform is
+    // built from it — every badge would lose its centring, not just its size.
+    expect(zoomedOverlayScale(4, NaN)).toBeCloseTo(0.25);
+    expect(zoomedOverlayScale(4, 0)).toBeCloseTo(0.25);
+    expect(zoomedOverlayScale(4, -2)).toBeCloseTo(0.25);
+    expect(zoomedOverlayScale(NaN, 2)).toBe(1);
+  });
+});
+
 describe("areaZoomTransform", () => {
   it("returns the identity transform for an empty polygon", () => {
     expect(areaZoomTransform([], 100, 100, 0)).toEqual(IDENTITY_ZOOM);
@@ -4635,6 +4703,69 @@ describe("lightBadgePaint (#106)", () => {
 // Issue #145 meets #143: a two-panel slider has two sensors and its leaves do
 // not travel the full width, so neither the amount nor the leaf count could be
 // read off `entity` alone.
+describe("a fixed opening and a partial sash, as gaps (issue #218)", () => {
+  const win = (extra: Partial<Opening>) =>
+    ({ id: "o", type: "window", x: 0, y: 0, length: 100, angle: 0, ...extra }) as Opening;
+
+  it("a fixed opening is never a gap, whatever a sensor says", () => {
+    const f = win({ motion: "fixed" });
+    expect(openingClearFraction(f, 0)).toBe(0);
+    expect(openingClearFraction(f, 1)).toBe(0);
+    expect(openingClearSpan(f, 1)).toEqual([0.5, 0.5]);
+  });
+
+  it("but it is still glass, so light goes straight through it", () => {
+    // The distinction the feature turns on: no *airflow* gap, full daylight.
+    const f = win({ motion: "fixed" });
+    expect(glowClearFraction(f, 0)).toBe(1);
+    expect(openingSunFraction(f, openingClearFraction(f, 0))).toBe(1);
+  });
+
+  it("an opaque fixed panel is neither a gap nor a window", () => {
+    const f = win({ motion: "fixed", glazed: false });
+    expect(glowClearFraction(f, 1)).toBe(0);
+    expect(openingSunFraction(f, openingClearFraction(f, 1))).toBe(0);
+  });
+
+  it("a half-width sash swung wide open clears half the opening", () => {
+    const half = win({ sash: "single", sashSpan: 0.5 });
+    expect(openingClearFraction(half, 1)).toBeCloseTo(0.5);
+    expect(openingClearFraction(half, 0.5)).toBeCloseTo(0.25);
+    expect(openingClearFraction(half, 0)).toBe(0);
+  });
+
+  it("and clears it at its own jamb, where the sash is — not in the middle", () => {
+    const half = win({ sash: "single", sashSpan: 0.5 });
+    expect(openingClearSpan(half, 1)).toEqual([0, 0.5]);
+    // flipH hangs the sash on the other jamb, so the clear half moves with it.
+    expect(openingClearSpan(win({ sash: "single", sashSpan: 0.5, flipH: true }), 1)).toEqual([
+      0.5, 1,
+    ]);
+  });
+
+  it("a full-width sash keeps the centred span every plan already lights by", () => {
+    const full = win({ sash: "single" });
+    expect(openingClearFraction(full, 1)).toBe(1);
+    expect(openingClearSpan(full, 0.5)).toEqual([0.25, 0.75]);
+  });
+
+  it("clamps a nonsense span rather than drawing a sliver or an inside-out sash", () => {
+    expect(openingSashSpan(win({ sash: "single", sashSpan: 0 }))).toBe(MIN_SASH_SPAN);
+    expect(openingSashSpan(win({ sash: "single", sashSpan: -3 }))).toBe(MIN_SASH_SPAN);
+    expect(openingSashSpan(win({ sash: "single", sashSpan: 4 }))).toBe(1);
+    expect(openingSashSpan(win({ sash: "single", sashSpan: NaN }))).toBe(1);
+  });
+
+  it("is ignored where there is no leftover pane to describe", () => {
+    // A double splits the frame between its leaves; a slider and a roll-up
+    // have panel arithmetic of their own.
+    expect(openingSashSpan(win({ sash: "double", sashSpan: 0.4 }))).toBe(1);
+    expect(openingSashSpan(win({ motion: "slide", sashSpan: 0.4 }))).toBe(1);
+    expect(openingSashSpan(win({ motion: "roll", sashSpan: 0.4 }))).toBe(1);
+    expect(openingClearFraction(win({ sash: "double", sashSpan: 0.4 }), 1, 1)).toBe(1);
+  });
+});
+
 describe("openingClearFraction (#145 / #143)", () => {
   const slider = (sliderStyle: string): Opening =>
     ({ id: "o", type: "window", motion: "slide", sliderStyle, x: 300, y: 300, length: 200, angle: 0 }) as Opening;
