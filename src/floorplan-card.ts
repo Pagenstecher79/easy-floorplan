@@ -97,6 +97,7 @@ import {
   itemHiddenWhenInactive,
   itemBadgeHidden,
   itemLabelSize,
+  itemLabelColor,
   areaLabelFontSize,
   wallStrokeStyle,
   normalizeOverlayScale,
@@ -670,7 +671,7 @@ export class FloorplanCard extends LitElement {
     // active state alone left threshold colours invisible on exactly the
     // devices they were written for.
     const stateColor = cssColor(resolveStateColor(item.stateColor, rawValue));
-    const labelColor = item.disableLabelColor ? undefined : stateColor;
+    const labelColor = itemLabelColor(item, stateColor);
     // Offline (issue #162): the entity is unavailable, unknown, or gone from
     // Home Assistant altogether. Guarded on `hass` — before the first states
     // arrive every device would answer "offline" and the plan would flash

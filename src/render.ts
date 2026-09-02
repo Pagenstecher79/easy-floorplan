@@ -1481,14 +1481,16 @@ export function itemLabelSize(v: unknown): number {
   return Math.min(40, Math.max(8, cssNumber(v, DEFAULT_LABEL_SIZE)));
 }
 /**
- * Resolves the label color for an item, respecting the `disableLabelColor` toggle.
- * When disabled, it returns undefined so the label falls back to the theme default.
+ * Resolves the label color for an item, respecting disableLabelColor,
+ * useCustomLabelColor, and any custom color set.
  */
 export function itemLabelColor(
-  item: { disableLabelColor?: boolean },
+  item: { disableLabelColor?: boolean; useCustomLabelColor?: boolean; labelCustomColor?: string },
   stateColor: string | undefined
 ): string | undefined {
-  return item.disableLabelColor ? undefined : stateColor;
+  if (!item.disableLabelColor) return stateColor;
+  if (!item.useCustomLabelColor) return undefined;
+  return cssColor(item.labelCustomColor) ?? undefined;
 }
 
 /** Clamp a config area `labelSize` to the same 8–40 range item labels use. */

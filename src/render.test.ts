@@ -5989,20 +5989,17 @@ describe("hide by condition, through the card's own entry points", () => {
 });
 
 describe("item label color (itemLabelColor)", () => {
-  it("returns the state color by default when disableLabelColor is false", () => {
+  it("returns the state color by default when disableLabelColor is false or omitted", () => {
     expect(itemLabelColor({ disableLabelColor: false }, "#ff0000")).toBe("#ff0000");
-  });
-
-  it("returns the state color when disableLabelColor is omitted", () => {
     expect(itemLabelColor({}, "#ff0000")).toBe("#ff0000");
   });
 
-  it("suppresses the state color and returns undefined when disableLabelColor is true", () => {
+  it("returns undefined when disableLabelColor is true and custom color is off", () => {
+    expect(itemLabelColor({ disableLabelColor: true, useCustomLabelColor: false }, "#ff0000")).toBe(undefined);
     expect(itemLabelColor({ disableLabelColor: true }, "#ff0000")).toBe(undefined);
   });
 
-  it("returns undefined when no state color is provided, regardless of the toggle", () => {
-    expect(itemLabelColor({ disableLabelColor: false }, undefined)).toBe(undefined);
-    expect(itemLabelColor({ disableLabelColor: true }, undefined)).toBe(undefined);
+  it("returns the custom color when both toggles are true", () => {
+    expect(itemLabelColor({ disableLabelColor: true, useCustomLabelColor: true, labelCustomColor: "#00ff00" }, "#ff0000")).toBe("#00ff00");
   });
 });

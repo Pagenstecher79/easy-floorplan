@@ -630,6 +630,8 @@ export interface FloorItem {
   activeColor?: string;
   /** new option to prevent using the state color for the label too */
   disableLabelColor?: boolean;
+  useCustomLabelColor?: boolean;
+  labelCustomColor?: string;
   /** Ripple ring color (CSS/hex). Falls back to `activeColor`, then the primary color. */
   rippleColor?: string;
   /** Max ripple ring diameter in pixels. Default 80. */

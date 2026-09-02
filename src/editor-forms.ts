@@ -910,36 +910,66 @@ export function itemShowStateForm(it: FloorItem): FormSpec {
 
 /** Group 3: where the label sits and how big it is. */
 export function itemLabelForm(it: FloorItem): FormSpec {
+  const fields: FormField[] = [
+    {
+      name: "labelPosition",
+      label: "Label position",
+      helper: "Beside the badge instead of under it — a long reading then grows one way only",
+      selector: dropdown(opt("below", "Below"), opt("left", "Left"), opt("right", "Right")),
+    },
+    {
+      name: "labelSize",
+      label: "Label size",
+      selector: { number: { min: 8, max: 40, step: 1, mode: "slider", unit_of_measurement: "px" } },
+    },
+    {
+      name: "disableLabelColor",
+      label: "Disable label color",
+      helper: "Keeps the text in its default color even if the icon changes color",
+      selector: { boolean: {} },
+    },
+  ];
+
+  if (it.disableLabelColor) {
+    fields.push({
+      name: "useCustomLabelColor",
+      label: "Own color",
+      helper: "Override the theme default with a fixed custom color",
+      selector: { boolean: {} },
+    });
+  }
+
   return {
-    fields: [
-      {
-        name: "labelPosition",
-        label: "Label position",
-        helper: "Beside the badge instead of under it — a long reading then grows one way only",
-        selector: dropdown(opt("below", "Below"), opt("left", "Left"), opt("right", "Right")),
-      },
-      {
-        name: "labelSize",
-        label: "Label size",
-        selector: { number: { min: 8, max: 40, step: 1, mode: "slider", unit_of_measurement: "px" } },
-      },
-      {
-        name: "disableLabelColor",
-        label: "Disable label color",
-        helper: "Keeps the text in its default color even if the icon changes color",
-        selector: { boolean: {} },
-      },
-    ],
+    fields,
     data: {
       labelPosition: labelPositionOf(it),
       labelSize: it.labelSize ?? DEFAULT_LABEL_SIZE,
       disableLabelColor: it.disableLabelColor ?? false,
+      useCustomLabelColor: it.useCustomLabelColor ?? false,
+      labelCustomColor: it.labelCustomColor ?? "",
     },
-    // Defaults stay out of the YAML to keep the configuration clean
     toPatch: (p) => {
       const out = { ...p };
+      
+      // WICHTIG: Wir ermitteln den echten zukünftigen Status, 
+      // indem wir den Patch (out) mit dem aktuellen Status (it) abgleichen.
+      const isDisable = out.disableLabelColor ?? it.disableLabelColor ?? false;
+      const isCustom = out.useCustomLabelColor ?? it.useCustomLabelColor ?? false;
+
       if (out.labelPosition === "below") out.labelPosition = undefined;
       if (out.disableLabelColor === false) out.disableLabelColor = undefined;
+      if (out.useCustomLabelColor === false) out.useCustomLabelColor = undefined;
+
+      // Aufräumen basierend auf dem ECHTEN Status
+      if (!isDisable) {
+        out.useCustomLabelColor = undefined;
+        out.labelCustomColor = undefined;
+      } else if (!isCustom) {
+        out.labelCustomColor = undefined;
+      }
+
+      if (out.labelCustomColor === "") out.labelCustomColor = undefined;
+      
       return out;
     },
   };
