@@ -1565,22 +1565,39 @@ export function areaForm(a: Area): FormSpec {
       // How close tapping the room goes (issue #222). Only worth asking while
       // a tap still zooms: an area with its own `tap_action` has replaced the
       // zoom outright, and a number that does nothing is worse than no number.
+      //
+      // A toggle *and* a slider, rather than the slider alone resting at the
+      // fit's ceiling. That earlier shape made "fit" and an explicit 4 the
+      // same position, so a room whose fit is 1.15 — the ordinary case, and
+      // the one this feature exists for — could not be told to zoom to 4 at
+      // all. "Fit" is not a number on this scale; it is the absence of one,
+      // and it needs its own control to say so.
       ...(a.tap_action
         ? []
         : [
             {
-              name: "zoom",
-              label: "Zoom level",
-              helper: "How close a tap goes. Unset fits the room to the card",
-              selector: {
-                number: {
-                  min: 1,
-                  max: MAX_AREA_ZOOM,
-                  step: 0.5,
-                  mode: "slider" as const,
-                },
-              },
+              name: "fitZoom",
+              label: "Fit the room to the card",
+              helper: "Off lets you set how close a tap goes",
+              selector: { boolean: {} },
             },
+            ...(a.zoom === undefined
+              ? []
+              : [
+                  {
+                    name: "zoom",
+                    label: "Zoom level",
+                    helper: "How close a tap goes",
+                    selector: {
+                      number: {
+                        min: 1,
+                        max: MAX_AREA_ZOOM,
+                        step: 0.5,
+                        mode: "slider" as const,
+                      },
+                    },
+                  },
+                ]),
           ]),
       // Optional entity that makes the room itself live (issue #6) — a presence
       // sensor that lights the room while it is occupied. Last, because most
@@ -1638,9 +1655,10 @@ export function areaForm(a: Area): FormSpec {
       entity: a.entity ?? "",
       activeOpacity: a.activeOpacity ?? a.opacity ?? DEFAULT_AREA_OPACITY,
       highlight: a.highlight ?? "fill",
-      // No number means "fit the room", which is not a value the slider can
-      // show — so it rests at the fit's own ceiling, the closest a fitted
-      // room is ever drawn.
+      // "Fit" is the absence of a number, so it gets its own boolean; the
+      // slider only appears once that is off, and then always shows a real
+      // stored value.
+      fitZoom: a.zoom === undefined,
       zoom: a.zoom ?? MAX_AREA_ZOOM_FIT,
       tap_action: a.tap_action,
       hold_action: a.hold_action,
@@ -1650,9 +1668,15 @@ export function areaForm(a: Area): FormSpec {
       let out = p;
       // "fill" is the default, so keep it out of the YAML.
       if ("highlight" in out && out.highlight === "fill") out = { ...out, highlight: undefined };
-      // Back at the fit's ceiling is back to "let it fit" (issue #222) — the
-      // resting position of the slider, so leaving it alone writes nothing.
-      if ("zoom" in out && out.zoom === MAX_AREA_ZOOM_FIT) out = { ...out, zoom: undefined };
+      // The toggle is a form-only control: it says whether `zoom` is written
+      // at all, and must never reach the config itself (issue #222).
+      if ("fitZoom" in out) {
+        const { fitZoom, ...rest } = out;
+        // Turning the fit off has to leave a number behind for the slider that
+        // is about to appear — the fit's own ceiling is the natural opening
+        // bid, and unlike before it is now a real, re-selectable value.
+        out = { ...rest, zoom: fitZoom ? undefined : MAX_AREA_ZOOM_FIT };
+      }
       return out;
     },
   };

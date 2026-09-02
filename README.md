@@ -697,7 +697,9 @@ animated inside a rectangular tracked area:
   at `4`), which is what tapping a room has always done. Set it when the fit is not the
   picture you want: a small room fits at a scale that fills the card with one cupboard, and
   a long thin one binds on its long axis and barely zooms at all. The room stays centred
-  either way — this sets how close, not where.
+  either way — this sets how close, not where. A value below `1` becomes `1`; zooming out
+  past the whole plan is what the zoom-out button does. In the editor, turn
+  **Fit the room to the card** off and the **Zoom level** slider appears.
 - `tap_action` / `hold_action` / `double_tap_action` — standard Lovelace actions on the
   room itself. **Tap already does something** — it zooms the plan to the room — so setting
   `tap_action` *replaces* that zoom; leaving it unset keeps it. Put the action on hold or

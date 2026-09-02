@@ -943,8 +943,8 @@ export interface Area {
    * single number for the plan.
    *
    * The room stays centred either way — this sets how close, not where.
-   * Clamped to 1..{@link MAX_AREA_ZOOM}: below 1 would zoom *out* past the
-   * whole plan, which the zoom-out button already does properly.
+   * Clamped to 1..{@link MAX_AREA_ZOOM}: a value below 1 becomes 1, since
+   * zooming *out* past the whole plan is what the zoom-out button does.
    */
   zoom?: number;
   /** Fill color. Falls back to the theme primary color. */

@@ -982,25 +982,50 @@ describe("wallForm / projectForm / floorImageForm", () => {
     expect((width.selector.number as { min: number }).min).toBe(1);
   });
 
-  it("offers a zoom level on a room, and only while a tap still zooms (issue #222)", () => {
+  it("offers the zoom controls only while a tap still zooms (issue #222)", () => {
     const area = { id: "a", points: [{ x: 0, y: 0 }] } as Area;
-    expect(areaForm(area).fields.map((x) => x.name)).toContain("zoom");
+    expect(areaForm(area).fields.map((x) => x.name)).toContain("fitZoom");
     // Its own tap_action has replaced the zoom, so a zoom level would be a
     // number that does nothing.
     const acting = { ...area, tap_action: { action: "toggle" } } as Area;
-    expect(areaForm(acting).fields.map((x) => x.name)).not.toContain("zoom");
+    const names = areaForm(acting).fields.map((x) => x.name);
+    expect(names).not.toContain("fitZoom");
+    expect(names).not.toContain("zoom");
   });
 
-  it("rests at the fit's ceiling and writes nothing there (issue #222)", () => {
+  it("shows the slider only once the room has stopped fitting (issue #222)", () => {
     const area = { id: "a", points: [{ x: 0, y: 0 }] } as Area;
+    // Fitting: the toggle is on and there is no number to show.
+    const fitted = areaForm(area);
+    expect(fitted.data.fitZoom).toBe(true);
+    expect(fitted.fields.map((x) => x.name)).not.toContain("zoom");
+    // Chosen: the toggle is off and the slider shows what was chosen.
+    const chosen = areaForm({ ...area, zoom: 8 } as Area);
+    expect(chosen.data.fitZoom).toBe(false);
+    expect(chosen.fields.map((x) => x.name)).toContain("zoom");
+    expect(chosen.data.zoom).toBe(8);
+  });
+
+  it("lets a room pick an explicit 4, which the old sentinel could not (review of #222)", () => {
+    // The bug this shape replaces: "fit" and an explicit 4 were the same
+    // slider position, so a room whose fit is 1.15 — the ordinary case, and
+    // the one the feature exists for — could never be told to zoom to 4.
+    const area = { id: "a", points: [{ x: 0, y: 0 }], zoom: 4 } as Area;
     const form = areaForm(area);
-    // "Fit the room" is not a number the slider can show, so it rests at the
-    // closest a fitted room is ever drawn.
-    expect(form.data.zoom).toBe(MAX_AREA_ZOOM_FIT);
-    expect(form.toPatch({ zoom: MAX_AREA_ZOOM_FIT })).toEqual({ zoom: undefined });
-    expect(form.toPatch({ zoom: 8 })).toEqual({ zoom: 8 });
-    // A room that has chosen shows what it chose.
-    expect(areaForm({ ...area, zoom: 8 } as Area).data.zoom).toBe(8);
+    expect(form.data.fitZoom).toBe(false);
+    expect(form.data.zoom).toBe(4);
+    // And 4 survives a round trip instead of being stripped as a default.
+    expect(form.toPatch({ zoom: 4 })).toEqual({ zoom: 4 });
+  });
+
+  it("keeps the fit toggle itself out of the config (issue #222)", () => {
+    const form = areaForm({ id: "a", points: [{ x: 0, y: 0 }], zoom: 8 } as Area);
+    // Turning the fit back on clears the number; the toggle never lands.
+    expect(form.toPatch({ fitZoom: true })).toEqual({ zoom: undefined });
+    // Turning it off leaves a real value behind for the slider to show.
+    expect(form.toPatch({ fitZoom: false })).toEqual({ zoom: MAX_AREA_ZOOM_FIT });
+    for (const p of [{ fitZoom: true }, { fitZoom: false }])
+      expect("fitZoom" in form.toPatch(p)).toBe(false);
   });
 
   it("keeps a zoomed overlay scale of 1 out of the YAML (issue #222)", () => {
@@ -1783,7 +1808,7 @@ describe("every field lands in exactly one panel group", () => {
     ["showName", "labelSize"],
     ["entity"],
     ["highlight", "opacity", "activeOpacity"],
-    ["zoom", "tap_action", "hold_action", "double_tap_action"],
+    ["fitZoom", "zoom", "tap_action", "hold_action", "double_tap_action"],
   ];
 
   const check = (fields: { name: string }[], groups: string[][], what: string) => {

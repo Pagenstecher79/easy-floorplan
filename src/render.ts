@@ -4439,11 +4439,12 @@ export function areaZoomTransform(
  * A room's configured zoom, clamped, or `undefined` when it has none and the
  * fit should stand (issue #222).
  *
- * Below 1 is refused rather than clamped silently into meaning something else:
- * it would zoom *out* past the whole plan, which is what the zoom-out button
- * is for. A non-finite value from a hand-edited config falls back to the fit,
- * on the same reasoning as {@link areaZoomTransform}'s own guard — a NaN scale
- * reaches a style sink and takes the overlay's centring down with it.
+ * Below 1 is clamped **to 1**, not honoured and not refused: it would zoom
+ * *out* past the whole plan, which is what the zoom-out button is for, and 1
+ * is the nearest thing to it that means anything. A non-finite value is the
+ * one case that does fall back to the fit, on the same reasoning as {@link
+ * areaZoomTransform}'s own guard — a NaN scale reaches a style sink and takes
+ * the overlay's centring down with it.
  */
 export function resolveAreaZoom(a: Pick<Area, "zoom">): number | undefined {
   const raw = a.zoom;

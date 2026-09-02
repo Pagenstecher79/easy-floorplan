@@ -4827,7 +4827,13 @@ export class FloorplanCardEditor extends LitElement {
           // other element: the thing it *does*, after everything it *is*.
           "Behavior",
           this._renderForm(
-            formSlice(aSpec, ["zoom", "tap_action", "hold_action", "double_tap_action"]),
+            formSlice(aSpec, [
+              "fitZoom",
+              "zoom",
+              "tap_action",
+              "hold_action",
+              "double_tap_action",
+            ]),
             aApply
           )
         )}
