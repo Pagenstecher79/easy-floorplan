@@ -380,6 +380,7 @@ The editor writes this config for you; manual editing is optional.
 | `offlineStyle`| string  | `dim`              | How a device whose entity is **offline** is drawn: `dim`, `strike` (dimmed with a diagonal through the badge) or `none`. See [Offline devices](#offline-devices). |
 | `compactHeader`| boolean | `false`           | Draw the title inside the plan and the floor buttons in a row, instead of spending a card header row on them. See [Compact header](#compact-header). |
 | `overlayScale`| string  | `fixed`; `plan` in new plans | How badges, labels, room names and text are sized: `plan` = canvas units so they scale with the drawing, `fixed` = screen pixels. A card added from the picker is created with `plan`; a config that doesn't say renders `fixed`, which is what every plan drawn before the option existed was laid out in. See [Overlay scale](#overlay-scale). |
+| `zoomedOverlayScale` | number | `1` | Overlay size while zoomed in to a room, as a multiple of its size at full plan. `1` — the default — holds badges, labels and text at the size they have unzoomed, which is what zooming has always done. Raise it for a wall tablet read at arm's length, lower it to get a dense room's badges out of the way. Applies to the whole overlay so a badge and its label scale as one thing, and does nothing at full plan. |
 | `background` | string   | skin / card bg     | Canvas background color (CSS / hex). Overrides the skin's paper. |
 | `floors`     | Floor[]  | —                  | Per-floor element groups (see [Floor](#floor)).   |
 | `defaultFloor`| string  | first floor        | Id of the floor shown first.                 |
@@ -692,6 +693,11 @@ animated inside a rectangular tracked area:
   down the middle, an exterior wall colors on its inside face only. `borderWidth` is the
   width seen on the room's own side and defaults to `4` here; widen it and the band runs
   past the wall onto the floor.
+- `zoom` — how close a tap goes, `1`–`10`. Unset, the room is fitted to the card (capped
+  at `4`), which is what tapping a room has always done. Set it when the fit is not the
+  picture you want: a small room fits at a scale that fills the card with one cupboard, and
+  a long thin one binds on its long axis and barely zooms at all. The room stays centred
+  either way — this sets how close, not where.
 - `tap_action` / `hold_action` / `double_tap_action` — standard Lovelace actions on the
   room itself. **Tap already does something** — it zooms the plan to the room — so setting
   `tap_action` *replaces* that zoom; leaving it unset keeps it. Put the action on hold or

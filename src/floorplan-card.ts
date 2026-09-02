@@ -115,6 +115,8 @@ import {
   rotatePlanPoint,
   planRotationTransform,
   areaZoomTransform,
+  resolveAreaZoom,
+  zoomedOverlayScale,
   IDENTITY_ZOOM,
   type PlanRotation,
 } from "./render";
@@ -827,7 +829,19 @@ export class FloorplanCard extends LitElement {
     // completely differently (a group transform vs. per-point left/top%) —
     // reframe identically instead of drifting apart under zoom.
     const zoomedArea = active.areas?.find((a) => a.id === this._zoomedAreaId);
-    const zoom = zoomedArea ? areaZoomTransform(zoomedArea.points, c.width, c.height, rot) : IDENTITY_ZOOM;
+    const zoom = zoomedArea
+      ? areaZoomTransform(
+          zoomedArea.points,
+          c.width,
+          c.height,
+          rot,
+          undefined,
+          undefined,
+          // A room may say how close to go; without one the fit decides,
+          // exactly as it always has (issue #222).
+          resolveAreaZoom(zoomedArea)
+        )
+      : IDENTITY_ZOOM;
     // Chrome drawn inside the plan rather than above it (issue #152). The
     // flag is what the floor buttons follow; the chip needs a title as well,
     // and a compact card with no title has nothing to draw there.
@@ -1176,7 +1190,10 @@ export class FloorplanCard extends LitElement {
             </g>
           </svg>`
           )}
-          <div class="items" style="--fp-inv-zoom:${1 / zoom.scale};">
+          <div
+            class="items"
+            style="--fp-inv-zoom:${zoomedOverlayScale(zoom.scale, c.zoomedOverlayScale)};"
+          >
             ${active.areas?.map((a) => this._renderAreaLabel(a, c, rot, scale))}
             ${active.texts.map((t) => this._renderText(t, c, rot, scale))}
             ${repeat(

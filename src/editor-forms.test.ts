@@ -30,7 +30,12 @@ import {
 import { itemHasLabel } from "./render";
 import type { FormField } from "./editor-forms";
 import type { Area, FloorText, Opening, FloorItem, Floor, Furniture, Tracker, FloorplanCardConfig } from "./types";
-import { DEFAULT_GLOW_RADIUS, DEFAULT_PRESS_EFFECT } from "./types";
+import {
+  DEFAULT_GLOW_RADIUS,
+  DEFAULT_PRESS_EFFECT,
+  MAX_AREA_ZOOM_FIT,
+  DEFAULT_ZOOMED_OVERLAY_SCALE,
+} from "./types";
 import { DEFAULT_SKIN, SKINS, MAX_SKIN_WALL_WIDTH } from "./skins";
 import { DEFAULT_SUN_BEARING, SUN_REACH } from "./render";
 
@@ -977,12 +982,42 @@ describe("wallForm / projectForm / floorImageForm", () => {
     expect((width.selector.number as { min: number }).min).toBe(1);
   });
 
+  it("offers a zoom level on a room, and only while a tap still zooms (issue #222)", () => {
+    const area = { id: "a", points: [{ x: 0, y: 0 }] } as Area;
+    expect(areaForm(area).fields.map((x) => x.name)).toContain("zoom");
+    // Its own tap_action has replaced the zoom, so a zoom level would be a
+    // number that does nothing.
+    const acting = { ...area, tap_action: { action: "toggle" } } as Area;
+    expect(areaForm(acting).fields.map((x) => x.name)).not.toContain("zoom");
+  });
+
+  it("rests at the fit's ceiling and writes nothing there (issue #222)", () => {
+    const area = { id: "a", points: [{ x: 0, y: 0 }] } as Area;
+    const form = areaForm(area);
+    // "Fit the room" is not a number the slider can show, so it rests at the
+    // closest a fitted room is ever drawn.
+    expect(form.data.zoom).toBe(MAX_AREA_ZOOM_FIT);
+    expect(form.toPatch({ zoom: MAX_AREA_ZOOM_FIT })).toEqual({ zoom: undefined });
+    expect(form.toPatch({ zoom: 8 })).toEqual({ zoom: 8 });
+    // A room that has chosen shows what it chose.
+    expect(areaForm({ ...area, zoom: 8 } as Area).data.zoom).toBe(8);
+  });
+
+  it("keeps a zoomed overlay scale of 1 out of the YAML (issue #222)", () => {
+    const cfg = { type: "t", width: 1000, height: 600 } as FloorplanCardConfig;
+    const form = projectDisplayForm(cfg);
+    expect(form.data.zoomedOverlayScale).toBe(DEFAULT_ZOOMED_OVERLAY_SCALE);
+    expect(form.toPatch({ zoomedOverlayScale: 1 })).toEqual({ zoomedOverlayScale: undefined });
+    expect(form.toPatch({ zoomedOverlayScale: 1.5 })).toEqual({ zoomedOverlayScale: 1.5 });
+  });
+
   it("rotation lives in the bottom-row display form, defaults to 0°, and patches as a number", () => {
     const form = projectDisplayForm({ type: "t", width: 1000, height: 600 } as FloorplanCardConfig);
     expect(form.fields.map((x) => x.name)).toEqual([
       "rotation",
       "overlayScale",
       "compactHeader",
+      "zoomedOverlayScale",
       "offlineStyle",
     ]);
     expect(form.data.rotation).toBe("0");
@@ -1748,7 +1783,7 @@ describe("every field lands in exactly one panel group", () => {
     ["showName", "labelSize"],
     ["entity"],
     ["highlight", "opacity", "activeOpacity"],
-    ["tap_action", "hold_action", "double_tap_action"],
+    ["zoom", "tap_action", "hold_action", "double_tap_action"],
   ];
 
   const check = (fields: { name: string }[], groups: string[][], what: string) => {
@@ -1784,7 +1819,7 @@ describe("every field lands in exactly one panel group", () => {
     // offlineStyle as one form with one toPatch, but the panel renders the
     // first three under "Display" and the last under "Devices". Miss it in
     // both slices and the control silently disappears.
-    const DISPLAY = ["rotation", "overlayScale", "compactHeader"];
+    const DISPLAY = ["rotation", "overlayScale", "compactHeader", "zoomedOverlayScale"];
     const DEVICES = ["offlineStyle"];
     const cfg = { type: "t", width: 1000, height: 600 } as FloorplanCardConfig;
     check(projectDisplayForm(cfg).fields, [DISPLAY, DEVICES], "project display");

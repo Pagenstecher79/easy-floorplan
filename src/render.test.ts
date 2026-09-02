@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { html, nothing } from "lit";
 import type { Area, FloorText, Furniture, FurnitureType, ItemKind, ItemReading } from "./types";
 import { SKIN_ACCENT, SKIN_WALL, MAX_SKIN_WALL_WIDTH } from "./skins";
+import { MAX_AREA_ZOOM, DEFAULT_ZOOMED_OVERLAY_SCALE } from "./types";
 import {
   DEFAULT_GLOW_RADIUS,
   DEFAULT_GLOW_COLOR,
@@ -125,6 +126,8 @@ import {
   planRotationTransform,
   polygonCentroid,
   areaZoomTransform,
+  resolveAreaZoom,
+  zoomedOverlayScale,
   IDENTITY_ZOOM,
   renderArea,
   renderAreaBorder,
@@ -3713,6 +3716,69 @@ describe("polygonCentroid", () => {
 
   it("returns the origin for an empty polygon", () => {
     expect(polygonCentroid([])).toEqual({ x: 0, y: 0 });
+  });
+});
+
+describe("a room's own zoom level (issue #222)", () => {
+  // A 10x10 room in the middle of a 100x100 canvas: fits at the 4x cap, so
+  // every difference below is the explicit scale rather than the fit.
+  const room = [{ x: 45, y: 45 }, { x: 55, y: 45 }, { x: 55, y: 55 }, { x: 45, y: 55 }];
+
+  it("uses the room's scale instead of the fit, and still centres it", () => {
+    const t = areaZoomTransform(room, 100, 100, 0, undefined, undefined, 7);
+    expect(t.scale).toBe(7);
+    // Centre stays the centre — this sets how close, not where.
+    expect(t.txPercent).toBeCloseTo(50 - 7 * 0.5 * 100);
+    expect(t.tyPercent).toBeCloseTo(50 - 7 * 0.5 * 100);
+  });
+
+  it("can ask for less than the fit as well as more", () => {
+    // The long-thin-room case in reverse: the fit is not always too far out.
+    expect(areaZoomTransform(room, 100, 100, 0, undefined, undefined, 1.5).scale).toBe(1.5);
+  });
+
+  it("falls back to the fit when the room has no zoom of its own", () => {
+    expect(areaZoomTransform(room, 100, 100, 0, undefined, undefined, undefined)).toEqual(
+      areaZoomTransform(room, 100, 100, 0),
+    );
+  });
+
+  it("resolves and clamps what a config may hold", () => {
+    expect(resolveAreaZoom({ zoom: 6 })).toBe(6);
+    expect(resolveAreaZoom({ zoom: 99 })).toBe(MAX_AREA_ZOOM);
+    // Below 1 would zoom out past the whole plan; that is the zoom-out button.
+    expect(resolveAreaZoom({ zoom: 0.2 })).toBe(1);
+    // No zoom, and nonsense from a hand-edited config, both leave the fit be.
+    expect(resolveAreaZoom({})).toBeUndefined();
+    expect(resolveAreaZoom({ zoom: NaN })).toBeUndefined();
+    expect(resolveAreaZoom({ zoom: Infinity })).toBeUndefined();
+  });
+});
+
+describe("overlay size while zoomed (issue #222)", () => {
+  it("holds the overlay at its full-plan size by default, as it always has", () => {
+    expect(zoomedOverlayScale(4)).toBeCloseTo(0.25);
+    expect(zoomedOverlayScale(4, DEFAULT_ZOOMED_OVERLAY_SCALE)).toBeCloseTo(0.25);
+  });
+
+  it("multiplies that counter-scale, so badges can grow when zoomed in", () => {
+    expect(zoomedOverlayScale(4, 2)).toBeCloseTo(0.5); // twice full-plan size
+    expect(zoomedOverlayScale(4, 0.5)).toBeCloseTo(0.125); // half of it
+  });
+
+  it("does nothing at full plan — the setting is about the zoomed view", () => {
+    // Otherwise setting it would resize every plan the moment it was set.
+    expect(zoomedOverlayScale(1, 2)).toBe(1);
+    expect(zoomedOverlayScale(0.5, 2)).toBe(1);
+  });
+
+  it("ignores a value that would poison the custom property it lands in", () => {
+    // --fp-inv-zoom:NaN invalidates the property, and .item's transform is
+    // built from it — every badge would lose its centring, not just its size.
+    expect(zoomedOverlayScale(4, NaN)).toBeCloseTo(0.25);
+    expect(zoomedOverlayScale(4, 0)).toBeCloseTo(0.25);
+    expect(zoomedOverlayScale(4, -2)).toBeCloseTo(0.25);
+    expect(zoomedOverlayScale(NaN, 2)).toBe(1);
   });
 });
 
