@@ -541,6 +541,35 @@ describe("a nudge with nothing movable does nothing at all (review of #191)", ()
     ).toEqual([{ kind: "item", id: "loose" }]);
   });
 
+  it("drops a selection that outlived its element (review of #191)", () => {
+    // setConfig does not clear _selection, so a config pushed from elsewhere
+    // can leave the editor holding ids for elements that are gone. They must
+    // not count as movable, or the nudge guard passes and _commitFloor spends
+    // an undo step on a plan where nothing could move.
+    expect(movableSelection(floor, [{ kind: "wall", id: "gone" }])).toEqual([]);
+    expect(
+      movableSelection(floor, [
+        { kind: "wall", id: "gone" },
+        { kind: "wall", id: "pinned" },
+      ]),
+    ).toEqual([]);
+    // A live element alongside a stale one still moves.
+    expect(
+      movableSelection(floor, [
+        { kind: "item", id: "vanished" },
+        { kind: "item", id: "loose" },
+      ]),
+    ).toEqual([{ kind: "item", id: "loose" }]);
+  });
+
+  it("keeps stale and locked as different questions", () => {
+    // isLocked stays false for a stale id on purpose — calling it locked would
+    // make a group refuse to move because one member had been deleted. It is
+    // movableSelection that has to know the difference.
+    expect(isLocked(floor, { kind: "wall", id: "gone" })).toBe(false);
+    expect(movableSelection(floor, [{ kind: "wall", id: "gone" }])).toEqual([]);
+  });
+
   it("passes an ordinary selection through untouched", () => {
     const sel = [{ kind: "item", id: "loose" }] as const;
     expect(movableSelection(floor, sel)).toEqual([...sel]);

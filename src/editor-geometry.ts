@@ -428,27 +428,43 @@ export function elementsAtPoint(
 }
 
 /**
- * Whether a selection names a locked element (issue #191). Unknown ids are not
- * locked: an id that no longer resolves is stale selection state, and treating
- * it as pinned would quietly refuse to move the rest of a group with it.
+ * The element a selection names, or `undefined` when nothing answers to it.
+ *
+ * `undefined` is a real answer here, not a failure: a selection can outlive
+ * what it pointed at. `setConfig` does not clear `_selection`, so a config
+ * pushed from elsewhere — another tab, a YAML edit — can leave the editor
+ * holding ids for elements that no longer exist.
  */
-export function isLocked(f: Floor, sel: Sel): boolean {
+function findElement(f: Floor, sel: Sel): { id: string; locked?: boolean } | undefined {
   switch (sel.kind) {
     case "wall":
-      return !!f.walls.find((x) => x.id === sel.id)?.locked;
+      return f.walls.find((x) => x.id === sel.id);
     case "opening":
-      return !!f.openings.find((x) => x.id === sel.id)?.locked;
+      return f.openings.find((x) => x.id === sel.id);
     case "item":
-      return !!f.items.find((x) => x.id === sel.id)?.locked;
+      return f.items.find((x) => x.id === sel.id);
     case "text":
-      return !!f.texts.find((x) => x.id === sel.id)?.locked;
+      return f.texts.find((x) => x.id === sel.id);
     case "furniture":
-      return !!f.furniture.find((x) => x.id === sel.id)?.locked;
+      return f.furniture.find((x) => x.id === sel.id);
     case "tracker":
-      return !!(f.trackers ?? []).find((x) => x.id === sel.id)?.locked;
+      return (f.trackers ?? []).find((x) => x.id === sel.id);
     case "area":
-      return !!(f.areas ?? []).find((x) => x.id === sel.id)?.locked;
+      return (f.areas ?? []).find((x) => x.id === sel.id);
   }
+}
+
+/**
+ * Whether a selection names a locked element (issue #191). A stale id is not
+ * locked: treating a selection that outlived its element as pinned would
+ * quietly refuse to move the rest of a group with it.
+ *
+ * Note this is not the same question as {@link movableSelection}'s — a stale
+ * id is not locked *and* not movable, because there is nothing there to be
+ * either.
+ */
+export function isLocked(f: Floor, sel: Sel): boolean {
+  return !!findElement(f, sel)?.locked;
 }
 
 /**
@@ -462,7 +478,12 @@ export function isLocked(f: Floor, sel: Sel): boolean {
  * happened" have to be the same thing here.
  */
 export function movableSelection(f: Floor, sel: readonly Sel[]): Sel[] {
-  return sel.filter((s) => !isLocked(f, s));
+  return sel.filter((s) => {
+    const el = findElement(f, s);
+    // Pinned cannot move; missing has nothing *to* move. Both keep the editor
+    // from spending an undo step, which is the only thing this answer feeds.
+    return !!el && !el.locked;
+  });
 }
 
 /**
