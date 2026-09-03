@@ -407,6 +407,16 @@ Nothing about the rendered card reads this — it is an editing aid, and `locked
 the YAML changes nothing a viewer sees.
 
 
+<!-- Anchors for sections that moved into docs/. Invisible when rendered; they keep
+     links from older issues and discussions landing on this table. -->
+<a name="configuration-reference"></a><a name="more-readings-per-device"></a>
+<a name="follow-the-sun"></a><a name="sunlight"></a>
+<a name="skins"></a><a name="overlay-scale"></a><a name="compact-header"></a>
+<a name="rotation-that-follows-the-screen"></a><a name="styling-hooks-card-mod"></a>
+<a name="dead-spaces"></a><a name="doors-on-locks"></a><a name="actions-on-rooms"></a>
+<a name="stairs-that-change-floor"></a><a name="offline-devices"></a>
+<a name="advanced-hiding-logic"></a>
+
 ## Feature guides
 
 Everything the card does beyond placing elements, in four guides:
