@@ -27,6 +27,9 @@ import {
 import {
   DEFAULT_AREA_OPACITY,
   DEFAULT_AREA_LABEL_SIZE,
+  MAX_AREA_ZOOM,
+  MAX_AREA_ZOOM_FIT,
+  DEFAULT_ZOOMED_OVERLAY_SCALE,
   DEFAULT_GRID,
   DEFAULT_ITEM_SIZE,
   DEFAULT_RIPPLE_SIZE,
@@ -48,6 +51,7 @@ import {
   normalizePlanRotation,
   openingActionForGesture,
   openingMotion,
+  MIN_SASH_SPAN,
   openingHasTwoLeaves,
   sliderStyleHasTwoLeaves,
   pressEffectOf,
@@ -239,7 +243,13 @@ export function openingForm(o: Opening, featuresOf: (entityId: string) => number
         // Not "garage / shutter": an external shutter is the Shutter field
         // below, a layer over any opening, and naming it here read as the
         // place to set one up.
-        opt("roll", "Roll up (garage)")
+        opt("roll", "Roll up (garage)"),
+        // Windows only (issue #218). A bay or picture window is an ordinary
+        // thing to draw; a door that cannot open is a wall, and offering it
+        // here would only invite drawing one. A hand-written config may still
+        // set it on a door, and the card draws that honestly as a sealed
+        // panel — this is about what the editor suggests, not what it allows.
+        ...(o.type === "window" ? [opt("fixed", "Fixed (does not open)")] : [])
       ),
     },
     { name: "length", label: "Length", required: true, selector: { number: { min: 1, mode: "box" } } },
@@ -258,6 +268,27 @@ export function openingForm(o: Opening, featuresOf: (entityId: string) => number
       selector: door
         ? dropdown(opt("single", "Single (one leaf)"), opt("double", "Double (two leaves)"))
         : dropdown(opt("double", "Double (two leaves)"), opt("single", "Single sash")),
+    });
+  }
+  // How much of the frame actually opens (issue #218). Only a single leaf has
+  // a remainder to be fixed: a double already splits the opening between its
+  // two. Left at 1 it writes nothing, so this appears in no YAML that has not
+  // asked for it.
+  //
+  // Offered on doors as well as windows, unlike `fixed` above. A door leaf
+  // narrower than its frame is an ordinary sidelight door, not a degenerate
+  // case, and `renderOpening` already draws that remainder as a solid panel
+  // rather than glass — so the only thing that would be window-only here is
+  // the wording, which is why the wording is what varies.
+  if (motion === "swing" && openingSash(o) === "single") {
+    fields.push({
+      name: "sashSpan",
+      label: o.type === "door" ? "Leaf width" : "Sash width",
+      helper:
+        o.type === "door"
+          ? "Share of the opening that actually swings — the rest is a fixed panel"
+          : "Share of the opening that actually opens — the rest is fixed glass",
+      selector: { number: { min: MIN_SASH_SPAN, max: 1, step: 0.05, mode: "slider" } },
     });
   }
   // Glass, for a door. A window never needs asking, and the only thing that
@@ -586,11 +617,17 @@ export function openingForm(o: Opening, featuresOf: (entityId: string) => number
           if (!v) out.icon = undefined;
         }
         else if (k === "motion") {
-          const motion = v === "slide" || v === "roll" ? (v as "slide" | "roll") : undefined;
+          const motion =
+            v === "slide" || v === "roll" || v === "fixed"
+              ? (v as "slide" | "roll" | "fixed")
+              : undefined;
           out.motion = motion;
           // sliderStyle only applies while sliding — drop it when switching
           // away (issue #145).
           if (v !== "slide") out.sliderStyle = undefined;
+          // Nothing swings any more, so the sash's share of the frame has
+          // nothing left to describe (issue #218).
+          if (v !== "swing") out.sashSpan = undefined;
           // The second leaf's sensor goes only if the opening this *becomes*
           // has no second leaf. Asked of the result rather than of the motion,
           // because since issue #159 a hinged double has one too: a two-sensor
@@ -601,6 +638,10 @@ export function openingForm(o: Opening, featuresOf: (entityId: string) => number
             sliderStyle: v === "slide" ? o.sliderStyle : undefined,
           } as Opening))
             out.secondaryEntity = undefined;
+        } else if (k === "sashSpan") {
+          // A full-width sash is what every opening drew before this field,
+          // so it is the default and stays out of the YAML (issue #218).
+          out.sashSpan = typeof v === "number" && v < 1 ? v : undefined;
         } else if (k === "sash") {
           // The two types default the other way round — a window opens with
           // two sashes, a door with one leaf — so only the value that is *not*
@@ -610,6 +651,9 @@ export function openingForm(o: Opening, featuresOf: (entityId: string) => number
           // drive (issue #159).
           if (!openingHasTwoLeaves({ ...o, sash: v as "single" | "double" } as Opening))
             out.secondaryEntity = undefined;
+          // Two sashes already split the opening between them, so there is no
+          // leftover pane for `sashSpan` to describe (issue #218).
+          if (v === "double") out.sashSpan = undefined;
         } else if (k === "shutterStyle") {
           out.shutterStyle = v;
           // Only a hinged pair has a second panel — a roll curtain is one
@@ -1559,6 +1603,43 @@ export function areaForm(a: Area): FormSpec {
         label: "Fill opacity",
         selector: { number: { min: 0, max: 1, step: 0.05, mode: "slider" } },
       },
+      // How close tapping the room goes (issue #222). Only worth asking while
+      // a tap still zooms: an area with its own `tap_action` has replaced the
+      // zoom outright, and a number that does nothing is worse than no number.
+      //
+      // A toggle *and* a slider, rather than the slider alone resting at the
+      // fit's ceiling. That earlier shape made "fit" and an explicit 4 the
+      // same position, so a room whose fit is 1.15 — the ordinary case, and
+      // the one this feature exists for — could not be told to zoom to 4 at
+      // all. "Fit" is not a number on this scale; it is the absence of one,
+      // and it needs its own control to say so.
+      ...(a.tap_action
+        ? []
+        : [
+            {
+              name: "fitZoom",
+              label: "Fit the room to the card",
+              helper: "Off lets you set how close a tap goes",
+              selector: { boolean: {} },
+            },
+            ...(a.zoom === undefined
+              ? []
+              : [
+                  {
+                    name: "zoom",
+                    label: "Zoom level",
+                    helper: "How close a tap goes",
+                    selector: {
+                      number: {
+                        min: 1,
+                        max: MAX_AREA_ZOOM,
+                        step: 0.5,
+                        mode: "slider" as const,
+                      },
+                    },
+                  },
+                ]),
+          ]),
       // Optional entity that makes the room itself live (issue #6) — a presence
       // sensor that lights the room while it is occupied. Last, because most
       // areas are just outlines and never bind anything.
@@ -1615,12 +1696,30 @@ export function areaForm(a: Area): FormSpec {
       entity: a.entity ?? "",
       activeOpacity: a.activeOpacity ?? a.opacity ?? DEFAULT_AREA_OPACITY,
       highlight: a.highlight ?? "fill",
+      // "Fit" is the absence of a number, so it gets its own boolean; the
+      // slider only appears once that is off, and then always shows a real
+      // stored value.
+      fitZoom: a.zoom === undefined,
+      zoom: a.zoom ?? MAX_AREA_ZOOM_FIT,
       tap_action: a.tap_action,
       hold_action: a.hold_action,
       double_tap_action: a.double_tap_action,
     },
-    // "fill" is the default, so keep it out of the YAML.
-    toPatch: (p) => ("highlight" in p && p.highlight === "fill" ? { ...p, highlight: undefined } : p),
+    toPatch: (p) => {
+      let out = p;
+      // "fill" is the default, so keep it out of the YAML.
+      if ("highlight" in out && out.highlight === "fill") out = { ...out, highlight: undefined };
+      // The toggle is a form-only control: it says whether `zoom` is written
+      // at all, and must never reach the config itself (issue #222).
+      if ("fitZoom" in out) {
+        const { fitZoom, ...rest } = out;
+        // Turning the fit off has to leave a number behind for the slider that
+        // is about to appear — the fit's own ceiling is the natural opening
+        // bid, and unlike before it is now a real, re-selectable value.
+        out = { ...rest, zoom: fitZoom ? undefined : MAX_AREA_ZOOM_FIT };
+      }
+      return out;
+    },
   };
 }
 
@@ -1715,6 +1814,35 @@ export function projectPressForm(c: FloorplanCardConfig): FormSpec {
 }
 
 /**
+ * Project-level replay toggle. Keeps replay optional and explicit in config.
+ */
+export function projectReplayForm(c: FloorplanCardConfig): FormSpec {
+  const enabled = c.historyReplay?.enabled ?? false;
+  return {
+    fields: [
+      {
+        name: "historyReplayEnabled",
+        label: "Enable history replay",
+        helper: "Shows replay controls and loads mapped-entity history from Home Assistant",
+        selector: { boolean: {} },
+      },
+    ],
+    data: { historyReplayEnabled: enabled },
+    toPatch: (p) => {
+      if (!("historyReplayEnabled" in p)) return {};
+      if (!p.historyReplayEnabled) return { historyReplay: undefined };
+      return {
+        historyReplay: {
+          enabled: true,
+          lookbackSeconds: c.historyReplay?.lookbackSeconds,
+          defaultSpeed: c.historyReplay?.defaultSpeed,
+        },
+      };
+    },
+  };
+}
+
+/**
  * Built-in skins (issue #122). Its own one-field form so the editor can put it
  * at the top of the Project section, directly above the Background colour it
  * interacts with — the skin supplies the paper, `background` overrides it.
@@ -1773,6 +1901,13 @@ export function projectDisplayForm(c: FloorplanCardConfig): FormSpec {
         selector: { boolean: {} },
       },
       {
+        name: "zoomedOverlayScale",
+        label: "Zoomed badge size",
+        helper:
+          "Badges, labels and text while zoomed in to a room, as a multiple of their size at full plan. 1 keeps them the same",
+        selector: { number: { min: 0.5, max: 3, step: 0.1, mode: "slider" } },
+      },
+      {
         name: "offlineStyle",
         label: "Offline devices",
         helper: "How a device is drawn when its entity is unavailable or missing",
@@ -1787,6 +1922,7 @@ export function projectDisplayForm(c: FloorplanCardConfig): FormSpec {
       rotation: String(normalizePlanRotation(c.rotation)),
       overlayScale: normalizeOverlayScale(c.overlayScale),
       compactHeader: c.compactHeader ?? false,
+      zoomedOverlayScale: c.zoomedOverlayScale ?? DEFAULT_ZOOMED_OVERLAY_SCALE,
       offlineStyle: offlineStyleOf(c),
     },
     toPatch: (p) => {
@@ -1808,6 +1944,10 @@ export function projectDisplayForm(c: FloorplanCardConfig): FormSpec {
         out = { ...out, compactHeader: undefined };
       if ("offlineStyle" in out && out.offlineStyle === DEFAULT_OFFLINE_STYLE)
         out = { ...out, offlineStyle: undefined };
+      // Same again for the zoomed overlay: 1 means "no different while zoomed",
+      // which is what every plan did before this existed (issue #222).
+      if ("zoomedOverlayScale" in out && out.zoomedOverlayScale === DEFAULT_ZOOMED_OVERLAY_SCALE)
+        out = { ...out, zoomedOverlayScale: undefined };
       return out;
     },
   };
