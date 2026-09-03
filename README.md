@@ -7,8 +7,6 @@
 <a href="https://www.buymeacoffee.com/nicosandller" target="_blank">
   <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important; width: 217px !important;" >
 </a>
-<!--START_SECTION:buy-me-a-coffee-->
-<!--END_SECTION:buy-me-a-coffe-->
 --
 
 A Home Assistant Lovelace card for building an interactive floorplan — **with a visual
