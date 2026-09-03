@@ -7,7 +7,6 @@
 <a href="https://www.buymeacoffee.com/nicosandller" target="_blank">
   <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important; width: 217px !important;" >
 </a>
-
 --
 
 A Home Assistant Lovelace card for building an interactive floorplan — **with a visual
@@ -378,6 +377,8 @@ The editor writes this config for you; manual editing is optional.
 | `grid`       | number   | `20`               | Gap between grid lines, in canvas units — smaller means finer. |
 | `snap`       | number   | follows `grid`     | Snap step in canvas units, always absolute. Omit to follow the grid, `0` for free placement. The editor shows a custom step as a percentage of the grid. |
 | `rotation`   | number   | `0`                | Rotate the card `90`, `180` or `270`° — a landscape plan on a portrait wall tablet. Icons and labels stay upright; the editor always shows the plan as drawn. |
+| `rotationPortrait` | number | (same as `rotation`) | Rotation to use while the **screen** is portrait, overriding `rotation`. Unset means `rotation` applies whichever way the screen is. See [Rotation that follows the screen](#rotation-that-follows-the-screen). |
+| `rotationLandscape` | number | (same as `rotation`) | Rotation to use while the screen is landscape. The mirror of `rotationPortrait`; set either, or both. |
 | `showDeadSpaces` | boolean | `false` | Hatch every space the walls seal off that no door or window reaches, worked out from the walls and openings themselves. See [Dead spaces](#dead-spaces). |
 | `sunDimming` | boolean | `false` | Dim through dusk, brighten through dawn, from the HA instance's sun. See [Follow the sun](#follow-the-sun). |
 | `sunBrightnessMin` | number | `0.45` | Brightness once the sun is fully down, 0–1. |
@@ -1535,6 +1536,36 @@ and the first thing you do is position it.
 
 Nothing about the rendered card reads this — it is an editing aid, and `locked: true` in
 the YAML changes nothing a viewer sees.
+
+## Rotation that follows the screen
+
+A rectangular flat wants its long side across the screen, and which side that is changes
+with the device. One `rotation` cannot be right for both, so there are two more:
+
+```yaml
+type: custom:easy-floorplan-card
+rotation: 0            # the fallback, and what an unset override falls back to
+rotationPortrait: 270  # phones
+rotationLandscape: 0   # desktop, wall tablet
+```
+
+- Set **either** override, or both. An unset one means "same as `rotation`", which is what
+  every plan did before these existed — a config that sets neither is completely
+  unaffected.
+- `0` in an override is a real answer, not "unset". On a plan that is otherwise rotated,
+  `rotationLandscape: 0` says *don't* rotate on a desktop. Writing the key with **no
+  value** (`rotationPortrait:`) is unset, though — not 0°.
+- It follows the **screen's** orientation, not the card's own box. That is what "my
+  vertical devices" means, and it keeps a narrow card in a sidebar from rotating itself on
+  a landscape desktop. On any current browser it follows the device being turned live,
+  with no reload; on an older WebView without a subscribable `matchMedia` it is still
+  correct when the page loads and simply stops following turns after that.
+- Editing is unaffected. The editor always shows the plan as drawn, as it does for plain
+  `rotation`.
+
+In the editor: **Project → Display**, under *Rotate display*.
+
+Icons and labels stay upright at every angle, so a rotated plan is still readable.
 
 ## Styling hooks (card-mod)
 

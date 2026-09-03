@@ -4495,7 +4495,17 @@ export class FloorplanCardEditor extends LitElement {
           // How the card is framed on the dashboard, as opposed to what is
           // drawn inside it. Set once for a surface and rarely touched again.
           "Display",
-          this._renderForm(formSlice(display, ["rotation", "overlayScale", "compactHeader", "zoomedOverlayScale"]), patch)
+          this._renderForm(
+            formSlice(display, [
+              "rotation",
+              "rotationPortrait",
+              "rotationLandscape",
+              "overlayScale",
+              "compactHeader",
+              "zoomedOverlayScale",
+            ]),
+            patch
+          )
         )}
         ${this._renderGroup(
           // Light through the openings (issue #177) — where it comes from and

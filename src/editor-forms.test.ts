@@ -1044,6 +1044,49 @@ describe("wallForm / projectForm / floorImageForm", () => {
     expect((width.selector.number as { min: number }).min).toBe(1);
   });
 
+  it("rests both orientation overrides at \"same as above\" (issue #237)", () => {
+    const form = projectDisplayForm({ type: "t", width: 1000, height: 600 } as FloorplanCardConfig);
+    expect(form.data.rotationPortrait).toBe("");
+    expect(form.data.rotationLandscape).toBe("");
+    // Back to "same as above" clears the override.
+    expect(form.toPatch({ rotationPortrait: "" })).toEqual({ rotationPortrait: undefined });
+    expect(form.toPatch({ rotationPortrait: "270" })).toEqual({ rotationPortrait: 270 });
+    // 0 is kept, unlike `rotation` — on a rotated plan it is a real answer.
+    expect(form.toPatch({ rotationLandscape: "0" })).toEqual({ rotationLandscape: 0 });
+  });
+
+  it("reads an override written with no value as unset, not 0°", () => {
+    // `rotationPortrait:` in YAML parses to null. Shown as 0° the editor would
+    // not just display the wrong thing — saving this panel would write that 0
+    // back as a real override, turning a stray empty key into an instruction
+    // the plan never had. Same `== null` reasoning as resolvePlanRotation.
+    const form = projectDisplayForm({
+      type: "t",
+      width: 1000,
+      height: 600,
+      rotation: 270,
+      rotationPortrait: null,
+      rotationLandscape: null,
+    } as unknown as FloorplanCardConfig);
+    expect(form.data.rotationPortrait).toBe("");
+    expect(form.data.rotationLandscape).toBe("");
+    // The base angle is untouched by the stray key.
+    expect(form.data.rotation).toBe("270");
+  });
+
+  it("shows an override the config already has (issue #237)", () => {
+    const form = projectDisplayForm({
+      type: "t",
+      width: 1000,
+      height: 600,
+      rotation: 270,
+      rotationLandscape: 0,
+    } as FloorplanCardConfig);
+    expect(form.data.rotation).toBe("270");
+    expect(form.data.rotationLandscape).toBe("0");
+    expect(form.data.rotationPortrait).toBe("");
+  });
+
   it("offers the zoom controls only while a tap still zooms (issue #222)", () => {
     const area = { id: "a", points: [{ x: 0, y: 0 }] } as Area;
     expect(areaForm(area).fields.map((x) => x.name)).toContain("fitZoom");
@@ -1102,6 +1145,8 @@ describe("wallForm / projectForm / floorImageForm", () => {
     const form = projectDisplayForm({ type: "t", width: 1000, height: 600 } as FloorplanCardConfig);
     expect(form.fields.map((x) => x.name)).toEqual([
       "rotation",
+      "rotationPortrait",
+      "rotationLandscape",
       "overlayScale",
       "compactHeader",
       "zoomedOverlayScale",
@@ -1908,7 +1953,14 @@ describe("every field lands in exactly one panel group", () => {
     // offlineStyle as one form with one toPatch, but the panel renders the
     // first three under "Display" and the last under "Devices". Miss it in
     // both slices and the control silently disappears.
-    const DISPLAY = ["rotation", "overlayScale", "compactHeader", "zoomedOverlayScale"];
+    const DISPLAY = [
+      "rotation",
+      "rotationPortrait",
+      "rotationLandscape",
+      "overlayScale",
+      "compactHeader",
+      "zoomedOverlayScale",
+    ];
     const DEVICES = ["offlineStyle"];
     const cfg = { type: "t", width: 1000, height: 600 } as FloorplanCardConfig;
     check(projectDisplayForm(cfg).fields, [DISPLAY, DEVICES], "project display");

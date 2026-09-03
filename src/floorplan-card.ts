@@ -116,7 +116,8 @@ import {
   resolveItemIcon,
   resolveIconAnimation,
   itemIconSize,
-  normalizePlanRotation,
+  resolvePlanRotation,
+  subscribeOrientation,
   rotatedCanvasSize,
   rotatePlanPoint,
   planRotationTransform,
@@ -203,6 +204,35 @@ export class FloorplanCard extends LitElement {
     ]);
   }
 
+  /**
+   * Whether the screen is portrait, for the per-orientation rotations (issue
+   * #237). `undefined` until asked, and where there is nothing to ask —
+   * `resolvePlanRotation` reads that as "no orientation known" and stays on
+   * the plain `rotation` rather than guessing.
+   */
+  @state() private _portrait?: boolean;
+  /** Undoes the orientation subscription; set while connected (issue #237). */
+  private _unsubscribeOrientation?: () => void;
+  // Takes the narrowest thing it uses, so it fits both a `MediaQueryList` read
+  // directly on load and the `change` event that follows.
+  private readonly _onOrientation = (e: { matches: boolean }): void => {
+    this._portrait = e.matches;
+  };
+
+  public connectedCallback(): void {
+    super.connectedCallback();
+    // Subscribed unconditionally rather than only when an override is set:
+    // the config can change under a live card, and a query that is listened
+    // to but never read costs nothing.
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const q = window.matchMedia("(orientation: portrait)");
+    // Read first, subscribe second — deliberately in that order. The initial
+    // read is what gets the rotation right on load, and it works even on a
+    // WebView that offers no subscription at all, so the worst case is a plan
+    // that is correct until the device is turned rather than one that is wrong.
+    this._onOrientation(q);
+    this._unsubscribeOrientation = subscribeOrientation(q, this._onOrientation);
+  }
 
   public setConfig(config: FloorplanCardConfig): void {
     // Cheap shape assertions so malformed YAML surfaces as HA's error card
@@ -215,7 +245,7 @@ export class FloorplanCard extends LitElement {
       if (raw[key] != null && !Array.isArray(raw[key]))
         throw new Error(`Invalid configuration: "${key}" must be a list`);
     }
-    for (const key of ["width", "height", "grid", "rotation"]) {
+    for (const key of ["width", "height", "grid", "rotation", "rotationPortrait", "rotationLandscape"]) {
       if (raw[key] != null && typeof raw[key] !== "number")
         throw new Error(`Invalid configuration: "${key}" must be a number`);
     }
@@ -386,6 +416,12 @@ export class FloorplanCard extends LitElement {
 
   public disconnectedCallback(): void {
     this._replayController.stopReplayLoop();
+    // Orientation subscription for the per-screen rotations (issue #237).
+    // Folded in here rather than declared as a second `disconnectedCallback`:
+    // a class may only have one, and the later declaration would silently
+    // replace this one — taking the replay loop's cleanup with it.
+    this._unsubscribeOrientation?.();
+    this._unsubscribeOrientation = undefined;
     super.disconnectedCallback();
   }
 
@@ -843,7 +879,7 @@ export class FloorplanCard extends LitElement {
     // Whole-plan display rotation (issue #33): the SVG rotates via one group
     // transform below; the HTML overlay remaps per point in _renderItem /
     // _renderText. Both must use the same mapping (rotatePlanPoint).
-    const rot = normalizePlanRotation(c.rotation);
+    const rot = resolvePlanRotation(c, this._portrait);
     const dims = rotatedCanvasSize(cssNumber(c.width, DEFAULT_WIDTH), cssNumber(c.height, DEFAULT_HEIGHT), rot);
     const rotTransform = planRotationTransform(c.width, c.height, rot);
     // Overlay sizing mode. --fp-plan-w is the canvas width *as displayed*, so a
