@@ -181,10 +181,32 @@ export class ReplayControllerImpl implements ReplayController {
       && !this.state.manuallyDisabled;
   }
 
+  /**
+   * What the plan should draw from: history at `currentTime`, or the live
+   * states Home Assistant is pushing.
+   *
+   * `enabled` here is not the same question as "is replay switched on". Replay
+   * being on means the timeline exists and the head can be moved; it does not
+   * mean the plan must stop tracking reality. Parked at the end of the window
+   * and not playing, the head is pointing at the newest thing replay knows —
+   * and the newest thing *anything* knows is the live state, so that is what
+   * to draw.
+   *
+   * Without this, turning replay on quietly froze the plan at the instant it
+   * loaded. Every watched entity with a recorded state rendered from that
+   * moment forever, so a light toggled from the plan really did switch — the
+   * service call is live either way — while its badge and its cast pool stayed
+   * exactly as they had been, and lights that happened to be on at that instant
+   * stayed lit and casting no matter what you did to them. Entities with no
+   * history at that point fell through to live state, which is why only *some*
+   * of the plan looked stuck (issue #256).
+   */
   public getRenderState(): { enabled: boolean; currentTime: number; historyVisible: boolean } {
+    const playback = this.state.playbackController;
+    const atLiveEnd = !playback.playing && playback.currentTime >= playback.endTime;
     return {
-      enabled: this.state.enabled,
-      currentTime: this.state.playbackController.currentTime,
+      enabled: this.state.enabled && !atLiveEnd,
+      currentTime: playback.currentTime,
       historyVisible: this.state.historyVisible,
     };
   }

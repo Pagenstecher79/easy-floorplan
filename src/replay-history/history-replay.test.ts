@@ -704,6 +704,61 @@ describe("FloorplanCard replay", () => {
     expect(replaySpeed).toBe(1);
   });
 
+  describe("what the plan draws from while replay is on (issue #256)", () => {
+    // Replay being switched on means the timeline exists and the head can be
+    // moved. It does not mean the plan stops tracking reality: parked at the
+    // end of the window, the head points at the newest thing replay knows, and
+    // live state is newer still.
+    //
+    // Left rendering from history there, turning replay on quietly froze the
+    // plan at the instant it loaded — a light toggled from the plan really
+    // switched, while its badge and cast pool never moved.
+    const replayCard = () => {
+      const card = document.createElement("easy-floorplan-card") as FloorplanCard;
+      card.setConfig({
+        type: "easy-floorplan-card",
+        width: 1000,
+        height: 600,
+        historyReplay: { enabled: true, lookbackSeconds: 3600 },
+        floors: [{ id: "f1", name: "Floor 1", walls: [], openings: [], items: [], texts: [], furniture: [], trackers: [], areas: [] }],
+      } as never);
+      const controller = (card as any)._replayController;
+      controller.state.enabled = true;
+      controller.state.playbackController = new PlaybackController({ startTime: 1000, endTime: 2000 });
+      return { card, controller };
+    };
+
+    it("draws live state when the head is parked at the end of the window", () => {
+      const { controller } = replayCard();
+      controller.state.playbackController.seek(2000);
+      expect(controller.getRenderState().enabled).toBe(false);
+    });
+
+    it("draws history as soon as the head moves back", () => {
+      const { controller } = replayCard();
+      controller.state.playbackController.seek(1500);
+      const render = controller.getRenderState();
+      expect(render.enabled).toBe(true);
+      // …and still reports where the head is, so the plan draws that moment.
+      expect(render.currentTime).toBe(1500);
+    });
+
+    it("draws history while playing, even on the last frame", () => {
+      // Playing *to* the end is watching history arrive, not returning to now.
+      const { controller } = replayCard();
+      controller.state.playbackController.seek(2000);
+      controller.state.playbackController.play();
+      expect(controller.getRenderState().enabled).toBe(true);
+    });
+
+    it("stays live when replay is off, whatever the head says", () => {
+      const { controller } = replayCard();
+      controller.state.enabled = false;
+      controller.state.playbackController.seek(1500);
+      expect(controller.getRenderState().enabled).toBe(false);
+    });
+  });
+
   describe("the history cache survives an unrelated setConfig", () => {
     // HA calls setConfig on every keystroke in the config box. Clearing the
     // cache there meant one history query per character typed.
