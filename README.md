@@ -21,10 +21,10 @@ screen size.
 <img width="1161" height="596" alt="Screenshot 2026-08-06 at 4 26 22 PM" src="https://github.com/user-attachments/assets/69c6c865-4eeb-4878-914b-182b2c31b63b" />
 
 ## Features
-- **Visual editor** — draw walls, drop doors and windows that snap onto them, drag, nudge with arrow keys, multi-select, copy/paste, undo/redo, zoom.
+- ✏️ **Visual editor** — draw walls, drop doors and windows that snap onto them, drag, nudge with arrow keys, multi-select, copy/paste, undo/redo, zoom.
   - 🆕 **Lock in place** — pin anything you have finished positioning. A locked element still selects and edits but never moves, and it yields the click to whatever is unlocked on top of it, so reaching for a window stops grabbing the wall behind it. See [Locking elements in place](#locking-elements-in-place).
   - **Apply** — save the plan to the dashboard *without* closing the editor, so you can judge a change on the real card (in a second tab, or by collapsing the editor) instead of in the small preview beside it, then carry straight on. Needs Home Assistant 2025.3 or newer; on anything older the button says so and Save still works.
-- **Devices** — bind any entity to an icon: tap to toggle or open more-info, live state or attribute label, custom icon, size, rotation.
+- 🎛️ **Devices** — bind any entity to an icon: tap to toggle or open more-info, live state or attribute label, custom icon, size, rotation.
   - **Presence ripples** — presence and vibration sensors drawn as animated rings instead of a static icon.
   - **Cast light** — a light pools its own color and brightness onto the plan; overlapping pools mix, so a warm lamp and a cool one blend between them.
   - **Conditional text / icon / coloring** — threshold and state rules restyle an element from what its entity reads: the badge color, the label, and the glyph itself, so blinds swap between open and closed icons and a thermostat reddens as it heats. The same rules drive furniture and rooms.
@@ -32,30 +32,30 @@ screen size.
 <img width="195" height="278" alt="light blend" src="https://github.com/user-attachments/assets/23104587-687b-4c9a-83e8-e83c3d5eb6eb" />
 <img width="240" height="358" alt="conditionals" src="https://github.com/user-attachments/assets/11d359b6-de8c-483c-8763-105ddf7d915b" />
 
-- **Many readings, one device** — a sensor that reports temperature, humidity and pressure needs one badge, not three. Add entities one at a time; they show whether or not the device's own state does, so a smart plug can label itself `1.2 kW · 84 · 5 min ago` while the badge colour carries the on/off. The label can sit below, left or right of the badge.
-- **Animated doors & windows** — bind a contact `binary_sensor`, `cover` or `lock` and openings swing, slide or roll with their real state, partial positions included. A lock reads `unlocked` as open, so a door with no contact sensor still animates.
+- 📊 **Many readings, one device** — a sensor that reports temperature, humidity and pressure needs one badge, not three. Add entities one at a time; they show whether or not the device's own state does, so a smart plug can label itself `1.2 kW · 84 · 5 min ago` while the badge colour carries the on/off. The label can sit below, left or right of the badge.
+- 🚪 **Animated doors & windows** — bind a contact `binary_sensor`, `cover` or `lock` and openings swing, slide or roll with their real state, partial positions included. A lock reads `unlocked` as open, so a door with no contact sensor still animates.
   - **A sensor per leaf** — anything with two leaves takes a second contact and draws them independently: a casement window with one sash open and one shut, a double door ajar on one side, a pair of shutters with one folded back.
-- **Offline devices read as offline** — an entity that is unavailable, unknown, or gone from Home Assistant is dimmed (or crossed out), instead of looking exactly like a device someone switched off.
-- **Furniture** — 26 gray line-art diagrams (table, sofa, bed, stove, stairs, tv…), each bindable to an entity, in a searchable picker. Every one is a plain JSON file of numbers you can copy: draw your own in the editor's paste box, use it straight away, and open a PR when it's good. No SVG, so nothing you paste can run anything.
-- 🆕 **Live text labels** — bind a text to an entity and it shows the reading: a power figure in the corner, a temperature over a room. Type words in front of it, or leave them out for the number alone.
-- **Areas** — trace room polygons that color live from an entity, and link them to Home Assistant areas to scope entity pickers and bulk-add devices.
-- **Live position trackers** — map one or two distance sensors (mmWave / radar) onto a marker that moves across the plan in real time.
-- **Dead spaces** — hatch the spaces your walls seal off that no door or window reaches: a service shaft, the void behind a boxed-in stairwell. Nothing to draw — the regions come from the walls and openings themselves, so cutting a doorway into one stops it being dead the moment you place the door.
-- **Follow the sun** — dim the plan through dusk and brighten it through dawn, from your HA instance's sun elevation. Any light casting light holds the dark back around itself, out to its radius, so a night plan reads as a dark house with lit rooms glowing.
+- 📴 **Offline devices read as offline** — an entity that is unavailable, unknown, or gone from Home Assistant is dimmed (or crossed out), instead of looking exactly like a device someone switched off.
+- 🪑 **Furniture** — 26 gray line-art diagrams (table, sofa, bed, stove, stairs, tv…), each bindable to an entity, in a searchable picker. Every one is a plain JSON file of numbers you can copy: draw your own in the editor's paste box, use it straight away, and open a PR when it's good. No SVG, so nothing you paste can run anything.
+- 🔤 **Live text labels** 🆕 — bind a text to an entity and it shows the reading: a power figure in the corner, a temperature over a room. Type words in front of it, or leave them out for the number alone.
+- 🏠 **Areas** — trace room polygons that color live from an entity, and link them to Home Assistant areas to scope entity pickers and bulk-add devices.
+- 📍 **Live position trackers** — map one or two distance sensors (mmWave / radar) onto a marker that moves across the plan in real time.
+- 🧱 **Dead spaces** — hatch the spaces your walls seal off that no door or window reaches: a service shaft, the void behind a boxed-in stairwell. Nothing to draw — the regions come from the walls and openings themselves, so cutting a doorway into one stops it being dead the moment you place the door.
+- 🌗 **Follow the sun** — dim the plan through dusk and brighten it through dawn, from your HA instance's sun elevation. Any light casting light holds the dark back around itself, out to its radius, so a night plan reads as a dark house with lit rooms glowing.
  
 <img width="441" height="301" alt="day" src="https://github.com/user-attachments/assets/f3dbfc88-9d06-4f44-81dc-bf499cbd9bd3" />
 <img width="444" height="313" alt="night" src="https://github.com/user-attachments/assets/1590b710-d88f-4a34-986b-b08640a45f4c" />
 
 
-- **Multiple floors** — per-floor elements with a switcher in both the editor and the card. Give a staircase `goToFloor: up` and clicking it takes you there.
-- **Background image** — trace over a floor-plan scan, per floor, with adjustable opacity.
-- **Skins** — restyle the whole plan from one line of config: `default` follows your Home Assistant theme, `odnetnin` is chunky charcoal on cream, `pastel` is soft and low-contrast, `tron` is neon on near-black. Colors you set on an element yourself always win.
+- 🏢 **Multiple floors** — per-floor elements with a switcher in both the editor and the card. Give a staircase `goToFloor: up` and clicking it takes you there.
+- 🖼️ **Background image** — trace over a floor-plan scan, per floor, with adjustable opacity.
+- 🎨 **Skins** — restyle the whole plan from one line of config: `default` follows your Home Assistant theme, `odnetnin` is chunky charcoal on cream, `pastel` is soft and low-contrast, `tron` is neon on near-black. Colors you set on an element yourself always win.
   
 <img width="300" height="300" alt="default" src="https://github.com/user-attachments/assets/ce2d6545-10f4-4aa2-bbd7-0dcae08c27f5" />
 <img width="300" height="300" alt="odnetnin" src="https://github.com/user-attachments/assets/1d46f7a3-b894-4fcb-bdb9-a55270b8e4e4" />
 <img width="300" height="300" alt="tron" src="https://github.com/user-attachments/assets/de5b0825-3bff-4817-8a26-8f887bab8c48" />
 
-- **Auto-scaling** — SVG over a virtual coordinate space, so the plan fits any card size.
+- 📐 **Auto-scaling** — SVG over a virtual coordinate space, so the plan fits any card size.
 
 ## Installation
 
@@ -87,18 +87,17 @@ HACS adds the dashboard resource automatically.
 
 ## Documentation
 
-| | |
-| --- | --- |
-| [docs/configuration.md](https://github.com/nicosandller/easy-floorplan/blob/main/docs/configuration.md) | Every config key: per-element tables, defaults, a worked example |
-| [docs/lighting.md](https://github.com/nicosandller/easy-floorplan/blob/main/docs/lighting.md) | Follow the sun, and real sunlight through the windows |
-| [docs/appearance.md](https://github.com/nicosandller/easy-floorplan/blob/main/docs/appearance.md) | Skins, overlay scale, rotation, and card-mod styling hooks |
-| [docs/behavior.md](https://github.com/nicosandller/easy-floorplan/blob/main/docs/behavior.md) | What elements do once an entity is bound: hiding, locks, room actions |
-| [docker/README.md](https://github.com/nicosandller/easy-floorplan/blob/main/docker/README.md) | Running the card against a real Home Assistant in Docker |
-| [furniture/README.md](https://github.com/nicosandller/easy-floorplan/blob/main/furniture/README.md) | Authoring a furniture symbol, and contributing one |
-| [CONTRIBUTING.md](https://github.com/nicosandller/easy-floorplan/blob/main/CONTRIBUTING.md) | Build commands, and which test suite a change needs |
+| | | |
+| --- | --- | --- |
+| ⚙️ | **[Configuration](https://github.com/nicosandller/easy-floorplan/blob/main/docs/configuration.md)** | Every config key: per-element tables, defaults, a worked example |
+| 💡 | **[Lighting](https://github.com/nicosandller/easy-floorplan/blob/main/docs/lighting.md)** | Follow the sun, and real sunlight through the windows |
+| 🎨 | **[Appearance](https://github.com/nicosandller/easy-floorplan/blob/main/docs/appearance.md)** | Skins, overlay scale, rotation, and card-mod styling hooks |
+| ⚡ | **[Behaviour](https://github.com/nicosandller/easy-floorplan/blob/main/docs/behavior.md)** | What elements do once an entity is bound |
+| 🐳 | **[Local Home Assistant](https://github.com/nicosandller/easy-floorplan/blob/main/docker/README.md)** | Running the card against a real instance in Docker |
+| 🪑 | **[Furniture symbols](https://github.com/nicosandller/easy-floorplan/blob/main/furniture/README.md)** | Authoring a symbol, and contributing one |
+| 🤝 | **[Contributing](https://github.com/nicosandller/easy-floorplan/blob/main/CONTRIBUTING.md)** | Build commands, and which test suite a change needs |
 
-The rest of this file covers what you can put on a plan; each feature below links to its
-full guide.
+Below: what you can put on a plan, and links to the guide for each feature.
 
 ## Elements
 
@@ -123,7 +122,7 @@ then pick the entity in the **Element** section below the canvas.
   device has: `21.5 °C · 45% · 1013 hPa`. Each row picks an entity, an attribute, or both
   — leave the entity empty and it reads that attribute off this device, so one climate
   entity can show four of its own numbers. See
-  [More readings per device](README.md#more-readings-per-device).
+  [More readings per device](https://github.com/nicosandller/easy-floorplan/blob/main/docs/configuration.md#more-readings-per-device).
 - **Label position** — **Below** the badge (the default), or hung off its **left** or
   **right**. A reading under a badge grows in both directions and meets whatever sits
   beside it; hung off one side it grows one way only.
@@ -407,81 +406,16 @@ Nothing about the rendered card reads this — it is an editing aid, and `locked
 the YAML changes nothing a viewer sees.
 
 
-## Configuration reference
+## Feature guides
 
-Every key the card accepts — per-element tables, defaults and a full worked example —
-is in [docs/configuration.md](https://github.com/nicosandller/easy-floorplan/blob/main/docs/configuration.md).
+Everything the card does beyond placing elements, in four guides:
 
-## Lighting
-
-How the plan lights itself — from your own lights, and from the sun outside.
-Full guide: [docs/lighting.md](https://github.com/nicosandller/easy-floorplan/blob/main/docs/lighting.md).
-
-### Follow the sun
-
-Dim the plan through dusk and brighten it through dawn, from your instance's sun elevation — [full guide](https://github.com/nicosandller/easy-floorplan/blob/main/docs/lighting.md#follow-the-sun).
-
-### Sunlight
-
-Real sunlight through windows and doors, angled by the sun's true position — [full guide](https://github.com/nicosandller/easy-floorplan/blob/main/docs/lighting.md#sunlight).
-
-## Appearance
-
-How the plan presents itself: its palette, the size of what it draws, and the hooks to restyle it.
-Full guide: [docs/appearance.md](https://github.com/nicosandller/easy-floorplan/blob/main/docs/appearance.md).
-
-### Skins
-
-Four built-in looks for the whole plan, and the tokens to build your own — [full guide](https://github.com/nicosandller/easy-floorplan/blob/main/docs/appearance.md#skins).
-
-### Overlay scale
-
-How badges and labels size themselves against the plan, and when to fix them — [full guide](https://github.com/nicosandller/easy-floorplan/blob/main/docs/appearance.md#overlay-scale).
-
-### Compact header
-
-Reclaim the card's header row on a dense dashboard — [full guide](https://github.com/nicosandller/easy-floorplan/blob/main/docs/appearance.md#compact-header).
-
-### Rotation that follows the screen
-
-Turn the plan to suit a portrait wall tablet without redrawing it — [full guide](https://github.com/nicosandller/easy-floorplan/blob/main/docs/appearance.md#rotation-that-follows-the-screen).
-
-### Styling hooks (card-mod)
-
-Stable classes and `data-` attributes for card-mod and any other CSS — [full guide](https://github.com/nicosandller/easy-floorplan/blob/main/docs/appearance.md#styling-hooks-card-mod).
-
-## Behaviour from entities
-
-What elements *do* once a Home Assistant entity is bound to them.
-Full guide: [docs/behavior.md](https://github.com/nicosandller/easy-floorplan/blob/main/docs/behavior.md).
-
-### More readings per device
-
-One device, as many readings as it has — a sensor's humidity and pressure, a plug's power — [full guide](https://github.com/nicosandller/easy-floorplan/blob/main/docs/configuration.md#more-readings-per-device).
-
-### Dead spaces
-
-Hatch the sealed spaces your walls enclose that no door or window reaches — [full guide](https://github.com/nicosandller/easy-floorplan/blob/main/docs/behavior.md#dead-spaces).
-
-### Doors on locks
-
-Drive a door's leaf from a lock instead of a contact sensor — [full guide](https://github.com/nicosandller/easy-floorplan/blob/main/docs/behavior.md#doors-on-locks).
-
-### Actions on rooms
-
-Give a room polygon its own tap, hold and double-tap actions — [full guide](https://github.com/nicosandller/easy-floorplan/blob/main/docs/behavior.md#actions-on-rooms).
-
-### Stairs that change floor
-
-Click a staircase to move between floors — [full guide](https://github.com/nicosandller/easy-floorplan/blob/main/docs/behavior.md#stairs-that-change-floor).
-
-### Offline devices
-
-How an unavailable or unknown entity reads on the plan — [full guide](https://github.com/nicosandller/easy-floorplan/blob/main/docs/behavior.md#offline-devices).
-
-### Advanced Hiding Logic
-
-Hide a device, its badge or its label from a second entity's state — [full guide](https://github.com/nicosandller/easy-floorplan/blob/main/docs/behavior.md#advanced-hiding-logic).
+| | | |
+| --- | --- | --- |
+| ⚙️ | **[Configuration](https://github.com/nicosandller/easy-floorplan/blob/main/docs/configuration.md)** | Every key it accepts — per-element tables, defaults, a worked example |
+| 💡 | **[Lighting](https://github.com/nicosandller/easy-floorplan/blob/main/docs/lighting.md)** | Sun dimming through dusk and dawn · real sunlight through the windows |
+| 🎨 | **[Appearance](https://github.com/nicosandller/easy-floorplan/blob/main/docs/appearance.md)** | Skins · overlay scale · compact header · rotation · card-mod hooks |
+| ⚡ | **[Behaviour](https://github.com/nicosandller/easy-floorplan/blob/main/docs/behavior.md)** | Dead spaces · doors on locks · room actions · stairs between floors · offline devices · hiding logic |
 
 ## Development
 

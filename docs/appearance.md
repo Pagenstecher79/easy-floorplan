@@ -30,7 +30,7 @@ so the canvas reads as the plan, and a **background image** still covers the ski
 
 ### Rolling your own
 
-A skin is a set of CSS custom properties, so [card-mod](../README.md#styling-hooks-card-mod) can set
+A skin is a set of CSS custom properties, so [card-mod](appearance.md#styling-hooks-card-mod) can set
 the same ones for the same result — including on top of a skin, to change one thing about
 it rather than replace it. A skinned card also carries its id as `data-skin` on the card
 element, so a rule can apply to one skin only:
@@ -139,7 +139,7 @@ so a cluster neatly spaced on a wide card collides on a narrow one: the badges s
 while the gaps between them shrink. Under `plan` the whole cluster shrinks as one and the
 spacing you set is the spacing you keep. (That is the answer to "my grouped icons drift
 apart when the card resizes" — though the better answer is often to have no cluster at
-all: put the readings on **one** device with [`readings`](../README.md#more-readings-per-device) and
+all: put the readings on **one** device with [`readings`](configuration.md#more-readings-per-device) and
 there is no relative position left to preserve.)
 
 > **"It looks right on my computer and wrong on my phone."** Same plan, same config —
@@ -269,7 +269,7 @@ Ids come from the editor (`area_a5r5nwl`, `furn_3j66s50`, …) and are stable ac
 The stage carries the plan-wide modes as classes too — `press-scale` … `press-none`, and
 `offline-dim` / `offline-strike` / `offline-none` — so a rule can be scoped to one of
 them. The offline mark's own colour is `--fp-offline-mark` (see
-[Offline devices](../README.md#offline-devices)).
+[Offline devices](behavior.md#offline-devices)).
 
 A dead space has no `data-id`, and cannot: it's derived from the walls rather than placed,
 so there's nothing for an id to be stable against. Style them as a group —
@@ -306,7 +306,7 @@ override what the card draws.
 
 Note that colouring a room from a sensor needs no CSS — areas take `entity`, `stateColor`,
 `activeColor` and `activeOpacity` natively (see [Area](configuration.md#area)) — and restyling the whole
-plan doesn't either: the `--fp-skin-*` tokens in [Skins](../README.md#skins) are the supported way to
+plan doesn't either: the `--fp-skin-*` tokens in [Skins](appearance.md#skins) are the supported way to
 build a look of your own. These hooks are a *styling* surface, not an API: class names are
 stable, but the SVG inside an element may change between releases, so target the element
 rather than its internals.

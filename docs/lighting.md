@@ -119,7 +119,7 @@ half-following a sun it had already declined to follow.
 **`sunBearing`** pins the light. Leave it out and the plan follows `sun.sun`'s azimuth, so
 the light swings through the day — the better picture, but one that moves while you are
 laying a plan out, and one with no sensible answer at night. It stacks with
-[Follow the sun](../README.md#follow-the-sun), which dims the whole plan after dark and has the last
+[Follow the sun](lighting.md#follow-the-sun), which dims the whole plan after dark and has the last
 word: there is nothing to let in at night.
 
 Skins can restyle both through `--fp-skin-sunlight` and `--fp-skin-sunshade`.
