@@ -89,6 +89,7 @@ HACS adds the dashboard resource automatically.
 
 | | | |
 | --- | --- | --- |
+| 🎥 | **[Video walkthrough](https://youtu.be/M-b7xK-4Bpw)** | Setting the card up end to end — a community guide, in Italian 🇮🇹 |
 | ⚙️ | **[Configuration](https://github.com/nicosandller/easy-floorplan/blob/main/docs/configuration.md)** | Every config key: per-element tables, defaults, a worked example |
 | 💡 | **[Lighting](https://github.com/nicosandller/easy-floorplan/blob/main/docs/lighting.md)** | Follow the sun, and real sunlight through the windows |
 | 🎨 | **[Appearance](https://github.com/nicosandller/easy-floorplan/blob/main/docs/appearance.md)** | Skins, overlay scale, rotation, and card-mod styling hooks |
