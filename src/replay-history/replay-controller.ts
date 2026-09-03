@@ -54,7 +54,6 @@ export type ReplayController = {
   isHistoryVisible: () => boolean;
   isReplayReady: () => boolean;
   isReplayEnabled: () => boolean;
-  shouldAutoStart: () => boolean;
   getRenderState: () => { enabled: boolean; currentTime: number; historyVisible: boolean };
   clearConfigColorCache: () => void;
   pausePlayback: () => void;
@@ -63,7 +62,6 @@ export type ReplayController = {
   updateWindow: (start: number, end: number) => void;
   resetForFloorChange: () => void;
   zoomWindow: (direction: -1 | 1) => void;
-  ensureStarted: () => void;
   toggleReplay: () => Promise<void>;
   toggleHistoryVisible: (visible: boolean) => void;
   toggleSpeedPanel: () => void;
@@ -173,14 +171,6 @@ export class ReplayControllerImpl implements ReplayController {
     return this.state.enabled;
   }
 
-  public shouldAutoStart(): boolean {
-    return !!this._card.getHass()
-      && !!this._card.getConfig()?.historyReplay?.enabled
-      && !this.state.loadRequested
-      && !this.state.enabled
-      && !this.state.manuallyDisabled;
-  }
-
   /**
    * What the plan should draw from: history at `currentTime`, or the live
    * states Home Assistant is pushing.
@@ -275,13 +265,6 @@ export class ReplayControllerImpl implements ReplayController {
     const nextStart = Math.max(0, anchor - halfSpan);
     const nextEnd = nextStart + nextSpan;
     this.updateWindow(nextStart, nextEnd);
-  }
-
-  public ensureStarted(): void {
-    if (!this._card.getHass() || !this._card.getConfig()?.historyReplay?.enabled || this.state.loadRequested || this.state.enabled || this.state.manuallyDisabled) {
-      return;
-    }
-    void this.startReplay();
   }
 
   public async toggleReplay(): Promise<void> {
