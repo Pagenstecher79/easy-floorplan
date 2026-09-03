@@ -24,6 +24,7 @@ screen size.
 
 ## Features
 - **Visual editor** — draw walls, drop doors and windows that snap onto them, drag, nudge with arrow keys, multi-select, copy/paste, undo/redo, zoom.
+  - (${\color{red}NEW!}$) **Lock in place** — pin anything you have finished positioning. A locked element still selects and edits but never moves, and it yields the click to whatever is unlocked on top of it, so reaching for a window stops grabbing the wall behind it. See [Locking elements in place](#locking-elements-in-place).
   - (${\color{red}NEW!}$) **Apply** — save the plan to the dashboard *without* closing the editor, so you can judge a change on the real card (in a second tab, or by collapsing the editor) instead of in the small preview beside it, then carry straight on. Needs Home Assistant 2025.3 or newer; on anything older the button says so and Save still works.
 - **Devices** — bind any entity to an icon: tap to toggle or open more-info, live state or attribute label, custom icon, size, rotation.
   - **Presence ripples** — presence and vibration sensors drawn as animated rings instead of a static icon.
@@ -1507,6 +1508,36 @@ Off by default, because the title then sits over the drawing — the right trade
 there is room for it, which is the author's call. Set it in the editor under
 **Project → Compact header**.
 
+## Locking elements in place
+
+Select anything and press the padlock in the **Element** header. It applies to every kind
+of element — walls, doors and windows, devices, text, furniture, trackers and rooms — and
+to a whole multi-selection at once.
+
+A locked element:
+
+- **still selects, still edits, still deletes.** Everything works except *moving* it.
+- **never moves.** Not by dragging, not by its endpoint or vertex handles (which stop
+  being drawn, so nothing on it pretends to be draggable), and not by arrow keys — alone
+  or as part of a group. Drag a group by an unlocked member and the locked ones stay put
+  while the rest travel.
+- **yields the click.** Anything unlocked under the pointer is picked first, whatever kind
+  it is. Lock the wall and a window drawn on it selects on the first click instead of
+  after cycling past the wall.
+
+Both halves are the point. Yielding alone would still let a stray drag move the wall;
+pinning alone would still cost a click to get past it. Together they answer the thing
+that prompted this: *"every time I want to move a window, I end up moving a wall
+instead"*.
+
+Locked elements stay selectable on purpose — a design tool hides them behind a layers
+panel to unlock from, and this editor has none, so an element you could not click would
+be one you could never unlock. Pasted copies are never locked: a duplicate lands offset
+and the first thing you do is position it.
+
+Nothing about the rendered card reads this — it is an editing aid, and `locked: true` in
+the YAML changes nothing a viewer sees.
+
 ## Rotation that follows the screen
 
 A rectangular flat wants its long side across the screen, and which side that is changes
@@ -1610,39 +1641,27 @@ npm install
 npm run build      # bundles to dist/easy-floorplan-card.js
 npm run watch      # rebuild on change
 npm run typecheck  # tsc --noEmit
-npm test           # vitest (pure-logic tests; no browser)
+npm test           # vitest in node (jsdom where a test file asks for it)
+npm run test:browser  # editor gesture tests, in headless Chromium (see CONTRIBUTING.md)
 ```
 
 Releases are built and attached automatically by GitHub Actions when a GitHub release
 is published.
 
-### What the suite does not cover
+### Two suites
 
-The tests run in node against the pure modules — geometry, config migration, rendering
-decisions, the frame coalescer with an injected scheduler. That covers most of the
-codebase, and it runs in about a second.
+`npm test` runs in node against the pure modules — geometry, config migration, rendering
+decisions, the frame coalescer with an injected scheduler — and takes a couple of seconds.
+A file that needs a document opts into jsdom per file.
 
-It does **not** cover the editor's gesture wiring in [`src/editor.ts`](src/editor.ts):
-the pointerdown/move/up listeners, pointer capture, what gets queued for the next frame,
-and what happens to an in-flight drag on teardown. Those are verified by reading and by
-hand, so a green suite says nothing about them (issue
-[#233](https://github.com/nicosandller/easy-floorplan/issues/233)).
-
-**Changing anything on a drag path therefore needs manual verification in a real
-browser** — [`npm run ha`](#local-home-assistant) is the way — and the check has to
-include a moving viewport, because that is where these bugs live. Drag an element while
-the canvas scrolls under it: positions are mapped through the SVG's live
-`getScreenCTM()`, so anything deferred by a frame resolves against a matrix that may have
-moved since. A 150px wheel scroll mid-drag is enough to turn an 8-unit move into a
-288-unit one.
-
-A DOM shim is not a shortcut past this. Both candidates were measured against these
-exact needs: jsdom has no `getScreenCTM` at all, and happy-dom has one that always
-returns the identity matrix with a canvas that can never scroll — so a regression test
-for the bug above would run, pass, and prove nothing. Real coverage here means a real
-browser (`@vitest/browser` with the Playwright provider, as a second vitest project);
-that has been prototyped successfully but is not wired up, and the CI weight is the open
-question. Until it is, this section is the honest version.
+The editor's gesture wiring in [`src/editor.ts`](src/editor.ts) — the pointer listeners,
+pointer capture, what gets queued for the next frame, and what happens to an in-flight
+drag on teardown — is tested separately, in real Chromium, by `npm run test:browser`.
+Positions there are mapped through the SVG's live `getScreenCTM()`, so a move deferred by
+a frame resolves against a matrix that may have moved since; a DOM shim cannot show that
+(jsdom has no `getScreenCTM`, happy-dom's is always the identity), which is why it is a
+browser and not a shim. Which changes need that suite, and how to run it, is in
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Local Home Assistant
 
