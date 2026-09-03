@@ -752,7 +752,7 @@ export class FloorplanCard extends LitElement {
       </div>`;
     } else if (showIcon) {
       visual = html`<span style="${hiddenStyle}">
-        ${this._renderBadge(item, scale)}
+        ${this._renderBadge(item, scale, renderHass)}
       </span>`;
     }
 
