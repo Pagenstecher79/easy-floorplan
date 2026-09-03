@@ -133,6 +133,8 @@ import {
   attachedCorners,
   elementsAtPoint,
   cyclePick,
+  isLocked,
+  movableSelection,
   elementsInRect,
   layoutPointsInPolygon,
   nearestAreaSnapPoint,
@@ -1123,13 +1125,27 @@ export class FloorplanCardEditor extends LitElement {
   private _nudge(dx: number, dy: number): void {
     if (!this._selection.length) return;
     const f = this._floor();
-    const wIds = this._idsOfKind("wall");
-    const oIds = this._idsOfKind("opening");
-    const iIds = this._idsOfKind("item");
-    const tIds = this._idsOfKind("text");
-    const fIds = this._idsOfKind("furniture");
-    const trIds = this._idsOfKind("tracker");
-    const aIds = this._idsOfKind("area");
+    // Every selected element is pinned, so there is nothing to move. Return
+    // before committing: `_commitFloor` pushes a history entry unconditionally
+    // and `.map()` below hands it freshly allocated arrays, so an arrow key on
+    // a locked selection would otherwise spend an undo step on nothing — and
+    // wipe the redo stack while doing it (issue #191).
+    if (!movableSelection(f, this._selection).length) return;
+    // Pinned elements sit out the nudge as they sit out a drag (issue #191).
+    // Filtered per kind rather than from the selection, because _idsOfKind
+    // also feeds copy and delete, which a lock deliberately does not block.
+    const movable = (kind: SelKind) => {
+      const ids = this._idsOfKind(kind);
+      for (const id of ids) if (isLocked(f, { kind, id })) ids.delete(id);
+      return ids;
+    };
+    const wIds = movable("wall");
+    const oIds = movable("opening");
+    const iIds = movable("item");
+    const tIds = movable("text");
+    const fIds = movable("furniture");
+    const trIds = movable("tracker");
+    const aIds = movable("area");
     this._commitFloor({
       walls: f.walls.map((w) =>
         wIds.has(w.id) ? { ...w, x1: w.x1 + dx, y1: w.y1 + dy, x2: w.x2 + dx, y2: w.y2 + dy } : w
@@ -1414,6 +1430,15 @@ export class FloorplanCardEditor extends LitElement {
     const pick = explicitHandle ? sel : this._resolvePick(ev, sel);
     if (explicitHandle) this._selectOne(pick);
     else this._selectForPointer(ev, pick);
+    // A locked element selects but never drags (issue #191). Refused here
+    // rather than inside _applyDrag so it covers the handle branches too —
+    // a wall endpoint and an area vertex are written straight to the floor
+    // and never consult the drag snapshot that pins everything else.
+    // The selection above stands; nothing else happens. No `_drag`, no
+    // captured pointer and no `_gesturePointer`, so pointermove has nothing
+    // to apply — and `ev.stopPropagation()` at the top already kept the
+    // canvas marquee out of it.
+    if (isLocked(this._floor(), pick)) return;
     this._drag = {
       primary: pick,
       start: this._toVirtual(ev, false),
@@ -1436,6 +1461,12 @@ export class FloorplanCardEditor extends LitElement {
     const f = this._floor();
     const m = new Map<string, OrigPos>();
     for (const s of this._selection) {
+      // What is not snapshotted does not move. That is the whole mechanism
+      // for a pinned member of a group drag (issue #191): the delta is still
+      // taken from the primary, and _applyDelta only writes the elements this
+      // map names — so dragging a group by an unlocked handle leaves the
+      // locked ones exactly where they were.
+      if (isLocked(f, s)) continue;
       if (s.kind === "wall") {
         const w = f.walls.find((x) => x.id === s.id);
         if (w) m.set(`wall:${w.id}`, { kind: "wall", x1: w.x1, y1: w.y1, x2: w.x2, y2: w.y2 });
@@ -1770,8 +1801,14 @@ export class FloorplanCardEditor extends LitElement {
     // Fall back to the grid when snap is explicitly off (`0`) to avoid overlap.
     const off = this._resolvedSnap || this.grid;
     const f = this._floor();
+    // A pasted copy is never pinned (issue #191). It lands offset from the
+    // original and the first thing anyone does with it is put it somewhere —
+    // inheriting the lock would hand back a copy that cannot be moved into
+    // place, which reads as the paste being broken rather than as a lock.
+    const loose = { locked: undefined };
     const newWalls: Wall[] = cb.walls.map((w) => ({
       ...w,
+      ...loose,
       id: uid("wall"),
       x1: w.x1 + off,
       y1: w.y1 + off,
@@ -1780,36 +1817,42 @@ export class FloorplanCardEditor extends LitElement {
     }));
     const newOpenings: Opening[] = cb.openings.map((o) => ({
       ...o,
+      ...loose,
       id: uid(o.type),
       x: o.x + off,
       y: o.y + off,
     }));
     const newItems: FloorItem[] = cb.items.map((it) => ({
       ...it,
+      ...loose,
       id: uid("item"),
       x: it.x + off,
       y: it.y + off,
     }));
     const newTexts: FloorText[] = cb.texts.map((t) => ({
       ...t,
+      ...loose,
       id: uid("text"),
       x: t.x + off,
       y: t.y + off,
     }));
     const newFurn: Furniture[] = cb.furniture.map((fu) => ({
       ...fu,
+      ...loose,
       id: uid("furn"),
       x: fu.x + off,
       y: fu.y + off,
     }));
     const newTrackers: Tracker[] = (cb.trackers ?? []).map((tr) => ({
       ...tr,
+      ...loose,
       id: uid("tracker"),
       x: tr.x + off,
       y: tr.y + off,
     }));
     const newAreas: Area[] = (cb.areas ?? []).map((a) => ({
       ...a,
+      ...loose,
       id: uid("area"),
       points: a.points.map((p) => ({ x: p.x + off, y: p.y + off })),
     }));
@@ -1837,6 +1880,37 @@ export class FloorplanCardEditor extends LitElement {
   private _duplicate(): void {
     this._copy();
     this._paste();
+  }
+
+  /**
+   * Pin (or release) every selected element (issue #191). One history entry
+   * for the whole selection, since it is one press.
+   *
+   * `undefined` rather than `false` when releasing: unlocked is the default,
+   * so a released element goes back to saying nothing about it rather than
+   * leaving `locked: false` behind in the YAML.
+   */
+  private _setLocked(locked: boolean): void {
+    if (!this._selection.length) return;
+    const f = this._floor();
+    // `undefined` rather than `false` when releasing: unlocked is the default,
+    // so a released element goes back to saying nothing about it rather than
+    // leaving `locked: false` behind in the YAML.
+    const flag = locked || undefined;
+    const set = <T extends { id: string; locked?: boolean }>(xs: readonly T[], kind: SelKind) => {
+      const ids = this._idsOfKind(kind);
+      return xs.map((x) => (ids.has(x.id) ? { ...x, locked: flag } : x));
+    };
+    // One _commitFloor for the whole selection — one press, one undo step.
+    this._commitFloor({
+      walls: set(f.walls, "wall"),
+      openings: set(f.openings, "opening"),
+      items: set(f.items, "item"),
+      texts: set(f.texts, "text"),
+      furniture: set(f.furniture, "furniture"),
+      trackers: set(f.trackers ?? [], "tracker"),
+      areas: set(f.areas ?? [], "area"),
+    });
   }
 
   // ---- floors -------------------------------------------------------------
@@ -3879,6 +3953,30 @@ export class FloorplanCardEditor extends LitElement {
           <ha-icon icon=${icon}></ha-icon>
           <span class="edit-title" title=${summary}>${summary}</span>
           <span class="head-spacer"></span>
+          ${(() => {
+            // Lock in place (issue #191). Beside duplicate and delete because
+            // it is the same kind of thing — an action on the selection, not a
+            // property of it — and because this header is the one place that
+            // says what a selected element can have done to it.
+            //
+            // With several selected the button reports the whole group: it
+            // reads "locked" only when every one of them is, so the first
+            // press pins whatever is still loose rather than unpinning the
+            // ones already done.
+            const f = this._floor();
+            const all = this._selection.every((x) => isLocked(f, x));
+            return html`<button
+              class=${all ? "on" : ""}
+              aria-label=${all ? "Unlock" : "Lock in place"}
+              aria-pressed=${all ? "true" : "false"}
+              title=${all
+                ? "Unlock — let it be dragged again"
+                : "Lock in place — it can still be selected and edited, just not moved"}
+              @click=${() => this._setLocked(!all)}
+            >
+              <ha-icon icon=${all ? "mdi:lock" : "mdi:lock-open-variant-outline"}></ha-icon>
+            </button>`;
+          })()}
           <button aria-label="Duplicate" title="Duplicate (Ctrl/Cmd+D)" @click=${this._duplicate}>
             <ha-icon icon="mdi:content-duplicate"></ha-icon>
           </button>
@@ -3898,6 +3996,11 @@ export class FloorplanCardEditor extends LitElement {
 
   private _renderWall(w: Wall): TemplateResult {
     const selected = this._isSel("wall", w.id);
+    // A pinned wall still *looks* selected — it is — but shows no endpoint
+    // handles (issue #191): they would be drawn as grab targets that refuse
+    // to grab, and their absence is the clearest signal on the canvas that
+    // the wall is pinned.
+    const handles = selected && !w.locked;
     return svg`
       <g>
         <line x1=${w.x1} y1=${w.y1} x2=${w.x2} y2=${w.y2}
@@ -3908,7 +4011,7 @@ export class FloorplanCardEditor extends LitElement {
               mask=${`url(#${this._wallMaskId})`}
               style=${wallStrokeStyle(w.thickness)} stroke-linecap="round" /></g>
         ${
-          selected
+          handles
             ? svg`
                 <circle cx=${w.x1} cy=${w.y1} r="9" class="handle"
                         @pointerdown=${(e: PointerEvent) =>
@@ -4039,7 +4142,10 @@ export class FloorplanCardEditor extends LitElement {
                  @pointerdown=${(e: PointerEvent) => this._startDrag(e, { kind: "area", id: a.id })} />
         ${selected ? svg`<polygon points=${pts} class="area-outline" />` : nothing}
         ${
-          selected
+          // Outline yes, vertex handles no, for a pinned room — same reasoning
+          // as the wall's endpoints (issue #191): still visibly selected, with
+          // nothing on it that pretends to be draggable.
+          selected && !a.locked
             ? a.points.map(
                 (p, i) => svg`
                   <circle cx=${p.x} cy=${p.y} r="7" class="handle"
@@ -6290,6 +6396,13 @@ export class FloorplanCardEditor extends LitElement {
     .edit-head button ha-icon {
       --mdc-icon-size: 16px;
       color: inherit;
+    }
+    /* Lock in place (issue #191). The pressed state has to read at a glance:
+       it is the only one of these buttons that describes a state rather than
+       performing an action, and "why won't this drag" is the question it
+       exists to answer. */
+    .edit-head button.on {
+      color: var(--primary-color);
     }
     /* Collapsible Project section header. */
     .section-toggle {
