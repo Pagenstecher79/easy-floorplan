@@ -1074,7 +1074,7 @@ export function itemEffectsForm(it: FloorItem, deviceClass?: string): FormSpec |
       });
       fields.push({
         name: "rippleWidth",
-        label: "Ripple Width",
+        label: "Ripple width",
         selector: {
           number: { min: 0, max: 360, step: 1, mode: "slider", unit_of_measurement: "°" },
         },
