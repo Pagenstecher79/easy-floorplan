@@ -59,6 +59,8 @@ import {
   FURNITURE_GLOW_TRANSMISSION,
   getFloors,
   trackerAxisFraction,
+  DEFAULT_RIPPLE_DIRECTION,
+  DEFAULT_RIPPLE_WIDTH,
 } from "./types";
 import { cssColor, cssColorOr, cssNumber, cssIdent, cssEntityId, cssIcon } from "./css-safe";
 import { hasAction } from "./actions";
@@ -4846,10 +4848,13 @@ export function renderRipple(
   scale: OverlayScale = "fixed"
 ): TemplateResult {
   const size = overlayLength(cssNumber(sizePx, DEFAULT_RIPPLE_SIZE), scale);
+  const direction_ = cssNumber(direction, DEFAULT_RIPPLE_DIRECTION);
+  const width_ = cssNumber(width, DEFAULT_RIPPLE_WIDTH);
+
   return html`
     <div
       class="ripple ${active ? "active" : ""}"
-      style="width:${size};height:${size};--fp-ripple-color:${cssColorOr(color, SKIN_ACCENT)};--fp-ripple-direction:${direction};--fp-ripple-width:${width}"
+      style="width:${size};height:${size};--fp-ripple-color:${cssColorOr(color, SKIN_ACCENT)};--fp-ripple-direction:${direction_};--fp-ripple-width:${width_}"
     >
       <span class="dot"></span>
       ${Array.from(
