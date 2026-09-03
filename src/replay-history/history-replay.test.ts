@@ -743,14 +743,19 @@ describe("FloorplanCard replay", () => {
 
     it("shows the window it would load rather than 1970", () => {
       // The unstarted panel used to be unreachable, so its placeholder window
-      // (0..MAX) had never been seen. It reads the clock now.
+      // (0..MAX) had never been seen. It reads the clock now — which is why
+      // this checks the window's shape rather than an exact pair of instants:
+      // the default window is computed from `Date.now()` on each call, so two
+      // calls a millisecond apart do not agree, and a test that demanded they
+      // did would fail on a slow machine and pass on a fast one.
       const { controller } = configured();
       const props = createReplayPanelProps(controller);
-      const { start, end } = controller.getDefaultWindow();
-      expect(props.startTime).toBe(start);
-      expect(props.endTime).toBe(end);
-      expect(props.currentTime).toBe(end);
+      const now = Date.now() / 1000;
+      expect(props.endTime).toBeCloseTo(now, 0);
+      expect(props.endTime - props.startTime).toBeCloseTo(3600, 0);
+      expect(props.currentTime).toBe(props.endTime);
       expect(props.startInputValue).not.toContain("1970");
+      expect(props.endInputValue).not.toContain("1970");
     });
 
     it("hands the window back to the panel once replay is running", async () => {
@@ -759,6 +764,55 @@ describe("FloorplanCard replay", () => {
       const props = createReplayPanelProps(controller);
       expect(props.startTime).toBe(controller.state.playbackController.startTime);
       expect(props.endTime).toBe(controller.state.playbackController.endTime);
+    });
+  });
+
+  describe("the way back to now", () => {
+    const controllerAt = (opts: { enabled: boolean; playing?: boolean; at?: number }) => {
+      const card = document.createElement("easy-floorplan-card") as FloorplanCard;
+      card.setConfig({
+        type: "easy-floorplan-card", width: 1000, height: 600,
+        historyReplay: { enabled: true, lookbackSeconds: 3600 },
+        floors: [{ id: "f1", name: "Floor 1", walls: [], openings: [], items: [], texts: [], furniture: [], trackers: [], areas: [] }],
+      } as never);
+      const controller = (card as any)._replayController;
+      controller.state.enabled = opts.enabled;
+      controller.state.startTime = 1000;
+      controller.state.endTime = 2000;
+      controller.state.playbackController = new PlaybackController({ startTime: 1000, endTime: 2000 });
+      controller.state.playbackController.seek(opts.at ?? 2000);
+      if (opts.playing) controller.state.playbackController.play();
+      return controller;
+    };
+
+    it("offers no way back while the plan is already showing now", () => {
+      // Not in replay at all…
+      expect(createReplayPanelProps(controllerAt({ enabled: false })).viewingHistory).toBe(false);
+      // …and in replay but parked at the end, which draws live anyway.
+      expect(createReplayPanelProps(controllerAt({ enabled: true })).viewingHistory).toBe(false);
+    });
+
+    it("offers it once the plan is showing the past", () => {
+      expect(createReplayPanelProps(controllerAt({ enabled: true, at: 1500 })).viewingHistory).toBe(true);
+      // Playing at the last frame is still watching the recording, not now.
+      expect(
+        createReplayPanelProps(controllerAt({ enabled: true, playing: true })).viewingHistory,
+      ).toBe(true);
+    });
+
+    it("returns the head to the end, and stops playing, without tearing replay down", () => {
+      const controller = controllerAt({ enabled: true, playing: true, at: 1200 });
+      controller.state.historyEvents = [{ entityId: "light.a", timestamp: 1300, state: "on" }];
+      controller.returnToLive();
+      expect(controller.state.playbackController.currentTime).toBe(2000);
+      expect(controller.state.playbackController.playing).toBe(false);
+      // The plan is live now…
+      expect(controller.getRenderState().enabled).toBe(false);
+      // …and going back to a moment costs no second history fetch.
+      expect(controller.state.enabled).toBe(true);
+      expect(controller.state.historyEvents).toHaveLength(1);
+      // …so the button that got you here is gone.
+      expect(createReplayPanelProps(controller).viewingHistory).toBe(false);
     });
   });
 
