@@ -661,9 +661,9 @@ export interface FloorItem {
   rippleColor?: string;
   /** Max ripple ring diameter in pixels. Default 80. */
   rippleSize?: number;
-  /** Direction of the center of the ripple if its width is not 360° in degrees. Default 0° (top) */
+  /** Direction of the center of the ripple if its width is not 360° in degrees. Default 0° (top). */
   rippleDirection?: number;
-  /** Width of the ripple in degrees. Default 360° (all around) */
+  /** Width of the ripple in degrees. Default 360° (all around). */
   rippleWidth?: number;
   /**
    * Cast a pool of light onto the plan from this device's position (issue #6).
