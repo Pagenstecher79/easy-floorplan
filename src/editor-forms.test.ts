@@ -1055,6 +1055,25 @@ describe("wallForm / projectForm / floorImageForm", () => {
     expect(form.toPatch({ rotationLandscape: "0" })).toEqual({ rotationLandscape: 0 });
   });
 
+  it("reads an override written with no value as unset, not 0°", () => {
+    // `rotationPortrait:` in YAML parses to null. Shown as 0° the editor would
+    // not just display the wrong thing — saving this panel would write that 0
+    // back as a real override, turning a stray empty key into an instruction
+    // the plan never had. Same `== null` reasoning as resolvePlanRotation.
+    const form = projectDisplayForm({
+      type: "t",
+      width: 1000,
+      height: 600,
+      rotation: 270,
+      rotationPortrait: null,
+      rotationLandscape: null,
+    } as unknown as FloorplanCardConfig);
+    expect(form.data.rotationPortrait).toBe("");
+    expect(form.data.rotationLandscape).toBe("");
+    // The base angle is untouched by the stray key.
+    expect(form.data.rotation).toBe("270");
+  });
+
   it("shows an override the config already has (issue #237)", () => {
     const form = projectDisplayForm({
       type: "t",

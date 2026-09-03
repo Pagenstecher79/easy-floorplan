@@ -1949,10 +1949,15 @@ export function projectDisplayForm(c: FloorplanCardConfig): FormSpec {
     data: {
       rotation: String(normalizePlanRotation(c.rotation)),
       // "" is "same as above" — the absence of an override, not an angle.
+      // `== null` for the same reason resolvePlanRotation uses it: a key
+      // written with no value (`rotationPortrait:`) parses to `null`, and
+      // reading that as an angle would show 0° here — then write it into the
+      // YAML as a real override the moment this panel is saved, turning a
+      // stray empty key into an instruction the plan never had.
       rotationPortrait:
-        c.rotationPortrait === undefined ? "" : String(normalizePlanRotation(c.rotationPortrait)),
+        c.rotationPortrait == null ? "" : String(normalizePlanRotation(c.rotationPortrait)),
       rotationLandscape:
-        c.rotationLandscape === undefined ? "" : String(normalizePlanRotation(c.rotationLandscape)),
+        c.rotationLandscape == null ? "" : String(normalizePlanRotation(c.rotationLandscape)),
       overlayScale: normalizeOverlayScale(c.overlayScale),
       compactHeader: c.compactHeader ?? false,
       zoomedOverlayScale: c.zoomedOverlayScale ?? DEFAULT_ZOOMED_OVERLAY_SCALE,
