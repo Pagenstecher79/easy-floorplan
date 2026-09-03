@@ -269,11 +269,15 @@ export class FloorplanCard extends LitElement {
       this._lastReplayCacheKey = replayKey;
       this._replayController.historyService().clearCache();
     }
+    // A plan that has switched replay off entirely stops any playback still
+    // running. A plan that *offers* replay does not start it: `enabled` means
+    // the control is there, not that the card hands the plan over to it. It
+    // used to start on load, which quietly turned a live plan into a snapshot
+    // of the moment it loaded — a light toggled from the plan really switched
+    // while its badge and cast pool stayed put (issue #256).
     if (!this._replayController.state.configured) {
       this._replayController.pausePlayback();
       this._replayController.stopReplayLoop();
-    } else if (this.hass) {
-      this._replayController.ensureStarted();
     }
     // Restore the floor this plan was last viewed on (issue #81). Only when
     // this instance has no floor of its own yet — a live floor switch always
@@ -317,12 +321,6 @@ export class FloorplanCard extends LitElement {
     super.updated(changed);
     if (changed.has("hass") || changed.has("_activeFloorId")) {
       this._syncHistoryServiceContext();
-    }
-    if (
-      (changed.has("hass") || changed.has("_activeFloorId"))
-      && this._replayController.shouldAutoStart()
-    ) {
-      this._replayController.ensureStarted();
     }
   }
 

@@ -4,6 +4,7 @@ import { PlaybackController } from "./playback-controller";
 import { HistoryService, type HistoryEventInput } from "./history-service";
 import { HistoryStateProvider, LiveStateProvider } from "./state-provider";
 import { HistoryTimeline } from "./history-timeline";
+import { createReplayPanelProps } from "./replay-panel";
 import { FloorplanCard } from "../floorplan-card";
 import type { HomeAssistant, HassEntity } from "../types";
 import {
@@ -704,6 +705,118 @@ describe("FloorplanCard replay", () => {
     expect(replaySpeed).toBe(1);
   });
 
+  describe("enabled means the control is offered, not taken (issue #256)", () => {
+    const replayConfig = {
+      type: "easy-floorplan-card",
+      width: 1000,
+      height: 600,
+      historyReplay: { enabled: true, lookbackSeconds: 3600 },
+      floors: [{ id: "f1", name: "Floor 1", walls: [], openings: [], texts: [], furniture: [], trackers: [], areas: [],
+        items: [{ id: "a", entity: "light.kitchen", x: 10, y: 10, kind: "light" }] }],
+    };
+    const hass = {
+      states: { "light.kitchen": { entity_id: "light.kitchen", state: "on", attributes: {} } },
+      entities: {}, callApi: vi.fn(async () => []), callService: vi.fn(),
+      formatEntityState: (st: HassEntity) => st.state,
+    } as unknown as HomeAssistant;
+
+    const configured = () => {
+      const card = document.createElement("easy-floorplan-card") as FloorplanCard;
+      document.body.appendChild(card);
+      card.hass = hass;
+      card.setConfig(replayConfig as never);
+      return { card, controller: (card as any)._replayController };
+    };
+
+    it("does not switch replay on by itself", () => {
+      const { controller } = configured();
+      expect(controller.state.enabled).toBe(false);
+      // …so the plan is drawing live state, which is the whole point.
+      expect(controller.getRenderState().enabled).toBe(false);
+    });
+
+    it("still offers the panel, so there is something to switch on with", async () => {
+      const { card } = configured();
+      await card.updateComplete;
+      expect(card.shadowRoot?.querySelector("easy-floorplan-replay-panel")).toBeTruthy();
+    });
+
+    it("shows the window it would load rather than 1970", () => {
+      // The unstarted panel used to be unreachable, so its placeholder window
+      // (0..MAX) had never been seen. It reads the clock now.
+      const { controller } = configured();
+      const props = createReplayPanelProps(controller);
+      const { start, end } = controller.getDefaultWindow();
+      expect(props.startTime).toBe(start);
+      expect(props.endTime).toBe(end);
+      expect(props.currentTime).toBe(end);
+      expect(props.startInputValue).not.toContain("1970");
+    });
+
+    it("hands the window back to the panel once replay is running", async () => {
+      const { controller } = configured();
+      await controller.startReplay();
+      const props = createReplayPanelProps(controller);
+      expect(props.startTime).toBe(controller.state.playbackController.startTime);
+      expect(props.endTime).toBe(controller.state.playbackController.endTime);
+    });
+  });
+
+  describe("what the plan draws from while replay is on (issue #256)", () => {
+    // Replay being switched on means the timeline exists and the head can be
+    // moved. It does not mean the plan stops tracking reality: parked at the
+    // end of the window, the head points at the newest thing replay knows, and
+    // live state is newer still.
+    //
+    // Left rendering from history there, turning replay on quietly froze the
+    // plan at the instant it loaded — a light toggled from the plan really
+    // switched, while its badge and cast pool never moved.
+    const replayCard = () => {
+      const card = document.createElement("easy-floorplan-card") as FloorplanCard;
+      card.setConfig({
+        type: "easy-floorplan-card",
+        width: 1000,
+        height: 600,
+        historyReplay: { enabled: true, lookbackSeconds: 3600 },
+        floors: [{ id: "f1", name: "Floor 1", walls: [], openings: [], items: [], texts: [], furniture: [], trackers: [], areas: [] }],
+      } as never);
+      const controller = (card as any)._replayController;
+      controller.state.enabled = true;
+      controller.state.playbackController = new PlaybackController({ startTime: 1000, endTime: 2000 });
+      return { card, controller };
+    };
+
+    it("draws live state when the head is parked at the end of the window", () => {
+      const { controller } = replayCard();
+      controller.state.playbackController.seek(2000);
+      expect(controller.getRenderState().enabled).toBe(false);
+    });
+
+    it("draws history as soon as the head moves back", () => {
+      const { controller } = replayCard();
+      controller.state.playbackController.seek(1500);
+      const render = controller.getRenderState();
+      expect(render.enabled).toBe(true);
+      // …and still reports where the head is, so the plan draws that moment.
+      expect(render.currentTime).toBe(1500);
+    });
+
+    it("draws history while playing, even on the last frame", () => {
+      // Playing *to* the end is watching history arrive, not returning to now.
+      const { controller } = replayCard();
+      controller.state.playbackController.seek(2000);
+      controller.state.playbackController.play();
+      expect(controller.getRenderState().enabled).toBe(true);
+    });
+
+    it("stays live when replay is off, whatever the head says", () => {
+      const { controller } = replayCard();
+      controller.state.enabled = false;
+      controller.state.playbackController.seek(1500);
+      expect(controller.getRenderState().enabled).toBe(false);
+    });
+  });
+
   describe("the history cache survives an unrelated setConfig", () => {
     // HA calls setConfig on every keystroke in the config box. Clearing the
     // cache there meant one history query per character typed.
@@ -1037,7 +1150,7 @@ describe("FloorplanCard replay", () => {
     expect(events.some((event: { entityId: string; oldState: string; newState: string }) => event.entityId === "binary_sensor.front_door" && event.oldState === "off" && event.newState === "on")).toBe(true);
   });
 
-  it("starts loading history automatically when replay is enabled", async () => {
+  it("loads history when replay is switched on, not merely offered (issue #256)", async () => {
     const card = document.createElement("easy-floorplan-card") as FloorplanCard;
     const now = new Date();
     const recent = new Date(now.getTime() - 10 * 60 * 1000).toISOString();
@@ -1095,8 +1208,16 @@ describe("FloorplanCard replay", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
+    // Configuring replay offers the control; it does not take the plan over,
+    // so nothing has been fetched yet and the plan is still drawing live.
+    expect(callApi).not.toHaveBeenCalled();
+
     const showButton = getReplayPanelShadowRoot(card)?.querySelector(".replay-show-toggle") as HTMLButtonElement | null;
     showButton?.click();
+    await card.updateComplete;
+
+    // Switching it on is what loads the history behind the timeline.
+    await (card as any)._replayController.startReplay();
     await card.updateComplete;
 
     expect(callApi).toHaveBeenCalled();
@@ -1430,6 +1551,10 @@ describe("FloorplanCard replay", () => {
         ],
       }],
     });
+
+    // Replay is offered, not started (issue #256), so ask for it — the point
+    // of this test is *which* entities the request covers, not when it fires.
+    await (card as any)._replayController.startReplay();
 
     await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));

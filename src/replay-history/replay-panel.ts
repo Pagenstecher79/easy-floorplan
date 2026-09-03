@@ -56,6 +56,7 @@ export interface ReplayPanelHost {
     playbackController: { startTime: number; endTime: number; currentTime: number; speed: number; playing: boolean };
   };
   formatReplayTime: (timestamp: number) => string;
+  getDefaultWindow: () => { start: number; end: number };
   handleRangeChange: (kind: "start" | "end", ev: Event) => void;
   zoomWindow: (direction: -1 | 1) => void;
   toggleReplay: () => Promise<void>;
@@ -75,13 +76,26 @@ export interface ReplayPanelHost {
 export function createReplayPanelProps(host: ReplayPanelHost): ReplayPanelRenderProps {
   const playback = host.state.playbackController;
   const state = host.state;
-  const currentTimeLabel = host.formatReplayTime(playback.currentTime);
+  // Before replay has ever been started there is no window and no head: the
+  // controller holds a placeholder spanning 0..MAX, whose timestamps format as
+  // 1970. That state used to be unreachable, because enabling the feature
+  // started replay outright; now that it means *offering* the control, it is
+  // the first thing anyone sees. So the panel presents the window it would
+  // load — the same default `startReplay` falls back to — and reads the clock
+  // for the head, since not having started is another way of saying "now".
+  const started = state.enabled || state.startTime > 0;
+  const fallback = started ? undefined : host.getDefaultWindow();
+  const windowStart = fallback ? fallback.start : state.startTime;
+  const windowEnd = fallback ? fallback.end : state.endTime;
+  const currentTimeLabel = host.formatReplayTime(
+    fallback ? fallback.end : playback.currentTime,
+  );
 
   return {
     events: state.historyEvents,
-    startTime: playback.startTime,
-    endTime: playback.endTime,
-    currentTime: playback.currentTime,
+    startTime: fallback ? fallback.start : playback.startTime,
+    endTime: fallback ? fallback.end : playback.endTime,
+    currentTime: fallback ? fallback.end : playback.currentTime,
     visible: state.historyVisible,
     enabled: state.enabled,
     ready: state.ready,
@@ -94,8 +108,8 @@ export function createReplayPanelProps(host: ReplayPanelHost): ReplayPanelRender
     panelId: state.panelId,
     replaySpeed: playback.speed,
     currentTimeLabel,
-    startInputValue: formatReplayInputValue(state.startTime),
-    endInputValue: formatReplayInputValue(state.endTime),
+    startInputValue: formatReplayInputValue(windowStart),
+    endInputValue: formatReplayInputValue(windowEnd),
     onToggleVisible: (visible: boolean) => host.toggleHistoryVisible(visible),
     onRangeChange: (kind: "start" | "end", value: string) => {
       host.handleRangeChange(kind, { target: { value } } as unknown as Event);
