@@ -98,7 +98,7 @@ which is a `body` at `0.08` with a dashed outline.
 3. When it looks right, drop it here as `<id>.json` and open a pull request.
 
 Check it at its default size *and* stretched: a glyph can be right by the numbers and wrong
-on screen. `npm run ha` (see the [main README](../README.md#local-home-assistant)) gets you
+on screen. `npm run ha` (see [`docker/README.md`](../docker/README.md)) gets you
 an editor to drop it into and resize.
 
 ## What gets merged
