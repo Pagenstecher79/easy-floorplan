@@ -1189,6 +1189,30 @@ describe("overlay scaling", () => {
     expect(flattenMarkup(renderRipple(true, "#fff", 80, 0, 360, 3, "fixed"))).toContain("width:80px");
   });
 
+  it("passes --fp-ripple-width and --fp-ripple-direction through to rendering", () => {
+    expect(flattenMarkup(renderRipple(true, "#fff", 80, 0, 180, 3, "plan"))).toContain(
+      "--fp-ripple-width:180"
+    );
+    expect(flattenMarkup(renderRipple(true, "#fff", 80, 0, 180, 3, "plan"))).toContain(
+      "--fp-ripple-direction:0"
+    );
+
+    expect(flattenMarkup(renderRipple(true, "#fff", 80, 90, 180, 3, "plan"))).toContain(
+      "--fp-ripple-width:180"
+    );
+    expect(flattenMarkup(renderRipple(true, "#fff", 80, 90, 180, 3, "plan"))).toContain(
+      "--fp-ripple-direction:90"
+    );
+
+    expect(flattenMarkup(renderRipple(true, "#fff", 80, 400, 400, 3, "plan"))).toContain(
+      "--fp-ripple-width:360"
+    );
+    expect(flattenMarkup(renderRipple(true, "#fff", 80, 400, 400, 3, "plan"))).toContain(
+      "--fp-ripple-direction:360"
+    );
+  });
+
+
   it("clamps the area name size to the same range item labels use", () => {
     expect(areaLabelSize(undefined)).toBe(14);
     expect(areaLabelSize(20)).toBe(20);
