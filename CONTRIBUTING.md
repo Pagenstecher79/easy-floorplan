@@ -1,8 +1,22 @@
 # Contributing
 
-Build, type-check, and the everyday commands are in the README's
-[Development](README.md#development) section. This file covers the one thing
-that is easy to get wrong: which test suite a change needs.
+## Everyday commands
+
+```bash
+npm install
+npm run build         # bundles to dist/easy-floorplan-card.js
+npm run watch         # rebuild on change
+npm run typecheck     # tsc --noEmit
+npm test              # node suite (jsdom where a test file asks for it)
+npm run test:browser  # editor gesture tests, in headless Chromium
+npm run ha            # a real Home Assistant in Docker — see docker/README.md
+```
+
+Releases are built and attached automatically by GitHub Actions when a GitHub
+release is published.
+
+The rest of this file covers the one thing that is easy to get wrong: which test
+suite a change needs.
 
 ## Two test suites
 
