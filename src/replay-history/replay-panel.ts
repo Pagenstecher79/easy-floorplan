@@ -27,9 +27,6 @@ export interface ReplayPanelRenderProps {
   onToggleVisible: (visible: boolean) => void;
   onRangeChange: (kind: "start" | "end", value: string) => void;
   onZoom: (direction: -1 | 1) => void;
-  onReturnLive: () => void;
-  /** Whether the plan is showing a past moment rather than the present. */
-  viewingHistory: boolean;
   onJump: (delta: number) => void;
   onStep: (direction: -1 | 1) => void;
   onPlayToggle: () => void;
@@ -61,7 +58,6 @@ export interface ReplayPanelHost {
   getDefaultWindow: () => { start: number; end: number };
   handleRangeChange: (kind: "start" | "end", ev: Event) => void;
   zoomWindow: (direction: -1 | 1) => void;
-  returnToLive: () => void;
   jumpReplay: (delta: number) => void;
   stepReplay: (direction: -1 | 1) => void;
   pauseReplay: () => void;
@@ -100,11 +96,6 @@ export function createReplayPanelProps(host: ReplayPanelHost): ReplayPanelRender
     currentTime: fallback ? fallback.end : playback.currentTime,
     visible: state.historyVisible,
     enabled: state.enabled,
-    // Showing the past, which is the only time there is anything to return
-    // from: replay running, and the head either moving or somewhere behind the
-    // end of the window. Parked at the end it is already drawing live.
-    viewingHistory:
-      state.enabled && (playback.playing || playback.currentTime < playback.endTime),
     ready: state.ready,
     playing: playback.playing,
     timelineExpanded: state.timelineExpanded,
@@ -122,7 +113,6 @@ export function createReplayPanelProps(host: ReplayPanelHost): ReplayPanelRender
       host.handleRangeChange(kind, { target: { value } } as unknown as Event);
     },
     onZoom: (direction: -1 | 1) => host.zoomWindow(direction),
-    onReturnLive: () => host.returnToLive(),
     onJump: (delta: number) => host.jumpReplay(delta),
     onStep: (direction: -1 | 1) => host.stepReplay(direction),
     onPlayToggle: () => (playback.playing ? host.pauseReplay() : host.playReplay()),
@@ -144,7 +134,6 @@ export function renderReplayPanel(props: ReplayPanelRenderProps): TemplateResult
       .currentTime=${props.currentTime}
       .visible=${props.visible}
       .enabled=${props.enabled}
-      .viewingHistory=${props.viewingHistory}
       .ready=${props.ready}
       .playing=${props.playing}
       .timelineExpanded=${props.timelineExpanded}
@@ -164,7 +153,6 @@ export function renderReplayPanel(props: ReplayPanelRenderProps): TemplateResult
         props.onRangeChange(kind, ev.detail.value);
       }}
       @zoom=${(ev: CustomEvent<{ direction: -1 | 1 }>) => props.onZoom(ev.detail?.direction ?? 1)}
-      @return-live=${() => props.onReturnLive()}
       @jump=${(ev: CustomEvent<{ delta: number }>) => props.onJump(ev.detail?.delta ?? 0)}
       @step=${(ev: CustomEvent<{ direction: -1 | 1 }>) => props.onStep(ev.detail?.direction ?? 1)}
       @play-toggle=${() => props.onPlayToggle()}
@@ -243,22 +231,22 @@ export class ReplayPanel extends LitElement {
       gap: 8px;
       flex-wrap: wrap;
     }
-    .replay-chip {
-      display: inline-flex;
-      align-items: center;
-      padding: 2px 8px;
-      border-radius: 999px;
-      background: var(--card-background-color, #fff);
-      color: var(--primary-text-color);
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
+    /*
+     * The moment being drawn, painted as its own thing rather than set in a
+     * line of grey text. This is the one fact the panel exists to report --
+     * with the panel open the plan is always showing the past, so "where in
+     * time am I" is the only question left -- and a plain timestamp beside a
+     * row of controls does not read as an answer to it. Matches the clock
+     * riding the timeline playhead, which wears the same accent.
+     */
     .replay-time {
       font-size: 12px;
       font-variant-numeric: tabular-nums;
-      color: var(--primary-text-color);
+      padding: 3px 9px;
+      border-radius: 999px;
+      background: var(--fp-skin-accent, var(--primary-color, #03a9f4));
+      color: var(--fp-skin-accent-ink, var(--text-primary-color, #fff));
+      font-weight: 600;
     }
     .replay-status {
       font-size: 12px;
@@ -400,21 +388,6 @@ export class ReplayPanel extends LitElement {
       min-width: 0;
       align-self: flex-start;
     }
-    /* The way back to now. Only drawn while the plan is showing the past, so
-       it is never a button that undoes nothing -- see viewingHistory. */
-    .replay-live-button {
-      font-weight: 600;
-    }
-    /* Only the live state wears the accent. Loading is not live, and painting
-       it as though it were is what this pair of classes exists to prevent --
-       see _chipState, which is the one place the state is decided. */
-    .replay-chip.is-live {
-      background: var(--fp-skin-accent, var(--primary-color, #03a9f4));
-      color: var(--text-primary-color, #fff);
-    }
-    .replay-chip.is-loading {
-      opacity: 0.75;
-    }
     .replay-run-button {
       min-width: 82px;
       font-weight: 600;
@@ -542,7 +515,6 @@ export class ReplayPanel extends LitElement {
   @property({ type: Number }) public currentTime = 0;
   @property({ type: Boolean }) public visible = false;
   @property({ type: Boolean }) public enabled = false;
-  @property({ type: Boolean }) public viewingHistory = false;
   @property({ type: Boolean }) public ready = false;
   @property({ type: Boolean }) public playing = false;
   @property({ type: Boolean }) public timelineExpanded = false;
@@ -613,21 +585,6 @@ export class ReplayPanel extends LitElement {
     current.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
 
-  /**
-   * The status chip: one state, said twice — in words and in colour.
-   *
-   * Worked out in one place because it was worked out in two, and they
-   * disagreed. The label had three branches and the class had two, so a panel
-   * that was still fetching read "Loading history…" painted in the live
-   * accent: the one state where the two halves could contradict each other,
-   * and the one nobody looks at twice.
-   */
-  private _chipState(): { label: string; className: string } {
-    if (this.enabled && !this.ready) return { label: "Loading history…", className: "is-loading" };
-    if (this.viewingHistory) return { label: "Replay", className: "is-replay" };
-    return { label: "Live", className: "is-live" };
-  }
-
   protected render(): TemplateResult {
     if (!this.visible) {
       return html`
@@ -646,20 +603,22 @@ export class ReplayPanel extends LitElement {
     }
 
     const currentEvent = this._getCurrentEvent();
-    const chip = this._chipState();
     return html`
       <div class="replay-panel" id=${this.panelId}>
+        <!-- Closing the panel is how you get back to now, so the button says
+             so. It used to say "hide", next to a separate Live button that did
+             the returning; one control does both because they were never two
+             things (see ReplayController.toggleHistoryVisible). -->
         <button
           class="replay-hide-toggle"
-          aria-label="Hide replay panel"
+          aria-label="Close replay and return to live"
           aria-controls=${this.panelId}
           @click=${() => this._dispatch("toggle-visible", { visible: false })}
         >
-          hide
+          live
         </button>
         <div class="replay-header">
           <div class="replay-meta">
-            <span class="replay-chip ${chip.className}">${chip.label}</span>
             <span class="replay-time">${this.currentTimeLabel}</span>
           </div>
           <div class="replay-status">
@@ -696,15 +655,6 @@ export class ReplayPanel extends LitElement {
         </div>
         <div class="replay-toolbar">
           <div class="replay-transport" role="group" aria-label="Replay transport controls">
-            ${this.viewingHistory
-              ? html`<button
-                  class="replay-live-button"
-                  title="Return to live"
-                  @click=${() => this._dispatch("return-live")}
-                >
-                  Live
-                </button>`
-              : nothing}
             <button class="replay-icon-button" aria-label="Jump back 30 seconds" title="Jump back 30 seconds" @click=${() => this._dispatch("jump", { delta: -30 })}>
               <ha-icon icon="mdi:rewind-30"></ha-icon>
             </button>

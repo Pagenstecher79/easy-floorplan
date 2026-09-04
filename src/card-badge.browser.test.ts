@@ -142,6 +142,9 @@ describe("a device is drawn from one instant, not two", () => {
       type: "custom:easy-floorplan-card",
       width: 1000,
       height: 600,
+      // Replay only reaches the plan from a panel that is on screen, which
+      // takes the config as well as the open flag set below.
+      historyReplay: { enabled: true, lookbackSeconds: 3600 },
       floors: [
         {
           id: "f1", name: "Floor 1", walls: [], openings: [], items: [motion],
@@ -166,10 +169,13 @@ describe("a device is drawn from one instant, not two", () => {
     await card.updateComplete;
 
     const controller = (card as unknown as { _replayController: {
-      state: { enabled: boolean };
+      state: { enabled: boolean; historyVisible: boolean };
       historyService: () => { getStateAt: (t: number) => Map<string, unknown> };
     } })._replayController;
+    // Both, because both are required: replay has been started, and the panel
+    // is open. A closed panel draws live no matter what history is loaded.
     controller.state.enabled = true;
+    controller.state.historyVisible = true;
     controller.historyService().getStateAt = () =>
       new Map([[
         "binary_sensor.motion",
