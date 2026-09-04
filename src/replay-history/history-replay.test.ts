@@ -270,6 +270,54 @@ describe("ReplayPanel", () => {
   });
 });
 
+describe("the replay status chip", () => {
+  // The chip says one thing in words and the same thing in colour. It used to
+  // work both out separately — three branches for the label, two for the class
+  // — so a panel still fetching read "Loading history…" painted in the live
+  // accent. These pin the pair together.
+  const chip = async (props: { enabled: boolean; ready: boolean; viewingHistory: boolean }) => {
+    const panel = document.createElement("easy-floorplan-replay-panel") as HTMLElement & {
+      visible: boolean; enabled: boolean; ready: boolean; viewingHistory: boolean;
+      updateComplete: Promise<unknown>;
+    };
+    panel.visible = true;
+    panel.enabled = props.enabled;
+    panel.ready = props.ready;
+    panel.viewingHistory = props.viewingHistory;
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+    const el = panel.shadowRoot!.querySelector(".replay-chip")!;
+    return { text: el.textContent?.trim(), classes: [...el.classList] };
+  };
+
+  it("reads Live, in the live colour, when the plan is showing now", async () => {
+    const c = await chip({ enabled: false, ready: false, viewingHistory: false });
+    expect(c.text).toBe("Live");
+    expect(c.classes).toContain("is-live");
+  });
+
+  it("reads Replay, and not in the live colour, when showing the past", async () => {
+    const c = await chip({ enabled: true, ready: true, viewingHistory: true });
+    expect(c.text).toBe("Replay");
+    expect(c.classes).not.toContain("is-live");
+  });
+
+  it("does not paint the loading state as live", async () => {
+    // The reported case: replay switched on, history not back yet, head parked
+    // at the end — so `viewingHistory` is false and the class used to fall
+    // through to is-live while the label said something else entirely.
+    const c = await chip({ enabled: true, ready: false, viewingHistory: false });
+    expect(c.text).toBe("Loading history…");
+    expect(c.classes).not.toContain("is-live");
+  });
+
+  it("says loading whichever way the head is pointing", async () => {
+    const c = await chip({ enabled: true, ready: false, viewingHistory: true });
+    expect(c.text).toBe("Loading history…");
+    expect(c.classes).not.toContain("is-live");
+  });
+});
+
 describe("HistoryTimeline", () => {
   it("emits a seek event for click scrubbing", async () => {
     const timeline = document.createElement("easy-floorplan-history-timeline") as HistoryTimeline;

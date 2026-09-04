@@ -405,9 +405,15 @@ export class ReplayPanel extends LitElement {
     .replay-live-button {
       font-weight: 600;
     }
+    /* Only the live state wears the accent. Loading is not live, and painting
+       it as though it were is what this pair of classes exists to prevent --
+       see _chipState, which is the one place the state is decided. */
     .replay-chip.is-live {
       background: var(--fp-skin-accent, var(--primary-color, #03a9f4));
       color: var(--text-primary-color, #fff);
+    }
+    .replay-chip.is-loading {
+      opacity: 0.75;
     }
     .replay-run-button {
       min-width: 82px;
@@ -607,6 +613,21 @@ export class ReplayPanel extends LitElement {
     current.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
 
+  /**
+   * The status chip: one state, said twice — in words and in colour.
+   *
+   * Worked out in one place because it was worked out in two, and they
+   * disagreed. The label had three branches and the class had two, so a panel
+   * that was still fetching read "Loading history…" painted in the live
+   * accent: the one state where the two halves could contradict each other,
+   * and the one nobody looks at twice.
+   */
+  private _chipState(): { label: string; className: string } {
+    if (this.enabled && !this.ready) return { label: "Loading history…", className: "is-loading" };
+    if (this.viewingHistory) return { label: "Replay", className: "is-replay" };
+    return { label: "Live", className: "is-live" };
+  }
+
   protected render(): TemplateResult {
     if (!this.visible) {
       return html`
@@ -625,6 +646,7 @@ export class ReplayPanel extends LitElement {
     }
 
     const currentEvent = this._getCurrentEvent();
+    const chip = this._chipState();
     return html`
       <div class="replay-panel" id=${this.panelId}>
         <button
@@ -637,13 +659,7 @@ export class ReplayPanel extends LitElement {
         </button>
         <div class="replay-header">
           <div class="replay-meta">
-            <span class="replay-chip ${this.viewingHistory ? "" : "is-live"}"
-              >${this.enabled && !this.ready
-                ? "Loading history…"
-                : this.viewingHistory
-                  ? "Replay"
-                  : "Live"}</span
-            >
+            <span class="replay-chip ${chip.className}">${chip.label}</span>
             <span class="replay-time">${this.currentTimeLabel}</span>
           </div>
           <div class="replay-status">
