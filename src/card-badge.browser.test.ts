@@ -111,3 +111,86 @@ describe("badge contents on the rendered card", () => {
     expect(t.badgeIcon()).toBeTruthy();
   });
 });
+
+describe("a device is drawn from one instant, not two", () => {
+  // Replay renders the plan from `renderHass` — history at the playback head.
+  // Anything in a device that still read `this.hass` disagreed with the rest
+  // of the same device the moment the head moved: a motion sensor pulsing
+  // because something is happening *now*, on a plan showing an hour ago.
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  const motion = {
+    id: "m1",
+    kind: "binary_sensor",
+    entity: "binary_sensor.motion",
+    x: 500,
+    y: 300,
+    display: "iconRipple",
+    iconAnimation: "pulse",
+  } as unknown as FloorItem;
+
+  async function mountWithReplayAt(state: string) {
+    const host = document.createElement("div");
+    host.style.width = "900px";
+    host.style.height = "540px";
+    document.body.appendChild(host);
+
+    const card = document.createElement("easy-floorplan-card") as FloorplanCard;
+    card.setConfig({
+      type: "custom:easy-floorplan-card",
+      width: 1000,
+      height: 600,
+      floors: [
+        {
+          id: "f1", name: "Floor 1", walls: [], openings: [], items: [motion],
+          texts: [], furniture: [], trackers: [], areas: [],
+        },
+      ],
+    } as FloorplanCardConfig);
+    // Live says the sensor is clear; the replayed instant says it detected
+    // something. The plan is drawing the replayed instant.
+    card.hass = {
+      states: {
+        "binary_sensor.motion": {
+          entity_id: "binary_sensor.motion",
+          state: "off",
+          attributes: { device_class: "motion" },
+        },
+      },
+      entities: {},
+      formatEntityState: (st: { state: string }) => st.state,
+    } as unknown as FloorplanCard["hass"];
+    host.appendChild(card);
+    await card.updateComplete;
+
+    const controller = (card as unknown as { _replayController: {
+      state: { enabled: boolean };
+      historyService: () => { getStateAt: (t: number) => Map<string, unknown> };
+    } })._replayController;
+    controller.state.enabled = true;
+    controller.historyService().getStateAt = () =>
+      new Map([[
+        "binary_sensor.motion",
+        { entity_id: "binary_sensor.motion", state, attributes: { device_class: "motion" } },
+      ]]);
+    card.requestUpdate();
+    await card.updateComplete;
+    return card;
+  }
+
+  it("animates the icon from the replayed state, not the live one", async () => {
+    const card = await mountWithReplayAt("on");
+    // Live is "off"; the replayed instant is "on", and the badge follows it.
+    expect(card.shadowRoot?.querySelector("ha-icon.anim-pulse")).toBeTruthy();
+    // …and the ring beside it agrees, which it always did.
+    expect(card.shadowRoot?.querySelector(".ripple.active")).toBeTruthy();
+  });
+
+  it("leaves both still when the replayed instant is clear", async () => {
+    const card = await mountWithReplayAt("off");
+    expect(card.shadowRoot?.querySelector("ha-icon.anim-pulse")).toBeFalsy();
+    expect(card.shadowRoot?.querySelector(".ripple.active")).toBeFalsy();
+  });
+});

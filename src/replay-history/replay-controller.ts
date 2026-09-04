@@ -29,7 +29,6 @@ export interface ReplayState {
   historyVisible: boolean;
   rangeWarning?: string;
   loadToken: number;
-  manuallyDisabled: boolean;
   uiLastUpdateFrameMs: number;
   loopId?: number;
   lastReplayFrame?: number;
@@ -62,7 +61,7 @@ export type ReplayController = {
   updateWindow: (start: number, end: number) => void;
   resetForFloorChange: () => void;
   zoomWindow: (direction: -1 | 1) => void;
-  toggleReplay: () => Promise<void>;
+  returnToLive: () => void;
   toggleHistoryVisible: (visible: boolean) => void;
   toggleSpeedPanel: () => void;
   toggleTimeline: () => void;
@@ -104,7 +103,6 @@ export class ReplayControllerImpl implements ReplayController {
       historyVisible: false,
       rangeWarning: undefined,
       loadToken: 0,
-      manuallyDisabled: false,
       uiLastUpdateFrameMs: 0,
       loopId: undefined,
       lastReplayFrame: undefined,
@@ -267,22 +265,27 @@ export class ReplayControllerImpl implements ReplayController {
     this.updateWindow(nextStart, nextEnd);
   }
 
-  public async toggleReplay(): Promise<void> {
-    if (!this._card.getHass() || !this._card.getConfig()?.historyReplay) return;
-    if (!this.state.enabled) {
-      this.state.manuallyDisabled = false;
-      await this.startReplay();
-      return;
-    }
-    this.state.enabled = false;
-    this.state.manuallyDisabled = true;
-    this.state.loadToken += 1;
-    this.state.ready = false;
-    this.state.loadRequested = false;
-    this.state.error = undefined;
-    this.state.historyEvents = [];
+  /**
+   * Back to now.
+   *
+   * Deliberately not a teardown. Replay stays loaded and the timeline keeps
+   * its events, because the head sitting at the end of the window *is* live —
+   * see {@link getRenderState} — so there is nothing to dismantle in order to
+   * see the present, and dismantling it would make going back to a moment you
+   * were just looking at cost another history fetch.
+   *
+   * Which is also why this is the only way out that the panel offers. There
+   * used to be an Enable/Disable pair, from when replay had to be switched on
+   * before it would do anything; now Run starts it and this returns from it,
+   * and neither of them is a mode you have to remember you are in.
+   */
+  public returnToLive(): void {
     this.state.playbackController.pause();
     this.stopReplayLoop();
+    this.state.playbackController.seek(this.state.playbackController.endTime);
+    this.logReplay("[easy-floorplan] Replay returned to live", {
+      currentTime: this.state.playbackController.currentTime,
+    });
     this._card.requestUpdate();
   }
 
@@ -313,7 +316,6 @@ export class ReplayControllerImpl implements ReplayController {
     const { start: replayStart, end: replayEnd } = this.normalizeWindow(start, end);
     this.state.startTime = replayStart;
     this.state.endTime = replayEnd;
-    this.state.manuallyDisabled = false;
     this.state.enabled = true;
     this.state.loadRequested = true;
     this.state.error = undefined;

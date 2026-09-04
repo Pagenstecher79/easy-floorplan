@@ -270,6 +270,54 @@ describe("ReplayPanel", () => {
   });
 });
 
+describe("the replay status chip", () => {
+  // The chip says one thing in words and the same thing in colour. It used to
+  // work both out separately — three branches for the label, two for the class
+  // — so a panel still fetching read "Loading history…" painted in the live
+  // accent. These pin the pair together.
+  const chip = async (props: { enabled: boolean; ready: boolean; viewingHistory: boolean }) => {
+    const panel = document.createElement("easy-floorplan-replay-panel") as HTMLElement & {
+      visible: boolean; enabled: boolean; ready: boolean; viewingHistory: boolean;
+      updateComplete: Promise<unknown>;
+    };
+    panel.visible = true;
+    panel.enabled = props.enabled;
+    panel.ready = props.ready;
+    panel.viewingHistory = props.viewingHistory;
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+    const el = panel.shadowRoot!.querySelector(".replay-chip")!;
+    return { text: el.textContent?.trim(), classes: [...el.classList] };
+  };
+
+  it("reads Live, in the live colour, when the plan is showing now", async () => {
+    const c = await chip({ enabled: false, ready: false, viewingHistory: false });
+    expect(c.text).toBe("Live");
+    expect(c.classes).toContain("is-live");
+  });
+
+  it("reads Replay, and not in the live colour, when showing the past", async () => {
+    const c = await chip({ enabled: true, ready: true, viewingHistory: true });
+    expect(c.text).toBe("Replay");
+    expect(c.classes).not.toContain("is-live");
+  });
+
+  it("does not paint the loading state as live", async () => {
+    // The reported case: replay switched on, history not back yet, head parked
+    // at the end — so `viewingHistory` is false and the class used to fall
+    // through to is-live while the label said something else entirely.
+    const c = await chip({ enabled: true, ready: false, viewingHistory: false });
+    expect(c.text).toBe("Loading history…");
+    expect(c.classes).not.toContain("is-live");
+  });
+
+  it("says loading whichever way the head is pointing", async () => {
+    const c = await chip({ enabled: true, ready: false, viewingHistory: true });
+    expect(c.text).toBe("Loading history…");
+    expect(c.classes).not.toContain("is-live");
+  });
+});
+
 describe("HistoryTimeline", () => {
   it("emits a seek event for click scrubbing", async () => {
     const timeline = document.createElement("easy-floorplan-history-timeline") as HistoryTimeline;
@@ -743,14 +791,24 @@ describe("FloorplanCard replay", () => {
 
     it("shows the window it would load rather than 1970", () => {
       // The unstarted panel used to be unreachable, so its placeholder window
-      // (0..MAX) had never been seen. It reads the clock now.
+      // (0..MAX) had never been seen. It reads the clock now, which is what
+      // makes this test worth writing carefully: the window comes from
+      // `Date.now()` at the moment it is asked for, so there is no second
+      // reading of the clock that agrees with it. Bracketing the call is the
+      // only assertion that holds however long the machine stalls in the
+      // middle — a tolerance is just a guess about how slow is too slow.
       const { controller } = configured();
+      const before = Date.now() / 1000;
       const props = createReplayPanelProps(controller);
-      const { start, end } = controller.getDefaultWindow();
-      expect(props.startTime).toBe(start);
-      expect(props.endTime).toBe(end);
-      expect(props.currentTime).toBe(end);
+      const after = Date.now() / 1000;
+      expect(props.endTime).toBeGreaterThanOrEqual(before);
+      expect(props.endTime).toBeLessThanOrEqual(after);
+      // Both ends come from one reading, so the span is exact whatever the
+      // clock did around it.
+      expect(props.endTime - props.startTime).toBe(3600);
+      expect(props.currentTime).toBe(props.endTime);
       expect(props.startInputValue).not.toContain("1970");
+      expect(props.endInputValue).not.toContain("1970");
     });
 
     it("hands the window back to the panel once replay is running", async () => {
@@ -759,6 +817,55 @@ describe("FloorplanCard replay", () => {
       const props = createReplayPanelProps(controller);
       expect(props.startTime).toBe(controller.state.playbackController.startTime);
       expect(props.endTime).toBe(controller.state.playbackController.endTime);
+    });
+  });
+
+  describe("the way back to now", () => {
+    const controllerAt = (opts: { enabled: boolean; playing?: boolean; at?: number }) => {
+      const card = document.createElement("easy-floorplan-card") as FloorplanCard;
+      card.setConfig({
+        type: "easy-floorplan-card", width: 1000, height: 600,
+        historyReplay: { enabled: true, lookbackSeconds: 3600 },
+        floors: [{ id: "f1", name: "Floor 1", walls: [], openings: [], items: [], texts: [], furniture: [], trackers: [], areas: [] }],
+      } as never);
+      const controller = (card as any)._replayController;
+      controller.state.enabled = opts.enabled;
+      controller.state.startTime = 1000;
+      controller.state.endTime = 2000;
+      controller.state.playbackController = new PlaybackController({ startTime: 1000, endTime: 2000 });
+      controller.state.playbackController.seek(opts.at ?? 2000);
+      if (opts.playing) controller.state.playbackController.play();
+      return controller;
+    };
+
+    it("offers no way back while the plan is already showing now", () => {
+      // Not in replay at all…
+      expect(createReplayPanelProps(controllerAt({ enabled: false })).viewingHistory).toBe(false);
+      // …and in replay but parked at the end, which draws live anyway.
+      expect(createReplayPanelProps(controllerAt({ enabled: true })).viewingHistory).toBe(false);
+    });
+
+    it("offers it once the plan is showing the past", () => {
+      expect(createReplayPanelProps(controllerAt({ enabled: true, at: 1500 })).viewingHistory).toBe(true);
+      // Playing at the last frame is still watching the recording, not now.
+      expect(
+        createReplayPanelProps(controllerAt({ enabled: true, playing: true })).viewingHistory,
+      ).toBe(true);
+    });
+
+    it("returns the head to the end, and stops playing, without tearing replay down", () => {
+      const controller = controllerAt({ enabled: true, playing: true, at: 1200 });
+      controller.state.historyEvents = [{ entityId: "light.a", timestamp: 1300, state: "on" }];
+      controller.returnToLive();
+      expect(controller.state.playbackController.currentTime).toBe(2000);
+      expect(controller.state.playbackController.playing).toBe(false);
+      // The plan is live now…
+      expect(controller.getRenderState().enabled).toBe(false);
+      // …and going back to a moment costs no second history fetch.
+      expect(controller.state.enabled).toBe(true);
+      expect(controller.state.historyEvents).toHaveLength(1);
+      // …so the button that got you here is gone.
+      expect(createReplayPanelProps(controller).viewingHistory).toBe(false);
     });
   });
 

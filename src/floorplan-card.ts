@@ -632,7 +632,12 @@ export class FloorplanCard extends LitElement {
     // Animation goes on the inner ha-icon, not the badge: the badge carries
     // the user's `angle` rotation, and a spin on the same element would
     // overwrite it.
-    const st = item.entity ? this.hass?.states[item.entity] : undefined;
+    // From the state being *drawn*, not the live one. Everything else in this
+    // badge — the glyph, the reading — comes from `renderHass`, and an
+    // animation resolved from `this.hass` disagrees with all of it the moment
+    // replay moves the head: a motion sensor pulsing because something is
+    // happening now, on a plan showing an hour ago.
+    const st = item.entity ? renderHass?.states[item.entity] : undefined;
     const anim = resolveIconAnimation(item, st?.state, st?.attributes);
     // "Show the reading, not a picture" (issue #106). Same badge — size, angle,
     // state colour, ripple stacking all unchanged — with the glyph swapped for
@@ -711,8 +716,12 @@ export class FloorplanCard extends LitElement {
     // grey on load.
     const offline = !!this.hass && itemIsOffline(item, st?.state);
 
-    // Hide badge by state or operator (preserve layout space via CSS visibility)
-    const isBadgeHidden = itemBadgeHidden(item, st?.state, this.hass);
+    // Hide badge by state or operator (preserve layout space via CSS
+    // visibility). Judged on the same instant as everything else it sits
+    // beside: the condition can name a *different* entity, and reading that
+    // one live would hide or show a badge on grounds the rest of the plan
+    // cannot see.
+    const isBadgeHidden = itemBadgeHidden(item, st?.state, renderHass);
     // "none" is the old `showIcon: false` — no badge, label only (issue #106).
     const showIcon = badgeContentOf(item) !== "none";
 
