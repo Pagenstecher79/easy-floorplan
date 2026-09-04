@@ -58,11 +58,22 @@ and remain valid for backward compatibility.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `enabled` | boolean | `false` | Shows replay controls and enables loading history for mapped entities. |
+| `enabled` | boolean | `false` | Offers the **Replay** button on the card. Replay itself stays off until you press it. |
 | `lookbackSeconds` | number | `3600` | Initial replay window length in seconds. Must be positive. |
 | `defaultSpeed` | number | auto | Playback speed in simulated seconds per real second. `1` means real-time. |
 | `debug` | boolean | `false` | Log replay lifecycle (load, seek, play, pause) to the browser console. Off by default — seeking logs once per frame. |
 | `numericSteps` | number | unset | Thin numeric sensor drift to this many levels of each sensor's observed range, to cut the time a freshly loaded window takes to draw. Discrete states — lights, doors, covers — are never thinned. Unset keeps every point. |
+
+`enabled: true` puts a **Replay** button on the card and nothing else. The plan keeps
+showing live state until you press it; opening the panel loads the chosen window and
+puts the plan at the *start* of it, and the **live** button in the panel's corner
+closes replay and hands the plan back to Home Assistant. There is no separate on/off
+setting and no mode to be stuck in: open means replay, closed means live. The panel's
+clock — the highlighted timestamp in its header, and the one riding the timeline
+playhead — is where in time the plan is being drawn from.
+
+Closing keeps the window loaded, so reopening on the same range does not fetch it
+again.
 
 A busy plan can load thousands of points a numeric sensor never meaningfully moved
 through, and each one becomes a marker on the timeline. `numericSteps: 25` keeps the
