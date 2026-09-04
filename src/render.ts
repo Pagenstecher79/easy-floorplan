@@ -4847,13 +4847,13 @@ export function renderRipple(
   rings = 3,
   scale: OverlayScale = "fixed"
 ): TemplateResult {
-  function clamp(value: number, min: number, max: number): number {
-    return Math.min(Math.max(value, min), max);
+  function wrapAngle(value: number): number {
+    return ((value % 360) + 360) % 360
   }
 
   const size = overlayLength(cssNumber(sizePx, DEFAULT_RIPPLE_SIZE), scale);
-  const direction_ = clamp(cssNumber(direction, DEFAULT_RIPPLE_DIRECTION), 0, 360);
-  const width_ = clamp(cssNumber(width, DEFAULT_RIPPLE_WIDTH), 0, 360);
+  const direction_ = wrapAngle(cssNumber(direction, DEFAULT_RIPPLE_DIRECTION));
+  const width_ = wrapAngle(cssNumber(width, DEFAULT_RIPPLE_WIDTH));
 
   return html`
     <div
