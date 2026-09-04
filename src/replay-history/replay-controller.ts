@@ -61,7 +61,6 @@ export type ReplayController = {
   updateWindow: (start: number, end: number) => void;
   resetForFloorChange: () => void;
   zoomWindow: (direction: -1 | 1) => void;
-  returnToLive: () => void;
   toggleHistoryVisible: (visible: boolean) => void;
   toggleSpeedPanel: () => void;
   toggleTimeline: () => void;
@@ -173,28 +172,25 @@ export class ReplayControllerImpl implements ReplayController {
    * What the plan should draw from: history at `currentTime`, or the live
    * states Home Assistant is pushing.
    *
-   * `enabled` here is not the same question as "is replay switched on". Replay
-   * being on means the timeline exists and the head can be moved; it does not
-   * mean the plan must stop tracking reality. Parked at the end of the window
-   * and not playing, the head is pointing at the newest thing replay knows —
-   * and the newest thing *anything* knows is the live state, so that is what
-   * to draw.
+   * The panel being open is the whole answer. Closed, replay is not a mode the
+   * plan is quietly in -- it is off, whatever the controller has loaded and
+   * wherever the head happens to sit, so a plan nobody has asked to rewind is
+   * indistinguishable from one with the feature switched off entirely.
    *
-   * Without this, turning replay on quietly froze the plan at the instant it
-   * loaded. Every watched entity with a recorded state rendered from that
-   * moment forever, so a light toggled from the plan really did switch — the
-   * service call is live either way — while its badge and its cast pool stayed
-   * exactly as they had been, and lights that happened to be on at that instant
-   * stayed lit and casting no matter what you did to them. Entities with no
-   * history at that point fell through to live state, which is why only *some*
-   * of the plan looked stuck (issue #256).
+   * Deliberately blunt, because the subtle version kept failing. Replay leaked
+   * into a live plan through any path that started it without anyone opening
+   * the panel -- switching floors was enough, and that path parked the head at
+   * the *start* of the window rather than the end -- and the symptom was
+   * silent: every watched entity with a recorded state drew from an hour ago,
+   * so lights that were on drew off and a presence sensor that was tripping
+   * drew still, while a light toggled from the plan really did switch, because
+   * the service call is live either way. Nothing on a closed panel said why
+   * (issue #256).
    */
   public getRenderState(): { enabled: boolean; currentTime: number; historyVisible: boolean } {
-    const playback = this.state.playbackController;
-    const atLiveEnd = !playback.playing && playback.currentTime >= playback.endTime;
     return {
-      enabled: this.state.enabled && !atLiveEnd,
-      currentTime: playback.currentTime,
+      enabled: this.state.historyVisible && this.state.enabled,
+      currentTime: this.state.playbackController.currentTime,
       historyVisible: this.state.historyVisible,
     };
   }
@@ -236,7 +232,10 @@ export class ReplayControllerImpl implements ReplayController {
     this.state.playbackController.pause();
     this.stopReplayLoop();
     this._card.requestUpdate();
-    if (!this._card.getHass() || !this._card.getConfig()?.historyReplay?.enabled) return;
+    // Only while the panel is open: `historyReplay.enabled` says the control is
+    // offered, not that the plan is in replay, and reloading on a closed panel
+    // is a history query nobody asked for and nobody can see.
+    if (!this._card.getHass() || !this.state.historyVisible) return;
     void this.startReplay({ preserveCurrentTime: true, keepPlaying: wasPlaying });
   }
 
@@ -250,7 +249,10 @@ export class ReplayControllerImpl implements ReplayController {
     this.clearHistoryCache();
     this.stopReplayLoop();
     this._card.requestUpdate();
-    if (this._card.getHass() && this._card.getConfig()?.historyReplay?.enabled) {
+    // Same rule as updateWindow: a floor switch reloads replay only if replay
+    // is what you are looking at. This path is how replay used to turn itself
+    // on behind a closed panel -- see getRenderState.
+    if (this._card.getHass() && this.state.historyVisible) {
       void this.startReplay({ preserveCurrentTime: true, keepPlaying: this.state.playbackController.playing });
     }
   }
@@ -266,32 +268,31 @@ export class ReplayControllerImpl implements ReplayController {
   }
 
   /**
-   * Back to now.
+   * Opening and closing the panel is the whole of turning replay on and off.
    *
-   * Deliberately not a teardown. Replay stays loaded and the timeline keeps
-   * its events, because the head sitting at the end of the window *is* live —
-   * see {@link getRenderState} — so there is nothing to dismantle in order to
-   * see the present, and dismantling it would make going back to a moment you
-   * were just looking at cost another history fetch.
+   * There is no separate enable switch and no button back to now, because
+   * those used to be separate questions whose answers could disagree: the plan
+   * could be showing an hour ago with nothing on screen saying so. Opening
+   * loads the window and parks the head at its start, so replay begins where
+   * the calendar says it does; closing stops the clock and hands the plan back
+   * to Home Assistant.
    *
-   * Which is also why this is the only way out that the panel offers. There
-   * used to be an Enable/Disable pair, from when replay had to be switched on
-   * before it would do anything; now Run starts it and this returns from it,
-   * and neither of them is a mode you have to remember you are in.
+   * Closing is not a teardown. The window and its events stay loaded, so
+   * reopening on the same range costs no second history fetch -- it just
+   * cannot reach the plan while the panel is shut (see {@link getRenderState}).
    */
-  public returnToLive(): void {
-    this.state.playbackController.pause();
-    this.stopReplayLoop();
-    this.state.playbackController.seek(this.state.playbackController.endTime);
-    this.logReplay("[easy-floorplan] Replay returned to live", {
-      currentTime: this.state.playbackController.currentTime,
-    });
-    this._card.requestUpdate();
-  }
-
   public toggleHistoryVisible(visible: boolean): void {
     this.state.historyVisible = visible;
+    if (!visible) {
+      this.state.playbackController.pause();
+      this.stopReplayLoop();
+      this.logReplay("[easy-floorplan] Replay closed, plan is live");
+      this._card.requestUpdate();
+      return;
+    }
     this._card.requestUpdate();
+    if (!this._card.getHass()) return;
+    void this.startReplay();
   }
 
   public toggleSpeedPanel(): void {
@@ -320,9 +321,12 @@ export class ReplayControllerImpl implements ReplayController {
     this.state.loadRequested = true;
     this.state.error = undefined;
     this.state.ready = false;
+    // A fresh start begins at the top of the window the calendar shows, so
+    // opening the panel and pressing Run play the range through rather than
+    // sitting on its last instant with nowhere left to go.
     const initialTime = options.preserveCurrentTime
       ? Math.min(replayEnd, Math.max(replayStart, this.state.playbackController.currentTime))
-      : replayEnd;
+      : replayStart;
     this.state.playbackController = new PlaybackController({
       startTime: replayStart,
       endTime: replayEnd,

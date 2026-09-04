@@ -269,13 +269,11 @@ export class FloorplanCard extends LitElement {
       this._lastReplayCacheKey = replayKey;
       this._replayController.historyService().clearCache();
     }
-    // A plan that has switched replay off entirely stops any playback still
-    // running. A plan that *offers* replay does not start it: `enabled` means
-    // the control is there, not that the card hands the plan over to it. It
-    // used to start on load, which quietly turned a live plan into a snapshot
-    // of the moment it loaded — a light toggled from the plan really switched
-    // while its badge and cast pool stayed put (issue #256).
-    if (!this._replayController.state.configured) {
+    // A plan whose replay panel is shut has no clock to run. `enabled` in the
+    // config means the control is offered, not that the card hands the plan
+    // over to it; opening the panel is what does that, and until then nothing
+    // should be ticking (issue #256).
+    if (!this._replayController.isHistoryVisible()) {
       this._replayController.pausePlayback();
       this._replayController.stopReplayLoop();
     }

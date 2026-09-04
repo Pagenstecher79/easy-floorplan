@@ -166,10 +166,13 @@ describe("a device is drawn from one instant, not two", () => {
     await card.updateComplete;
 
     const controller = (card as unknown as { _replayController: {
-      state: { enabled: boolean };
+      state: { enabled: boolean; historyVisible: boolean };
       historyService: () => { getStateAt: (t: number) => Map<string, unknown> };
     } })._replayController;
+    // Both, because both are required: replay has been started, and the panel
+    // is open. A closed panel draws live no matter what history is loaded.
     controller.state.enabled = true;
+    controller.state.historyVisible = true;
     controller.historyService().getStateAt = () =>
       new Map([[
         "binary_sensor.motion",
