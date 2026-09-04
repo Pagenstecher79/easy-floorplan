@@ -180,6 +180,8 @@ wider than the cap would not be fully cleared by its own door or window.
 | `activeColor` | string                                 | theme color  | Badge color while on. Ignored while `stateColor` rules match. |
 | `rippleColor` | string                                 | `activeColor`| Ripple ring color, falling back to `activeColor` then the primary color. |
 | `rippleSize`  | number                                 | `80`         | Max ripple diameter (px).                              |
+| `rippleDirection` | number                             | `0`          | Direction the ripple arc is centred on, in degrees clockwise from the top. Only visible when `rippleWidth` is under `360`. Wraps to be between `0`–`360`. |
+| `rippleWidth` | number                                 | `360`        | Angular width of the ripple arc in degrees. `360` rings all the way round; narrow it for a sensor on a wall that cannot see behind itself. Clamped to `0`–`360`. |
 | `glow`        | boolean                                | `false`      | Cast a pool of light onto the plan (lights only). See [Cast light](#cast-light). |
 | `glowRadius`  | number                                 | `140`        | Radius of the cast pool at full brightness, in canvas units. A dimmer lamp casts a proportionally smaller pool, down to half this. |
 | `glowColor`   | string                                 | `#ffd9a0`    | Pool color for a bulb that can't report one; color-capable lights use their own. |
