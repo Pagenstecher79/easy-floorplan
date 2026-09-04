@@ -51,6 +51,8 @@ export type ReplayController = {
   speedForRange: (start: number, end: number) => number;
   currentTime: () => number;
   isHistoryVisible: () => boolean;
+  isReplayShowing: () => boolean;
+  syncToConfig: () => void;
   isReplayReady: () => boolean;
   isReplayEnabled: () => boolean;
   getRenderState: () => { enabled: boolean; currentTime: number; historyVisible: boolean };
@@ -169,6 +171,32 @@ export class ReplayControllerImpl implements ReplayController {
   }
 
   /**
+   * Whether the replay panel is on screen: the config offers it, and it is
+   * open. Both halves, because a panel that is not rendered can neither be
+   * read nor closed -- so nothing behind it may draw on the plan or keep a
+   * clock running.
+   */
+  public isReplayShowing(): boolean {
+    return !!this._card.getConfig()?.historyReplay?.enabled && this.state.historyVisible;
+  }
+
+  /**
+   * Bring replay back in line with a config that no longer offers it.
+   *
+   * Switching `historyReplay.enabled` off takes the panel off screen but not,
+   * on its own, the state behind it: the plan went on rendering history with
+   * no control left anywhere to leave it. Called from setConfig, so it also
+   * covers the ordinary case of a shut panel, where it just makes sure no
+   * clock is ticking against a plan nobody is replaying.
+   */
+  public syncToConfig(): void {
+    if (this.isReplayShowing()) return;
+    this.state.historyVisible = false;
+    this.state.playbackController.pause();
+    this.stopReplayLoop();
+  }
+
+  /**
    * What the plan should draw from: history at `currentTime`, or the live
    * states Home Assistant is pushing.
    *
@@ -176,6 +204,9 @@ export class ReplayControllerImpl implements ReplayController {
    * plan is quietly in -- it is off, whatever the controller has loaded and
    * wherever the head happens to sit, so a plan nobody has asked to rewind is
    * indistinguishable from one with the feature switched off entirely.
+   *
+   * "Open" means on screen, which takes the config as well as the panel --
+   * see {@link isReplayShowing}.
    *
    * Deliberately blunt, because the subtle version kept failing. Replay leaked
    * into a live plan through any path that started it without anyone opening
@@ -189,7 +220,7 @@ export class ReplayControllerImpl implements ReplayController {
    */
   public getRenderState(): { enabled: boolean; currentTime: number; historyVisible: boolean } {
     return {
-      enabled: this.state.historyVisible && this.state.enabled,
+      enabled: this.isReplayShowing() && this.state.enabled,
       currentTime: this.state.playbackController.currentTime,
       historyVisible: this.state.historyVisible,
     };
@@ -291,7 +322,10 @@ export class ReplayControllerImpl implements ReplayController {
       return;
     }
     this._card.requestUpdate();
-    if (!this._card.getHass()) return;
+    // isReplayShowing, not just hass: a caller can set this true against a
+    // config with replay switched off, and loading history for a panel that
+    // will not be rendered is work nobody can see or stop.
+    if (!this._card.getHass() || !this.isReplayShowing()) return;
     void this.startReplay();
   }
 

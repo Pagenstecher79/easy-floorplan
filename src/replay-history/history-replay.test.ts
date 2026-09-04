@@ -913,6 +913,59 @@ describe("FloorplanCard replay", () => {
     });
   });
 
+  describe("switching the feature off while the panel is open", () => {
+    // The panel is only rendered while `historyReplay.enabled` is set, so
+    // turning it off takes the control off screen. Left alone, that took the
+    // way out without taking replay with it: the plan went on drawing an hour
+    // ago with nothing anywhere to stop it.
+    const openedThenDisabled = () => {
+      const card = document.createElement("easy-floorplan-card") as FloorplanCard;
+      const config = (replay: boolean) => ({
+        type: "easy-floorplan-card", width: 1000, height: 600,
+        historyReplay: { enabled: replay, lookbackSeconds: 3600 },
+        floors: [{ id: "f1", name: "Floor 1", walls: [], openings: [], items: [], texts: [], furniture: [], trackers: [], areas: [] }],
+      });
+      card.setConfig(config(true) as never);
+      const controller = (card as any)._replayController;
+      controller.state.enabled = true;
+      controller.state.historyVisible = true;
+      controller.state.playbackController = new PlaybackController({ startTime: 1000, endTime: 2000 });
+      controller.state.playbackController.seek(1500);
+      controller.state.playbackController.play();
+      card.setConfig(config(false) as never);
+      return controller;
+    };
+
+    it("puts the plan back to live", () => {
+      expect(openedThenDisabled().getRenderState().enabled).toBe(false);
+    });
+
+    it("stops the clock and shuts the panel", () => {
+      const controller = openedThenDisabled();
+      expect(controller.state.playbackController.playing).toBe(false);
+      expect(controller.state.historyVisible).toBe(false);
+    });
+
+    it("will not open replay a config does not offer", async () => {
+      const card = document.createElement("easy-floorplan-card") as FloorplanCard;
+      card.setConfig({
+        type: "easy-floorplan-card", width: 1000, height: 600,
+        historyReplay: { enabled: false, lookbackSeconds: 3600 },
+        floors: [{ id: "f1", name: "Floor 1", walls: [], openings: [], items: [], texts: [], furniture: [], trackers: [], areas: [] }],
+      } as never);
+      card.hass = {
+        states: {}, entities: {}, callApi: vi.fn(async () => []), callService: vi.fn(),
+        formatEntityState: (st: HassEntity) => st.state,
+      } as unknown as HomeAssistant;
+      const controller = (card as any)._replayController;
+      const startSpy = vi.spyOn(controller, "startReplay");
+
+      controller.toggleHistoryVisible(true);
+      expect(startSpy).not.toHaveBeenCalled();
+      expect(controller.getRenderState().enabled).toBe(false);
+    });
+  });
+
   describe("a closed panel draws nothing from history (issue #256)", () => {
     // The reported symptom, on the rendered plan rather than in the controller:
     // a light that is on drew off, and a presence ripple that should have been

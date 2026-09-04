@@ -269,14 +269,13 @@ export class FloorplanCard extends LitElement {
       this._lastReplayCacheKey = replayKey;
       this._replayController.historyService().clearCache();
     }
-    // A plan whose replay panel is shut has no clock to run. `enabled` in the
-    // config means the control is offered, not that the card hands the plan
-    // over to it; opening the panel is what does that, and until then nothing
-    // should be ticking (issue #256).
-    if (!this._replayController.isHistoryVisible()) {
-      this._replayController.pausePlayback();
-      this._replayController.stopReplayLoop();
-    }
+    // A plan not showing the replay panel has no clock to run, and nothing on
+    // screen to stop one with. `enabled` in the config means the control is
+    // offered, not that the card hands the plan over to it; opening the panel
+    // is what does that. Switching the feature off with the panel open takes
+    // the control away without taking replay with it, which is the one case
+    // that leaves a plan in history with no way out (issue #256).
+    this._replayController.syncToConfig();
     // Restore the floor this plan was last viewed on (issue #81). Only when
     // this instance has no floor of its own yet — a live floor switch always
     // wins — and only if that floor still exists.

@@ -142,6 +142,9 @@ describe("a device is drawn from one instant, not two", () => {
       type: "custom:easy-floorplan-card",
       width: 1000,
       height: 600,
+      // Replay only reaches the plan from a panel that is on screen, which
+      // takes the config as well as the open flag set below.
+      historyReplay: { enabled: true, lookbackSeconds: 3600 },
       floors: [
         {
           id: "f1", name: "Floor 1", walls: [], openings: [], items: [motion],
