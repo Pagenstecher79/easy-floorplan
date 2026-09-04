@@ -743,16 +743,21 @@ describe("FloorplanCard replay", () => {
 
     it("shows the window it would load rather than 1970", () => {
       // The unstarted panel used to be unreachable, so its placeholder window
-      // (0..MAX) had never been seen. It reads the clock now — which is why
-      // this checks the window's shape rather than an exact pair of instants:
-      // the default window is computed from `Date.now()` on each call, so two
-      // calls a millisecond apart do not agree, and a test that demanded they
-      // did would fail on a slow machine and pass on a fast one.
+      // (0..MAX) had never been seen. It reads the clock now, which is what
+      // makes this test worth writing carefully: the window comes from
+      // `Date.now()` at the moment it is asked for, so there is no second
+      // reading of the clock that agrees with it. Bracketing the call is the
+      // only assertion that holds however long the machine stalls in the
+      // middle — a tolerance is just a guess about how slow is too slow.
       const { controller } = configured();
+      const before = Date.now() / 1000;
       const props = createReplayPanelProps(controller);
-      const now = Date.now() / 1000;
-      expect(props.endTime).toBeCloseTo(now, 0);
-      expect(props.endTime - props.startTime).toBeCloseTo(3600, 0);
+      const after = Date.now() / 1000;
+      expect(props.endTime).toBeGreaterThanOrEqual(before);
+      expect(props.endTime).toBeLessThanOrEqual(after);
+      // Both ends come from one reading, so the span is exact whatever the
+      // clock did around it.
+      expect(props.endTime - props.startTime).toBe(3600);
       expect(props.currentTime).toBe(props.endTime);
       expect(props.startInputValue).not.toContain("1970");
       expect(props.endInputValue).not.toContain("1970");
