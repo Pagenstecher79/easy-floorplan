@@ -29,7 +29,6 @@ export interface ReplayState {
   historyVisible: boolean;
   rangeWarning?: string;
   loadToken: number;
-  manuallyDisabled: boolean;
   uiLastUpdateFrameMs: number;
   loopId?: number;
   lastReplayFrame?: number;
@@ -54,7 +53,6 @@ export type ReplayController = {
   isHistoryVisible: () => boolean;
   isReplayReady: () => boolean;
   isReplayEnabled: () => boolean;
-  shouldAutoStart: () => boolean;
   getRenderState: () => { enabled: boolean; currentTime: number; historyVisible: boolean };
   clearConfigColorCache: () => void;
   pausePlayback: () => void;
@@ -63,8 +61,7 @@ export type ReplayController = {
   updateWindow: (start: number, end: number) => void;
   resetForFloorChange: () => void;
   zoomWindow: (direction: -1 | 1) => void;
-  ensureStarted: () => void;
-  toggleReplay: () => Promise<void>;
+  returnToLive: () => void;
   toggleHistoryVisible: (visible: boolean) => void;
   toggleSpeedPanel: () => void;
   toggleTimeline: () => void;
@@ -106,7 +103,6 @@ export class ReplayControllerImpl implements ReplayController {
       historyVisible: false,
       rangeWarning: undefined,
       loadToken: 0,
-      manuallyDisabled: false,
       uiLastUpdateFrameMs: 0,
       loopId: undefined,
       lastReplayFrame: undefined,
@@ -173,18 +169,32 @@ export class ReplayControllerImpl implements ReplayController {
     return this.state.enabled;
   }
 
-  public shouldAutoStart(): boolean {
-    return !!this._card.getHass()
-      && !!this._card.getConfig()?.historyReplay?.enabled
-      && !this.state.loadRequested
-      && !this.state.enabled
-      && !this.state.manuallyDisabled;
-  }
-
+  /**
+   * What the plan should draw from: history at `currentTime`, or the live
+   * states Home Assistant is pushing.
+   *
+   * `enabled` here is not the same question as "is replay switched on". Replay
+   * being on means the timeline exists and the head can be moved; it does not
+   * mean the plan must stop tracking reality. Parked at the end of the window
+   * and not playing, the head is pointing at the newest thing replay knows —
+   * and the newest thing *anything* knows is the live state, so that is what
+   * to draw.
+   *
+   * Without this, turning replay on quietly froze the plan at the instant it
+   * loaded. Every watched entity with a recorded state rendered from that
+   * moment forever, so a light toggled from the plan really did switch — the
+   * service call is live either way — while its badge and its cast pool stayed
+   * exactly as they had been, and lights that happened to be on at that instant
+   * stayed lit and casting no matter what you did to them. Entities with no
+   * history at that point fell through to live state, which is why only *some*
+   * of the plan looked stuck (issue #256).
+   */
   public getRenderState(): { enabled: boolean; currentTime: number; historyVisible: boolean } {
+    const playback = this.state.playbackController;
+    const atLiveEnd = !playback.playing && playback.currentTime >= playback.endTime;
     return {
-      enabled: this.state.enabled,
-      currentTime: this.state.playbackController.currentTime,
+      enabled: this.state.enabled && !atLiveEnd,
+      currentTime: playback.currentTime,
       historyVisible: this.state.historyVisible,
     };
   }
@@ -255,29 +265,27 @@ export class ReplayControllerImpl implements ReplayController {
     this.updateWindow(nextStart, nextEnd);
   }
 
-  public ensureStarted(): void {
-    if (!this._card.getHass() || !this._card.getConfig()?.historyReplay?.enabled || this.state.loadRequested || this.state.enabled || this.state.manuallyDisabled) {
-      return;
-    }
-    void this.startReplay();
-  }
-
-  public async toggleReplay(): Promise<void> {
-    if (!this._card.getHass() || !this._card.getConfig()?.historyReplay) return;
-    if (!this.state.enabled) {
-      this.state.manuallyDisabled = false;
-      await this.startReplay();
-      return;
-    }
-    this.state.enabled = false;
-    this.state.manuallyDisabled = true;
-    this.state.loadToken += 1;
-    this.state.ready = false;
-    this.state.loadRequested = false;
-    this.state.error = undefined;
-    this.state.historyEvents = [];
+  /**
+   * Back to now.
+   *
+   * Deliberately not a teardown. Replay stays loaded and the timeline keeps
+   * its events, because the head sitting at the end of the window *is* live —
+   * see {@link getRenderState} — so there is nothing to dismantle in order to
+   * see the present, and dismantling it would make going back to a moment you
+   * were just looking at cost another history fetch.
+   *
+   * Which is also why this is the only way out that the panel offers. There
+   * used to be an Enable/Disable pair, from when replay had to be switched on
+   * before it would do anything; now Run starts it and this returns from it,
+   * and neither of them is a mode you have to remember you are in.
+   */
+  public returnToLive(): void {
     this.state.playbackController.pause();
     this.stopReplayLoop();
+    this.state.playbackController.seek(this.state.playbackController.endTime);
+    this.logReplay("[easy-floorplan] Replay returned to live", {
+      currentTime: this.state.playbackController.currentTime,
+    });
     this._card.requestUpdate();
   }
 
@@ -308,7 +316,6 @@ export class ReplayControllerImpl implements ReplayController {
     const { start: replayStart, end: replayEnd } = this.normalizeWindow(start, end);
     this.state.startTime = replayStart;
     this.state.endTime = replayEnd;
-    this.state.manuallyDisabled = false;
     this.state.enabled = true;
     this.state.loadRequested = true;
     this.state.error = undefined;

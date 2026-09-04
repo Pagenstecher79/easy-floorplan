@@ -4,6 +4,7 @@ import { PlaybackController } from "./playback-controller";
 import { HistoryService, type HistoryEventInput } from "./history-service";
 import { HistoryStateProvider, LiveStateProvider } from "./state-provider";
 import { HistoryTimeline } from "./history-timeline";
+import { createReplayPanelProps } from "./replay-panel";
 import { FloorplanCard } from "../floorplan-card";
 import type { HomeAssistant, HassEntity } from "../types";
 import {
@@ -266,6 +267,54 @@ describe("ReplayPanel", () => {
 
     expect(panel.shadowRoot).not.toBeNull();
     expect(panel.shadowRoot?.querySelector("style")?.textContent).toContain(".replay-panel");
+  });
+});
+
+describe("the replay status chip", () => {
+  // The chip says one thing in words and the same thing in colour. It used to
+  // work both out separately — three branches for the label, two for the class
+  // — so a panel still fetching read "Loading history…" painted in the live
+  // accent. These pin the pair together.
+  const chip = async (props: { enabled: boolean; ready: boolean; viewingHistory: boolean }) => {
+    const panel = document.createElement("easy-floorplan-replay-panel") as HTMLElement & {
+      visible: boolean; enabled: boolean; ready: boolean; viewingHistory: boolean;
+      updateComplete: Promise<unknown>;
+    };
+    panel.visible = true;
+    panel.enabled = props.enabled;
+    panel.ready = props.ready;
+    panel.viewingHistory = props.viewingHistory;
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+    const el = panel.shadowRoot!.querySelector(".replay-chip")!;
+    return { text: el.textContent?.trim(), classes: [...el.classList] };
+  };
+
+  it("reads Live, in the live colour, when the plan is showing now", async () => {
+    const c = await chip({ enabled: false, ready: false, viewingHistory: false });
+    expect(c.text).toBe("Live");
+    expect(c.classes).toContain("is-live");
+  });
+
+  it("reads Replay, and not in the live colour, when showing the past", async () => {
+    const c = await chip({ enabled: true, ready: true, viewingHistory: true });
+    expect(c.text).toBe("Replay");
+    expect(c.classes).not.toContain("is-live");
+  });
+
+  it("does not paint the loading state as live", async () => {
+    // The reported case: replay switched on, history not back yet, head parked
+    // at the end — so `viewingHistory` is false and the class used to fall
+    // through to is-live while the label said something else entirely.
+    const c = await chip({ enabled: true, ready: false, viewingHistory: false });
+    expect(c.text).toBe("Loading history…");
+    expect(c.classes).not.toContain("is-live");
+  });
+
+  it("says loading whichever way the head is pointing", async () => {
+    const c = await chip({ enabled: true, ready: false, viewingHistory: true });
+    expect(c.text).toBe("Loading history…");
+    expect(c.classes).not.toContain("is-live");
   });
 });
 
@@ -704,6 +753,177 @@ describe("FloorplanCard replay", () => {
     expect(replaySpeed).toBe(1);
   });
 
+  describe("enabled means the control is offered, not taken (issue #256)", () => {
+    const replayConfig = {
+      type: "easy-floorplan-card",
+      width: 1000,
+      height: 600,
+      historyReplay: { enabled: true, lookbackSeconds: 3600 },
+      floors: [{ id: "f1", name: "Floor 1", walls: [], openings: [], texts: [], furniture: [], trackers: [], areas: [],
+        items: [{ id: "a", entity: "light.kitchen", x: 10, y: 10, kind: "light" }] }],
+    };
+    const hass = {
+      states: { "light.kitchen": { entity_id: "light.kitchen", state: "on", attributes: {} } },
+      entities: {}, callApi: vi.fn(async () => []), callService: vi.fn(),
+      formatEntityState: (st: HassEntity) => st.state,
+    } as unknown as HomeAssistant;
+
+    const configured = () => {
+      const card = document.createElement("easy-floorplan-card") as FloorplanCard;
+      document.body.appendChild(card);
+      card.hass = hass;
+      card.setConfig(replayConfig as never);
+      return { card, controller: (card as any)._replayController };
+    };
+
+    it("does not switch replay on by itself", () => {
+      const { controller } = configured();
+      expect(controller.state.enabled).toBe(false);
+      // …so the plan is drawing live state, which is the whole point.
+      expect(controller.getRenderState().enabled).toBe(false);
+    });
+
+    it("still offers the panel, so there is something to switch on with", async () => {
+      const { card } = configured();
+      await card.updateComplete;
+      expect(card.shadowRoot?.querySelector("easy-floorplan-replay-panel")).toBeTruthy();
+    });
+
+    it("shows the window it would load rather than 1970", () => {
+      // The unstarted panel used to be unreachable, so its placeholder window
+      // (0..MAX) had never been seen. It reads the clock now, which is what
+      // makes this test worth writing carefully: the window comes from
+      // `Date.now()` at the moment it is asked for, so there is no second
+      // reading of the clock that agrees with it. Bracketing the call is the
+      // only assertion that holds however long the machine stalls in the
+      // middle — a tolerance is just a guess about how slow is too slow.
+      const { controller } = configured();
+      const before = Date.now() / 1000;
+      const props = createReplayPanelProps(controller);
+      const after = Date.now() / 1000;
+      expect(props.endTime).toBeGreaterThanOrEqual(before);
+      expect(props.endTime).toBeLessThanOrEqual(after);
+      // Both ends come from one reading, so the span is exact whatever the
+      // clock did around it.
+      expect(props.endTime - props.startTime).toBe(3600);
+      expect(props.currentTime).toBe(props.endTime);
+      expect(props.startInputValue).not.toContain("1970");
+      expect(props.endInputValue).not.toContain("1970");
+    });
+
+    it("hands the window back to the panel once replay is running", async () => {
+      const { controller } = configured();
+      await controller.startReplay();
+      const props = createReplayPanelProps(controller);
+      expect(props.startTime).toBe(controller.state.playbackController.startTime);
+      expect(props.endTime).toBe(controller.state.playbackController.endTime);
+    });
+  });
+
+  describe("the way back to now", () => {
+    const controllerAt = (opts: { enabled: boolean; playing?: boolean; at?: number }) => {
+      const card = document.createElement("easy-floorplan-card") as FloorplanCard;
+      card.setConfig({
+        type: "easy-floorplan-card", width: 1000, height: 600,
+        historyReplay: { enabled: true, lookbackSeconds: 3600 },
+        floors: [{ id: "f1", name: "Floor 1", walls: [], openings: [], items: [], texts: [], furniture: [], trackers: [], areas: [] }],
+      } as never);
+      const controller = (card as any)._replayController;
+      controller.state.enabled = opts.enabled;
+      controller.state.startTime = 1000;
+      controller.state.endTime = 2000;
+      controller.state.playbackController = new PlaybackController({ startTime: 1000, endTime: 2000 });
+      controller.state.playbackController.seek(opts.at ?? 2000);
+      if (opts.playing) controller.state.playbackController.play();
+      return controller;
+    };
+
+    it("offers no way back while the plan is already showing now", () => {
+      // Not in replay at all…
+      expect(createReplayPanelProps(controllerAt({ enabled: false })).viewingHistory).toBe(false);
+      // …and in replay but parked at the end, which draws live anyway.
+      expect(createReplayPanelProps(controllerAt({ enabled: true })).viewingHistory).toBe(false);
+    });
+
+    it("offers it once the plan is showing the past", () => {
+      expect(createReplayPanelProps(controllerAt({ enabled: true, at: 1500 })).viewingHistory).toBe(true);
+      // Playing at the last frame is still watching the recording, not now.
+      expect(
+        createReplayPanelProps(controllerAt({ enabled: true, playing: true })).viewingHistory,
+      ).toBe(true);
+    });
+
+    it("returns the head to the end, and stops playing, without tearing replay down", () => {
+      const controller = controllerAt({ enabled: true, playing: true, at: 1200 });
+      controller.state.historyEvents = [{ entityId: "light.a", timestamp: 1300, state: "on" }];
+      controller.returnToLive();
+      expect(controller.state.playbackController.currentTime).toBe(2000);
+      expect(controller.state.playbackController.playing).toBe(false);
+      // The plan is live now…
+      expect(controller.getRenderState().enabled).toBe(false);
+      // …and going back to a moment costs no second history fetch.
+      expect(controller.state.enabled).toBe(true);
+      expect(controller.state.historyEvents).toHaveLength(1);
+      // …so the button that got you here is gone.
+      expect(createReplayPanelProps(controller).viewingHistory).toBe(false);
+    });
+  });
+
+  describe("what the plan draws from while replay is on (issue #256)", () => {
+    // Replay being switched on means the timeline exists and the head can be
+    // moved. It does not mean the plan stops tracking reality: parked at the
+    // end of the window, the head points at the newest thing replay knows, and
+    // live state is newer still.
+    //
+    // Left rendering from history there, turning replay on quietly froze the
+    // plan at the instant it loaded — a light toggled from the plan really
+    // switched, while its badge and cast pool never moved.
+    const replayCard = () => {
+      const card = document.createElement("easy-floorplan-card") as FloorplanCard;
+      card.setConfig({
+        type: "easy-floorplan-card",
+        width: 1000,
+        height: 600,
+        historyReplay: { enabled: true, lookbackSeconds: 3600 },
+        floors: [{ id: "f1", name: "Floor 1", walls: [], openings: [], items: [], texts: [], furniture: [], trackers: [], areas: [] }],
+      } as never);
+      const controller = (card as any)._replayController;
+      controller.state.enabled = true;
+      controller.state.playbackController = new PlaybackController({ startTime: 1000, endTime: 2000 });
+      return { card, controller };
+    };
+
+    it("draws live state when the head is parked at the end of the window", () => {
+      const { controller } = replayCard();
+      controller.state.playbackController.seek(2000);
+      expect(controller.getRenderState().enabled).toBe(false);
+    });
+
+    it("draws history as soon as the head moves back", () => {
+      const { controller } = replayCard();
+      controller.state.playbackController.seek(1500);
+      const render = controller.getRenderState();
+      expect(render.enabled).toBe(true);
+      // …and still reports where the head is, so the plan draws that moment.
+      expect(render.currentTime).toBe(1500);
+    });
+
+    it("draws history while playing, even on the last frame", () => {
+      // Playing *to* the end is watching history arrive, not returning to now.
+      const { controller } = replayCard();
+      controller.state.playbackController.seek(2000);
+      controller.state.playbackController.play();
+      expect(controller.getRenderState().enabled).toBe(true);
+    });
+
+    it("stays live when replay is off, whatever the head says", () => {
+      const { controller } = replayCard();
+      controller.state.enabled = false;
+      controller.state.playbackController.seek(1500);
+      expect(controller.getRenderState().enabled).toBe(false);
+    });
+  });
+
   describe("the history cache survives an unrelated setConfig", () => {
     // HA calls setConfig on every keystroke in the config box. Clearing the
     // cache there meant one history query per character typed.
@@ -1037,7 +1257,7 @@ describe("FloorplanCard replay", () => {
     expect(events.some((event: { entityId: string; oldState: string; newState: string }) => event.entityId === "binary_sensor.front_door" && event.oldState === "off" && event.newState === "on")).toBe(true);
   });
 
-  it("starts loading history automatically when replay is enabled", async () => {
+  it("loads history when replay is switched on, not merely offered (issue #256)", async () => {
     const card = document.createElement("easy-floorplan-card") as FloorplanCard;
     const now = new Date();
     const recent = new Date(now.getTime() - 10 * 60 * 1000).toISOString();
@@ -1095,8 +1315,16 @@ describe("FloorplanCard replay", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
 
+    // Configuring replay offers the control; it does not take the plan over,
+    // so nothing has been fetched yet and the plan is still drawing live.
+    expect(callApi).not.toHaveBeenCalled();
+
     const showButton = getReplayPanelShadowRoot(card)?.querySelector(".replay-show-toggle") as HTMLButtonElement | null;
     showButton?.click();
+    await card.updateComplete;
+
+    // Switching it on is what loads the history behind the timeline.
+    await (card as any)._replayController.startReplay();
     await card.updateComplete;
 
     expect(callApi).toHaveBeenCalled();
@@ -1430,6 +1658,10 @@ describe("FloorplanCard replay", () => {
         ],
       }],
     });
+
+    // Replay is offered, not started (issue #256), so ask for it — the point
+    // of this test is *which* entities the request covers, not when it fires.
+    await (card as any)._replayController.startReplay();
 
     await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));

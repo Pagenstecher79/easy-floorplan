@@ -27,7 +27,9 @@ export interface ReplayPanelRenderProps {
   onToggleVisible: (visible: boolean) => void;
   onRangeChange: (kind: "start" | "end", value: string) => void;
   onZoom: (direction: -1 | 1) => void;
-  onToggleReplay: () => void;
+  onReturnLive: () => void;
+  /** Whether the plan is showing a past moment rather than the present. */
+  viewingHistory: boolean;
   onJump: (delta: number) => void;
   onStep: (direction: -1 | 1) => void;
   onPlayToggle: () => void;
@@ -56,9 +58,10 @@ export interface ReplayPanelHost {
     playbackController: { startTime: number; endTime: number; currentTime: number; speed: number; playing: boolean };
   };
   formatReplayTime: (timestamp: number) => string;
+  getDefaultWindow: () => { start: number; end: number };
   handleRangeChange: (kind: "start" | "end", ev: Event) => void;
   zoomWindow: (direction: -1 | 1) => void;
-  toggleReplay: () => Promise<void>;
+  returnToLive: () => void;
   jumpReplay: (delta: number) => void;
   stepReplay: (direction: -1 | 1) => void;
   pauseReplay: () => void;
@@ -75,15 +78,33 @@ export interface ReplayPanelHost {
 export function createReplayPanelProps(host: ReplayPanelHost): ReplayPanelRenderProps {
   const playback = host.state.playbackController;
   const state = host.state;
-  const currentTimeLabel = host.formatReplayTime(playback.currentTime);
+  // Before replay has ever been started there is no window and no head: the
+  // controller holds a placeholder spanning 0..MAX, whose timestamps format as
+  // 1970. That state used to be unreachable, because enabling the feature
+  // started replay outright; now that it means *offering* the control, it is
+  // the first thing anyone sees. So the panel presents the window it would
+  // load — the same default `startReplay` falls back to — and reads the clock
+  // for the head, since not having started is another way of saying "now".
+  const started = state.enabled || state.startTime > 0;
+  const fallback = started ? undefined : host.getDefaultWindow();
+  const windowStart = fallback ? fallback.start : state.startTime;
+  const windowEnd = fallback ? fallback.end : state.endTime;
+  const currentTimeLabel = host.formatReplayTime(
+    fallback ? fallback.end : playback.currentTime,
+  );
 
   return {
     events: state.historyEvents,
-    startTime: playback.startTime,
-    endTime: playback.endTime,
-    currentTime: playback.currentTime,
+    startTime: fallback ? fallback.start : playback.startTime,
+    endTime: fallback ? fallback.end : playback.endTime,
+    currentTime: fallback ? fallback.end : playback.currentTime,
     visible: state.historyVisible,
     enabled: state.enabled,
+    // Showing the past, which is the only time there is anything to return
+    // from: replay running, and the head either moving or somewhere behind the
+    // end of the window. Parked at the end it is already drawing live.
+    viewingHistory:
+      state.enabled && (playback.playing || playback.currentTime < playback.endTime),
     ready: state.ready,
     playing: playback.playing,
     timelineExpanded: state.timelineExpanded,
@@ -94,14 +115,14 @@ export function createReplayPanelProps(host: ReplayPanelHost): ReplayPanelRender
     panelId: state.panelId,
     replaySpeed: playback.speed,
     currentTimeLabel,
-    startInputValue: formatReplayInputValue(state.startTime),
-    endInputValue: formatReplayInputValue(state.endTime),
+    startInputValue: formatReplayInputValue(windowStart),
+    endInputValue: formatReplayInputValue(windowEnd),
     onToggleVisible: (visible: boolean) => host.toggleHistoryVisible(visible),
     onRangeChange: (kind: "start" | "end", value: string) => {
       host.handleRangeChange(kind, { target: { value } } as unknown as Event);
     },
     onZoom: (direction: -1 | 1) => host.zoomWindow(direction),
-    onToggleReplay: () => { void host.toggleReplay(); },
+    onReturnLive: () => host.returnToLive(),
     onJump: (delta: number) => host.jumpReplay(delta),
     onStep: (direction: -1 | 1) => host.stepReplay(direction),
     onPlayToggle: () => (playback.playing ? host.pauseReplay() : host.playReplay()),
@@ -123,6 +144,7 @@ export function renderReplayPanel(props: ReplayPanelRenderProps): TemplateResult
       .currentTime=${props.currentTime}
       .visible=${props.visible}
       .enabled=${props.enabled}
+      .viewingHistory=${props.viewingHistory}
       .ready=${props.ready}
       .playing=${props.playing}
       .timelineExpanded=${props.timelineExpanded}
@@ -142,7 +164,7 @@ export function renderReplayPanel(props: ReplayPanelRenderProps): TemplateResult
         props.onRangeChange(kind, ev.detail.value);
       }}
       @zoom=${(ev: CustomEvent<{ direction: -1 | 1 }>) => props.onZoom(ev.detail?.direction ?? 1)}
-      @toggle-replay=${() => props.onToggleReplay()}
+      @return-live=${() => props.onReturnLive()}
       @jump=${(ev: CustomEvent<{ delta: number }>) => props.onJump(ev.detail?.delta ?? 0)}
       @step=${(ev: CustomEvent<{ direction: -1 | 1 }>) => props.onStep(ev.detail?.direction ?? 1)}
       @play-toggle=${() => props.onPlayToggle()}
@@ -378,6 +400,21 @@ export class ReplayPanel extends LitElement {
       min-width: 0;
       align-self: flex-start;
     }
+    /* The way back to now. Only drawn while the plan is showing the past, so
+       it is never a button that undoes nothing -- see viewingHistory. */
+    .replay-live-button {
+      font-weight: 600;
+    }
+    /* Only the live state wears the accent. Loading is not live, and painting
+       it as though it were is what this pair of classes exists to prevent --
+       see _chipState, which is the one place the state is decided. */
+    .replay-chip.is-live {
+      background: var(--fp-skin-accent, var(--primary-color, #03a9f4));
+      color: var(--text-primary-color, #fff);
+    }
+    .replay-chip.is-loading {
+      opacity: 0.75;
+    }
     .replay-run-button {
       min-width: 82px;
       font-weight: 600;
@@ -505,6 +542,7 @@ export class ReplayPanel extends LitElement {
   @property({ type: Number }) public currentTime = 0;
   @property({ type: Boolean }) public visible = false;
   @property({ type: Boolean }) public enabled = false;
+  @property({ type: Boolean }) public viewingHistory = false;
   @property({ type: Boolean }) public ready = false;
   @property({ type: Boolean }) public playing = false;
   @property({ type: Boolean }) public timelineExpanded = false;
@@ -575,6 +613,21 @@ export class ReplayPanel extends LitElement {
     current.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
 
+  /**
+   * The status chip: one state, said twice — in words and in colour.
+   *
+   * Worked out in one place because it was worked out in two, and they
+   * disagreed. The label had three branches and the class had two, so a panel
+   * that was still fetching read "Loading history…" painted in the live
+   * accent: the one state where the two halves could contradict each other,
+   * and the one nobody looks at twice.
+   */
+  private _chipState(): { label: string; className: string } {
+    if (this.enabled && !this.ready) return { label: "Loading history…", className: "is-loading" };
+    if (this.viewingHistory) return { label: "Replay", className: "is-replay" };
+    return { label: "Live", className: "is-live" };
+  }
+
   protected render(): TemplateResult {
     if (!this.visible) {
       return html`
@@ -593,6 +646,7 @@ export class ReplayPanel extends LitElement {
     }
 
     const currentEvent = this._getCurrentEvent();
+    const chip = this._chipState();
     return html`
       <div class="replay-panel" id=${this.panelId}>
         <button
@@ -605,7 +659,7 @@ export class ReplayPanel extends LitElement {
         </button>
         <div class="replay-header">
           <div class="replay-meta">
-            <span class="replay-chip">${this.ready ? "Replay ready" : this.enabled ? "Loading replay…" : "Replay paused"}</span>
+            <span class="replay-chip ${chip.className}">${chip.label}</span>
             <span class="replay-time">${this.currentTimeLabel}</span>
           </div>
           <div class="replay-status">
@@ -642,7 +696,15 @@ export class ReplayPanel extends LitElement {
         </div>
         <div class="replay-toolbar">
           <div class="replay-transport" role="group" aria-label="Replay transport controls">
-            <button title="Toggle replay mode" @click=${() => this._dispatch("toggle-replay")}>${this.enabled ? "Disable" : "Enable"}</button>
+            ${this.viewingHistory
+              ? html`<button
+                  class="replay-live-button"
+                  title="Return to live"
+                  @click=${() => this._dispatch("return-live")}
+                >
+                  Live
+                </button>`
+              : nothing}
             <button class="replay-icon-button" aria-label="Jump back 30 seconds" title="Jump back 30 seconds" @click=${() => this._dispatch("jump", { delta: -30 })}>
               <ha-icon icon="mdi:rewind-30"></ha-icon>
             </button>

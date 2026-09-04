@@ -271,11 +271,15 @@ export class FloorplanCard extends LitElement {
       this._lastReplayCacheKey = replayKey;
       this._replayController.historyService().clearCache();
     }
+    // A plan that has switched replay off entirely stops any playback still
+    // running. A plan that *offers* replay does not start it: `enabled` means
+    // the control is there, not that the card hands the plan over to it. It
+    // used to start on load, which quietly turned a live plan into a snapshot
+    // of the moment it loaded — a light toggled from the plan really switched
+    // while its badge and cast pool stayed put (issue #256).
     if (!this._replayController.state.configured) {
       this._replayController.pausePlayback();
       this._replayController.stopReplayLoop();
-    } else if (this.hass) {
-      this._replayController.ensureStarted();
     }
     // Restore the floor this plan was last viewed on (issue #81). Only when
     // this instance has no floor of its own yet — a live floor switch always
@@ -319,12 +323,6 @@ export class FloorplanCard extends LitElement {
     super.updated(changed);
     if (changed.has("hass") || changed.has("_activeFloorId")) {
       this._syncHistoryServiceContext();
-    }
-    if (
-      (changed.has("hass") || changed.has("_activeFloorId"))
-      && this._replayController.shouldAutoStart()
-    ) {
-      this._replayController.ensureStarted();
     }
   }
 
@@ -636,7 +634,12 @@ export class FloorplanCard extends LitElement {
     // Animation goes on the inner ha-icon, not the badge: the badge carries
     // the user's `angle` rotation, and a spin on the same element would
     // overwrite it.
-    const st = item.entity ? this.hass?.states[item.entity] : undefined;
+    // From the state being *drawn*, not the live one. Everything else in this
+    // badge — the glyph, the reading — comes from `renderHass`, and an
+    // animation resolved from `this.hass` disagrees with all of it the moment
+    // replay moves the head: a motion sensor pulsing because something is
+    // happening now, on a plan showing an hour ago.
+    const st = item.entity ? renderHass?.states[item.entity] : undefined;
     const anim = resolveIconAnimation(item, st?.state, st?.attributes);
     // "Show the reading, not a picture" (issue #106). Same badge — size, angle,
     // state colour, ripple stacking all unchanged — with the glyph swapped for
@@ -715,8 +718,12 @@ export class FloorplanCard extends LitElement {
     // grey on load.
     const offline = !!this.hass && itemIsOffline(item, st?.state);
 
-    // Hide badge by state or operator (preserve layout space via CSS visibility)
-    const isBadgeHidden = itemBadgeHidden(item, st?.state, this.hass);
+    // Hide badge by state or operator (preserve layout space via CSS
+    // visibility). Judged on the same instant as everything else it sits
+    // beside: the condition can name a *different* entity, and reading that
+    // one live would hide or show a badge on grounds the rest of the plan
+    // cannot see.
+    const isBadgeHidden = itemBadgeHidden(item, st?.state, renderHass);
     // "none" is the old `showIcon: false` — no badge, label only (issue #106).
     const showIcon = badgeContentOf(item) !== "none";
 
