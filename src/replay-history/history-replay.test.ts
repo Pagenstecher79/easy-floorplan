@@ -963,6 +963,29 @@ describe("FloorplanCard replay", () => {
       controller.toggleHistoryVisible(true);
       expect(startSpy).not.toHaveBeenCalled();
       expect(controller.getRenderState().enabled).toBe(false);
+      // And it does not record the panel as open either: the flag means "on
+      // screen", so leaving it set against a config that draws no panel would
+      // have the two halves of that disagree.
+      expect(controller.isHistoryVisible()).toBe(false);
+      expect(controller.isReplayShowing()).toBe(false);
+    });
+
+    it("does not reopen already-open when the feature comes back", () => {
+      const card = document.createElement("easy-floorplan-card") as FloorplanCard;
+      const config = (replay: boolean) => ({
+        type: "easy-floorplan-card", width: 1000, height: 600,
+        historyReplay: { enabled: replay, lookbackSeconds: 3600 },
+        floors: [{ id: "f1", name: "Floor 1", walls: [], openings: [], items: [], texts: [], furniture: [], trackers: [], areas: [] }],
+      });
+      card.setConfig(config(false) as never);
+      const controller = (card as any)._replayController;
+
+      controller.toggleHistoryVisible(true);
+      card.setConfig(config(true) as never);
+
+      // A panel that comes back open would come back unstarted, because
+      // nothing ever ran startReplay behind it.
+      expect(controller.isHistoryVisible()).toBe(false);
     });
   });
 

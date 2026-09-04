@@ -177,7 +177,12 @@ export class ReplayControllerImpl implements ReplayController {
    * clock running.
    */
   public isReplayShowing(): boolean {
-    return !!this._card.getConfig()?.historyReplay?.enabled && this.state.historyVisible;
+    return this._replayOffered() && this.state.historyVisible;
+  }
+
+  /** Whether the config puts a replay control on the card at all. */
+  private _replayOffered(): boolean {
+    return !!this._card.getConfig()?.historyReplay?.enabled;
   }
 
   /**
@@ -313,8 +318,15 @@ export class ReplayControllerImpl implements ReplayController {
    * cannot reach the plan while the panel is shut (see {@link getRenderState}).
    */
   public toggleHistoryVisible(visible: boolean): void {
-    this.state.historyVisible = visible;
-    if (!visible) {
+    // Asked to open, and there is something to open: the flag means "the panel
+    // is on screen", so a config that draws no panel cannot set it. Committing
+    // it first and bailing afterwards left it true with replay switched off --
+    // a state where isHistoryVisible and isReplayShowing disagree, and where
+    // switching the feature back on would find the panel already open with
+    // nothing ever loaded behind it.
+    const open = visible && this._replayOffered();
+    this.state.historyVisible = open;
+    if (!open) {
       this.state.playbackController.pause();
       this.stopReplayLoop();
       this.logReplay("[easy-floorplan] Replay closed, plan is live");
@@ -322,10 +334,7 @@ export class ReplayControllerImpl implements ReplayController {
       return;
     }
     this._card.requestUpdate();
-    // isReplayShowing, not just hass: a caller can set this true against a
-    // config with replay switched off, and loading history for a panel that
-    // will not be rendered is work nobody can see or stop.
-    if (!this._card.getHass() || !this.isReplayShowing()) return;
+    if (!this._card.getHass()) return;
     void this.startReplay();
   }
 
