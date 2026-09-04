@@ -1208,8 +1208,35 @@ describe("overlay scaling", () => {
       "--fp-ripple-width:360"
     );
     expect(flattenMarkup(renderRipple(true, "#fff", 80, 400, 400, 3, "plan"))).toContain(
-      "--fp-ripple-direction:360"
+      "--fp-ripple-direction:40"
     );
+  });
+
+  // Both values land in a `style` attribute, so they are exactly the kind of
+  // config the adversarial suite exists for (css-safe.adversarial.test.ts):
+  // "nothing accepted can break out of a style declaration".
+  it("cannot be used to inject a style declaration", () => {
+    const hostile = [
+      "0; background:url(https://evil.example/x.png)",
+      '0" onload="alert(1)',
+      "0/*",
+      "abc",
+    ];
+    for (const value of hostile) {
+      const asDirection = flattenMarkup(
+        renderRipple(true, "#fff", 80, value as unknown as number, 360, 3, "fixed")
+      );
+      expect(asDirection).toContain("--fp-ripple-direction:0");
+      expect(asDirection).not.toContain("background");
+      expect(asDirection).not.toContain("onload");
+
+      const asWidth = flattenMarkup(
+        renderRipple(true, "#fff", 80, 0, value as unknown as number, 3, "fixed")
+      );
+      expect(asWidth).toContain("--fp-ripple-width:360");
+      expect(asWidth).not.toContain("background");
+      expect(asWidth).not.toContain("onload");
+    }
   });
 
 
