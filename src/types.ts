@@ -658,8 +658,11 @@ export interface FloorItem {
    */
   activeColor?: string;
   /** new option to prevent using the state color for the label too */
+  /** Disables the state-driven color inheritance for the label, falling back to the default theme text color. */
   disableLabelColor?: boolean;
+  /** Activates a custom color override for the label. Only applies when disableLabelColor is true. */
   useCustomLabelColor?: boolean;
+  /** The specific custom color applied to the label when useCustomLabelColor is true. */
   labelCustomColor?: string;
   /** Ripple ring color (CSS/hex). Falls back to `activeColor`, then the primary color. */
   rippleColor?: string;

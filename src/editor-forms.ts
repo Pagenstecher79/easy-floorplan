@@ -951,8 +951,7 @@ export function itemLabelForm(it: FloorItem): FormSpec {
     toPatch: (p) => {
       const out = { ...p };
       
-      // WICHTIG: Wir ermitteln den echten zukünftigen Status, 
-      // indem wir den Patch (out) mit dem aktuellen Status (it) abgleichen.
+      // IMPORTANT: Determine the actual future state
       const isDisable = out.disableLabelColor ?? it.disableLabelColor ?? false;
       const isCustom = out.useCustomLabelColor ?? it.useCustomLabelColor ?? false;
 
@@ -960,7 +959,7 @@ export function itemLabelForm(it: FloorItem): FormSpec {
       if (out.disableLabelColor === false) out.disableLabelColor = undefined;
       if (out.useCustomLabelColor === false) out.useCustomLabelColor = undefined;
 
-      // Aufräumen basierend auf dem ECHTEN Status
+      // Clean up based on the ACTUAL state
       if (!isDisable) {
         out.useCustomLabelColor = undefined;
         out.labelCustomColor = undefined;

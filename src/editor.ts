@@ -4758,7 +4758,7 @@ export class FloorplanCardEditor extends LitElement {
           ? this._renderGroup(
               "Label",
               this._renderForm(itemLabelForm(it), apply),
-              it.useCustomLabelColor
+              it.disableLabelColor && it.useCustomLabelColor
                 ? this._renderColorRow({
                     label: "Custom color",
                     value: it.labelCustomColor,
