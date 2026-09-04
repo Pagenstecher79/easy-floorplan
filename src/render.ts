@@ -4850,10 +4850,17 @@ export function renderRipple(
   function wrapAngle(value: number): number {
     return ((value % 360) + 360) % 360
   }
+  function clamp(value: number, min: number, max: number): number {
+    return Math.max(Math.min(value, max), min);
+  }
 
   const size = overlayLength(cssNumber(sizePx, DEFAULT_RIPPLE_SIZE), scale);
+
+  // direction gets wrapped, since 0° and 360° are actually the same
   const direction_ = wrapAngle(cssNumber(direction, DEFAULT_RIPPLE_DIRECTION));
-  const width_ = wrapAngle(cssNumber(width, DEFAULT_RIPPLE_WIDTH));
+
+  // width gets clamped, since a width of 0° and 360° is not the same and should not wrap
+  const width_ = clamp(cssNumber(width, DEFAULT_RIPPLE_WIDTH), 0, 360);
 
   return html`
     <div
