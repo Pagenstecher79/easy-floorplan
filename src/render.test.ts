@@ -1183,11 +1183,62 @@ describe("overlay scaling", () => {
   // path: dropping the argument at one of the badge/item call sites would
   // otherwise still pass. renderRipple is exported, so it anchors the wiring.
   it("threads the mode through a real render path, not just the helper", () => {
-    expect(flattenMarkup(renderRipple(true, "#fff", 80, 3, "plan"))).toContain(
+    expect(flattenMarkup(renderRipple(true, "#fff", 80, 0, 360, 3, "plan"))).toContain(
       "width:calc(80 * var(--fp-u, 1px))"
     );
-    expect(flattenMarkup(renderRipple(true, "#fff", 80, 3, "fixed"))).toContain("width:80px");
+    expect(flattenMarkup(renderRipple(true, "#fff", 80, 0, 360, 3, "fixed"))).toContain("width:80px");
   });
+
+  it("passes --fp-ripple-width and --fp-ripple-direction through to rendering", () => {
+    expect(flattenMarkup(renderRipple(true, "#fff", 80, 0, 180, 3, "plan"))).toContain(
+      "--fp-ripple-width:180"
+    );
+    expect(flattenMarkup(renderRipple(true, "#fff", 80, 0, 180, 3, "plan"))).toContain(
+      "--fp-ripple-direction:0"
+    );
+
+    expect(flattenMarkup(renderRipple(true, "#fff", 80, 90, 180, 3, "plan"))).toContain(
+      "--fp-ripple-width:180"
+    );
+    expect(flattenMarkup(renderRipple(true, "#fff", 80, 90, 180, 3, "plan"))).toContain(
+      "--fp-ripple-direction:90"
+    );
+
+    expect(flattenMarkup(renderRipple(true, "#fff", 80, 400, 400, 3, "plan"))).toContain(
+      "--fp-ripple-width:360"
+    );
+    expect(flattenMarkup(renderRipple(true, "#fff", 80, 400, 400, 3, "plan"))).toContain(
+      "--fp-ripple-direction:40"
+    );
+  });
+
+  // Both values land in a `style` attribute, so they are exactly the kind of
+  // config the adversarial suite exists for (css-safe.adversarial.test.ts):
+  // "nothing accepted can break out of a style declaration".
+  it("cannot be used to inject a style declaration", () => {
+    const hostile = [
+      "0; background:url(https://evil.example/x.png)",
+      '0" onload="alert(1)',
+      "0/*",
+      "abc",
+    ];
+    for (const value of hostile) {
+      const asDirection = flattenMarkup(
+        renderRipple(true, "#fff", 80, value as unknown as number, 360, 3, "fixed")
+      );
+      expect(asDirection).toContain("--fp-ripple-direction:0");
+      expect(asDirection).not.toContain("background");
+      expect(asDirection).not.toContain("onload");
+
+      const asWidth = flattenMarkup(
+        renderRipple(true, "#fff", 80, 0, value as unknown as number, 3, "fixed")
+      );
+      expect(asWidth).toContain("--fp-ripple-width:360");
+      expect(asWidth).not.toContain("background");
+      expect(asWidth).not.toContain("onload");
+    }
+  });
+
 
   it("clamps the area name size to the same range item labels use", () => {
     expect(areaLabelSize(undefined)).toBe(14);

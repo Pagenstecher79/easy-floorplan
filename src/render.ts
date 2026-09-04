@@ -59,6 +59,8 @@ import {
   FURNITURE_GLOW_TRANSMISSION,
   getFloors,
   trackerAxisFraction,
+  DEFAULT_RIPPLE_DIRECTION,
+  DEFAULT_RIPPLE_WIDTH,
 } from "./types";
 import { cssColor, cssColorOr, cssNumber, cssIdent, cssEntityId, cssIcon } from "./css-safe";
 import { hasAction } from "./actions";
@@ -4840,14 +4842,30 @@ export function renderRipple(
   active: boolean,
   color: string,
   sizePx: number,
+  direction: number,
+  width: number,
   rings = 3,
   scale: OverlayScale = "fixed"
 ): TemplateResult {
+  function wrapAngle(value: number): number {
+    return ((value % 360) + 360) % 360
+  }
+  function clamp(value: number, min: number, max: number): number {
+    return Math.max(Math.min(value, max), min);
+  }
+
   const size = overlayLength(cssNumber(sizePx, DEFAULT_RIPPLE_SIZE), scale);
+
+  // direction gets wrapped, since 0° and 360° are actually the same
+  const direction_ = wrapAngle(cssNumber(direction, DEFAULT_RIPPLE_DIRECTION));
+
+  // width gets clamped, since a width of 0° and 360° is not the same and should not wrap
+  const width_ = clamp(cssNumber(width, DEFAULT_RIPPLE_WIDTH), 0, 360);
+
   return html`
     <div
       class="ripple ${active ? "active" : ""}"
-      style="width:${size};height:${size};--fp-ripple-color:${cssColorOr(color, SKIN_ACCENT)};"
+      style="width:${size};height:${size};--fp-ripple-color:${cssColorOr(color, SKIN_ACCENT)};--fp-ripple-direction:${direction_};--fp-ripple-width:${width_}"
     >
       <span class="dot"></span>
       ${Array.from(

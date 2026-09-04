@@ -661,6 +661,10 @@ export interface FloorItem {
   rippleColor?: string;
   /** Max ripple ring diameter in pixels. Default 80. */
   rippleSize?: number;
+  /** Direction of the center of the ripple if its width is not 360° in degrees. Default 0° (top). */
+  rippleDirection?: number;
+  /** Width of the ripple in degrees. Default 360° (all around). */
+  rippleWidth?: number;
   /**
    * Cast a pool of light onto the plan from this device's position (issue #6).
    *
@@ -1296,6 +1300,9 @@ export const DEFAULT_ITEM_SIZE = 34;
 export const MIN_TOUCH_TARGET = 34;
 export const DEFAULT_TEXT_SIZE = 16;
 export const DEFAULT_RIPPLE_SIZE = 80;
+export const DEFAULT_RIPPLE_DIRECTION = 0;
+export const DEFAULT_RIPPLE_WIDTH = 360;
+
 /** Neutral gray, so furniture reads differently from the walls. Skinnable (#122). */
 export const FURNITURE_COLOR = "var(--fp-skin-furniture, #9e9e9e)";
 

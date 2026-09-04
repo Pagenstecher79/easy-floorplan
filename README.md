@@ -354,7 +354,9 @@ while the device detects something, and collapse to a faint dot when it's clear,
 spot stays marked without pulling the eye.
 
 **Ripple color** and **ripple size** are per device (the color follows **Active color**
-and state rules unless you set one).
+and state rules unless you set one). With **Ripple width** and **Ripple direction** the
+width of the ripple can be limited. This is intended for sensors mounted to a wall, which
+cannot detect presence or motion all around them.
 
 The toggle appears only on devices that detect something where they sit — a
 `binary_sensor` whose device class is `motion`, `occupancy`, `presence` or `vibration`, or

@@ -22,6 +22,8 @@ import {
   DEFAULT_ITEM_SIZE,
   DEFAULT_TEXT_SIZE,
   DEFAULT_RIPPLE_SIZE,
+  DEFAULT_RIPPLE_DIRECTION,
+  DEFAULT_RIPPLE_WIDTH,
   DEFAULT_AREA_LABEL_SIZE,
   MIN_TOUCH_TARGET,
   DEFAULT_SUN_MIN,
@@ -740,6 +742,8 @@ export class FloorplanCard extends LitElement {
     // var()/color-mix()/gradient keeps the theme ink, exactly as before.
     const badgeInk = contrastText(stateColor ?? activeColor);
     const rippleSize = item.rippleSize ?? DEFAULT_RIPPLE_SIZE;
+    const rippleDirection = item.rippleDirection ?? DEFAULT_RIPPLE_DIRECTION;
+    const rippleWidth = item.rippleWidth ?? DEFAULT_RIPPLE_WIDTH;
 
     // Apply visibility hidden to keep the layout space intact for the label
     const hiddenStyle = isBadgeHidden ? "visibility: hidden; pointer-events: none;" : "";
@@ -747,11 +751,11 @@ export class FloorplanCard extends LitElement {
     let visual: TemplateResult | typeof nothing = nothing;
     if (display === "ripple") {
       visual = html`<span style="${hiddenStyle}">
-        ${renderRipple(on, rippleColor, rippleSize, 3, scale)}
+        ${renderRipple(on, rippleColor, rippleSize, rippleDirection, rippleWidth, 3, scale)}
       </span>`;
     } else if (display === "iconRipple") {
       visual = html`<div class="stack" style="${hiddenStyle}">
-        ${renderRipple(on, rippleColor, rippleSize, 3, scale)}
+        ${renderRipple(on, rippleColor, rippleSize, rippleDirection, rippleWidth, 3, scale)}
         ${showIcon ? html`<div class="stack-icon">${this._renderBadge(item, scale, renderHass)}</div>` : nothing}
       </div>`;
     } else if (showIcon) {
@@ -2227,6 +2231,20 @@ export class FloorplanCard extends LitElement {
       border-radius: 50%;
       border: 2px solid var(--fp-ripple-color);
       opacity: 0;
+
+      /* Keep only the angular slice the ring should travel along */
+      -webkit-mask: conic-gradient(
+        from calc(var(--fp-ripple-direction) * 1deg - var(--fp-ripple-width) * 1deg / 2),
+        #000 0deg,
+        #000 calc(var(--fp-ripple-width) * 1deg),
+        transparent calc(var(--fp-ripple-width) * 1deg)
+      );
+      mask: conic-gradient(
+        from calc(var(--fp-ripple-direction) * 1deg - var(--fp-ripple-width) * 1deg / 2),
+        #000 0deg,
+        #000 calc(var(--fp-ripple-width) * 1deg),
+        transparent calc(var(--fp-ripple-width) * 1deg)
+      );
     }
     .ripple.active .ring {
       animation: fp-ripple 1.8s ease-out infinite;
