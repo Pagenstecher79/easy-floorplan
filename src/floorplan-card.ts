@@ -626,7 +626,7 @@ export class FloorplanCard extends LitElement {
     executeAction(this, this.hass, { entity: press.entity }, press.config);
   }
 
-  private _renderBadge(item: FloorItem, scale: OverlayScale, renderHass?: RenderHass): TemplateResult {
+  private _renderBadge(item: FloorItem, scale: OverlayScale, renderHass: RenderHass | undefined): TemplateResult {
     const size = cssNumber(item.size, DEFAULT_ITEM_SIZE);
     const box = overlayLength(size, scale);
     
