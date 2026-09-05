@@ -40,6 +40,8 @@ import {
   DEFAULT_SUN_MAX,
   DEFAULT_PRESS_EFFECT,
   DEFAULT_OFFLINE_STYLE,
+  DEFAULT_RIPPLE_DIRECTION,
+  DEFAULT_RIPPLE_WIDTH,
 } from "./types";
 import {
   DEFAULT_LABEL_SIZE,
@@ -1102,6 +1104,20 @@ export function itemEffectsForm(it: FloorItem, deviceClass?: string): FormSpec |
           number: { min: 40, max: 400, step: 4, mode: "slider", unit_of_measurement: "px" },
         },
       });
+      fields.push({
+        name: "rippleDirection",
+        label: "Ripple direction",
+        selector: {
+          number: { min: 0, max: 360, step: 1, mode: "slider", unit_of_measurement: "°" },
+        },
+      });
+      fields.push({
+        name: "rippleWidth",
+        label: "Ripple width",
+        selector: {
+          number: { min: 0, max: 360, step: 1, mode: "slider", unit_of_measurement: "°" },
+        },
+      });
     }
   }
   if (lights) {
@@ -1132,6 +1148,8 @@ export function itemEffectsForm(it: FloorItem, deviceClass?: string): FormSpec |
     data: {
       ripple,
       rippleSize: it.rippleSize ?? DEFAULT_RIPPLE_SIZE,
+      rippleDirection: it.rippleDirection ?? DEFAULT_RIPPLE_DIRECTION,
+      rippleWidth: it.rippleWidth ?? DEFAULT_RIPPLE_WIDTH,
       glow: it.glow ?? false,
       glowRadius: it.glowRadius ?? DEFAULT_GLOW_RADIUS,
       glowColor: it.glowColor ?? "",
@@ -1920,6 +1938,34 @@ export function projectDisplayForm(c: FloorplanCardConfig): FormSpec {
         helper: "Rotates the live card only — editing stays as drawn",
         selector: dropdown(opt("0", "0°"), opt("90", "90°"), opt("180", "180°"), opt("270", "270°")),
       },
+      // Per-orientation overrides (issue #237). Two dropdowns with a "same as
+      // above" default rather than a switch plus two angles: the switch would
+      // be a third control whose only job is to say whether the other two
+      // count, and "same as above" says that per orientation and for free.
+      {
+        name: "rotationPortrait",
+        label: "…on a portrait screen",
+        helper: "Overrides the angle above while the screen is taller than it is wide",
+        selector: dropdown(
+          opt("", "Same as above"),
+          opt("0", "0°"),
+          opt("90", "90°"),
+          opt("180", "180°"),
+          opt("270", "270°")
+        ),
+      },
+      {
+        name: "rotationLandscape",
+        label: "…on a landscape screen",
+        helper: "Overrides the angle above while the screen is wider than it is tall",
+        selector: dropdown(
+          opt("", "Same as above"),
+          opt("0", "0°"),
+          opt("90", "90°"),
+          opt("180", "180°"),
+          opt("270", "270°")
+        ),
+      },
       {
         name: "overlayScale",
         label: "Badge & label size",
@@ -1959,6 +2005,16 @@ export function projectDisplayForm(c: FloorplanCardConfig): FormSpec {
     ],
     data: {
       rotation: String(normalizePlanRotation(c.rotation)),
+      // "" is "same as above" — the absence of an override, not an angle.
+      // `== null` for the same reason resolvePlanRotation uses it: a key
+      // written with no value (`rotationPortrait:`) parses to `null`, and
+      // reading that as an angle would show 0° here — then write it into the
+      // YAML as a real override the moment this panel is saved, turning a
+      // stray empty key into an instruction the plan never had.
+      rotationPortrait:
+        c.rotationPortrait == null ? "" : String(normalizePlanRotation(c.rotationPortrait)),
+      rotationLandscape:
+        c.rotationLandscape == null ? "" : String(normalizePlanRotation(c.rotationLandscape)),
       overlayScale: normalizeOverlayScale(c.overlayScale),
       compactHeader: c.compactHeader ?? false,
       zoomedOverlayScale: c.zoomedOverlayScale ?? DEFAULT_ZOOMED_OVERLAY_SCALE,
@@ -1969,6 +2025,12 @@ export function projectDisplayForm(c: FloorplanCardConfig): FormSpec {
       if ("rotation" in out)
         // Stored as a number; 0 means "not rotated", so keep it out of the YAML.
         out = { ...out, rotation: out.rotation === "0" ? undefined : Number(out.rotation) };
+      // The overrides keep their 0 (issue #237): "0° on a portrait screen" is
+      // a real instruction when the plan is otherwise rotated, and dropping it
+      // the way `rotation` drops its own would silently mean "same as above".
+      // Only "" — no override — leaves the YAML.
+      for (const k of ["rotationPortrait", "rotationLandscape"] as const)
+        if (k in out) out = { ...out, [k]: out[k] === "" ? undefined : Number(out[k]) };
       // Both values are written down, which is the one field here that breaks
       // the "defaults stay out of the YAML" habit — deliberately. Omitting the
       // default is what let 1.5.0 restyle every existing plan by changing its

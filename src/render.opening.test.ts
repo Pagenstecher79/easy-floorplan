@@ -284,6 +284,33 @@ describe("renderSunlight — the markup, not just the geometry", () => {
     expect(spans.some((xs) => xs[0]! <= 190 && xs[1]! >= 210)).toBe(false);
   });
 
+  it("a beam carries on through a shut glazed door (#262)", () => {
+    // The patio door the reporter had between a balcony and the room behind
+    // it. Glass, so the wall's shade already has its gap cut and nothing
+    // stands in the light — but the beam's own length was measured against
+    // the *uncut* wall, so it faded to nothing at the door and the room
+    // beyond stayed as dark as if the door were brick. The gap the shade
+    // leaves is only worth having if there is still light arriving at it.
+    const mid = { id: "m", x1: 0, y1: 180, x2: 400, y2: 180 };
+    const far = { id: "f", x1: 0, y1: 220, x2: 400, y2: 220 };
+    const patio = { ...win, id: "d", type: "door", glazed: true, y: 180, length: 200 } as Opening;
+    const s = serialize(
+      renderSunlight([wall, mid, far], [win, patio], 400, 400, "sun", {
+        dir: sun,
+        // Shut, which is the whole point: glass admits its gap whatever the
+        // sash is doing, and the door in the report was a shut one.
+        openAmount: () => 0,
+        shutterOpen: () => undefined,
+      })
+    );
+    // Still one source — the glazed door is not a second sun (#177 / #178).
+    expect(s.match(/class="fp-sunbeam"/g)?.length).toBe(1);
+    // The falloff is scaled by how far the light travels, and that is now the
+    // wall past the door, 120 away, rather than the door's own wall at 80.
+    expect(s).toContain("scale(120 ");
+    expect(s).not.toContain("scale(80 ");
+  });
+
   it("an opening switched out of the sunlight is wall to it (#177)", () => {
     // The solid front door the plan draws open because nothing is bound to it.
     const shut = { ...win, type: "door", sunlight: false } as Opening;

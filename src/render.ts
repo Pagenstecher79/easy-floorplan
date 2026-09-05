@@ -59,6 +59,8 @@ import {
   FURNITURE_GLOW_TRANSMISSION,
   getFloors,
   trackerAxisFraction,
+  DEFAULT_RIPPLE_DIRECTION,
+  DEFAULT_RIPPLE_WIDTH,
 } from "./types";
 import { cssColor, cssColorOr, cssNumber, cssIdent, cssEntityId, cssIcon } from "./css-safe";
 import { hasAction } from "./actions";
@@ -3606,6 +3608,83 @@ export function normalizePlanRotation(v: unknown): PlanRotation {
   return r === 90 || r === 180 || r === 270 ? r : 0;
 }
 
+/**
+ * The rotation a plan is actually drawn at, given which way the screen is
+ * (issue #237).
+ *
+ * `rotation` is the answer for both orientations until one of the two
+ * overrides says otherwise, so a config that sets neither behaves exactly as
+ * it did before this existed — including a config that sets no rotation at
+ * all, which is most of them. An override written with no value at all
+ * (`rotationPortrait:`, which YAML parses to `null`) counts as not set.
+ *
+ * `portrait` is `undefined` where the question cannot be asked (a card
+ * rendered without a window, which is every test in this suite and the
+ * server-side pass in some setups). That falls back to `rotation` rather than
+ * guessing an orientation, because guessing wrong rotates the plan.
+ */
+export function resolvePlanRotation(
+  c: Pick<FloorplanCardConfig, "rotation" | "rotationPortrait" | "rotationLandscape">,
+  portrait?: boolean
+): PlanRotation {
+  const base = normalizePlanRotation(c.rotation);
+  if (portrait === undefined) return base;
+  const override = portrait ? c.rotationPortrait : c.rotationLandscape;
+  // `== null`, not `=== undefined`: a key written with no value —
+  // `rotationPortrait:` — parses to `null`, and the card's own numeric guard
+  // lets it through (it only rejects non-numbers that are not nullish, the
+  // same way an empty `trackers:` is treated as unset rather than malformed).
+  // Read as a value it would normalize to 0 and *silently override* the base
+  // rotation, which is the one thing an unset override must never do.
+  return override == null ? base : normalizePlanRotation(override);
+}
+
+/**
+ * The two ways a `MediaQueryList` can be listened to. Duck-typed rather than
+ * taking the DOM interface, so this is reachable from a node test — which is
+ * the whole reason it is a function instead of four lines inside the card's
+ * `connectedCallback` (issue #237).
+ */
+export interface OrientationQuery {
+  addEventListener?: (type: "change", fn: (e: { matches: boolean }) => void) => void;
+  removeEventListener?: (type: "change", fn: (e: { matches: boolean }) => void) => void;
+  addListener?: (fn: (e: { matches: boolean }) => void) => void;
+  removeListener?: (fn: (e: { matches: boolean }) => void) => void;
+}
+
+/**
+ * Subscribe to a media query, returning the matching unsubscribe (issue #237).
+ *
+ * `MediaQueryList` has only been an `EventTarget` since Safari 14 / Chrome 39;
+ * older WebViews carry the deprecated `addListener` alone. That matters here
+ * more than it usually would, because the devices this feature exists for —
+ * wall tablets, an old phone propped in a hallway — are exactly the ones
+ * likely to be running one, and calling a missing method would throw out of
+ * `connectedCallback` and take the card's whole render with it.
+ *
+ * Add and remove are chosen the same way, so a listener registered through the
+ * legacy API is removed through it too: crossing them leaves the listener
+ * attached to a card that is gone.
+ *
+ * Where neither exists this subscribes to nothing and returns a no-op. The
+ * card reads the query's current value *before* calling this, so that case is
+ * still right on load — it just stops following the device being turned.
+ */
+export function subscribeOrientation(
+  q: OrientationQuery,
+  fn: (e: { matches: boolean }) => void
+): () => void {
+  if (typeof q.addEventListener === "function") {
+    q.addEventListener("change", fn);
+    return () => q.removeEventListener?.("change", fn);
+  }
+  if (typeof q.addListener === "function") {
+    q.addListener(fn);
+    return () => q.removeListener?.(fn);
+  }
+  return () => {};
+}
+
 /** Canvas size as displayed: 90°/270° swap width and height. */
 export function rotatedCanvasSize(
   w: number,
@@ -4252,7 +4331,7 @@ export function renderSunlight(
     // How far the light gets before a wall stops it. The falloff is measured
     // against this, so a patch is faint by the time it ends however deep or
     // shallow the room is.
-    const along = sunTravelDistance(o, dir, walls, reach);
+    const along = sunTravelDistance(o, dir, blockers, reach);
     // …and how wide it is, measured across the light rather than along the
     // wall: a gap seen obliquely admits a narrower beam than its own length.
     const [ga, gb] = openingEnds(o);
@@ -4775,14 +4854,30 @@ export function renderRipple(
   active: boolean,
   color: string,
   sizePx: number,
+  direction: number,
+  width: number,
   rings = 3,
   scale: OverlayScale = "fixed"
 ): TemplateResult {
+  function wrapAngle(value: number): number {
+    return ((value % 360) + 360) % 360
+  }
+  function clamp(value: number, min: number, max: number): number {
+    return Math.max(Math.min(value, max), min);
+  }
+
   const size = overlayLength(cssNumber(sizePx, DEFAULT_RIPPLE_SIZE), scale);
+
+  // direction gets wrapped, since 0° and 360° are actually the same
+  const direction_ = wrapAngle(cssNumber(direction, DEFAULT_RIPPLE_DIRECTION));
+
+  // width gets clamped, since a width of 0° and 360° is not the same and should not wrap
+  const width_ = clamp(cssNumber(width, DEFAULT_RIPPLE_WIDTH), 0, 360);
+
   return html`
     <div
       class="ripple ${active ? "active" : ""}"
-      style="width:${size};height:${size};--fp-ripple-color:${cssColorOr(color, SKIN_ACCENT)};"
+      style="width:${size};height:${size};--fp-ripple-color:${cssColorOr(color, SKIN_ACCENT)};--fp-ripple-direction:${direction_};--fp-ripple-width:${width_}"
     >
       <span class="dot"></span>
       ${Array.from(

@@ -27,7 +27,6 @@ export interface ReplayPanelRenderProps {
   onToggleVisible: (visible: boolean) => void;
   onRangeChange: (kind: "start" | "end", value: string) => void;
   onZoom: (direction: -1 | 1) => void;
-  onToggleReplay: () => void;
   onJump: (delta: number) => void;
   onStep: (direction: -1 | 1) => void;
   onPlayToggle: () => void;
@@ -56,9 +55,9 @@ export interface ReplayPanelHost {
     playbackController: { startTime: number; endTime: number; currentTime: number; speed: number; playing: boolean };
   };
   formatReplayTime: (timestamp: number) => string;
+  getDefaultWindow: () => { start: number; end: number };
   handleRangeChange: (kind: "start" | "end", ev: Event) => void;
   zoomWindow: (direction: -1 | 1) => void;
-  toggleReplay: () => Promise<void>;
   jumpReplay: (delta: number) => void;
   stepReplay: (direction: -1 | 1) => void;
   pauseReplay: () => void;
@@ -75,13 +74,26 @@ export interface ReplayPanelHost {
 export function createReplayPanelProps(host: ReplayPanelHost): ReplayPanelRenderProps {
   const playback = host.state.playbackController;
   const state = host.state;
-  const currentTimeLabel = host.formatReplayTime(playback.currentTime);
+  // Before replay has ever been started there is no window and no head: the
+  // controller holds a placeholder spanning 0..MAX, whose timestamps format as
+  // 1970. That state used to be unreachable, because enabling the feature
+  // started replay outright; now that it means *offering* the control, it is
+  // the first thing anyone sees. So the panel presents the window it would
+  // load — the same default `startReplay` falls back to — and reads the clock
+  // for the head, since not having started is another way of saying "now".
+  const started = state.enabled || state.startTime > 0;
+  const fallback = started ? undefined : host.getDefaultWindow();
+  const windowStart = fallback ? fallback.start : state.startTime;
+  const windowEnd = fallback ? fallback.end : state.endTime;
+  const currentTimeLabel = host.formatReplayTime(
+    fallback ? fallback.end : playback.currentTime,
+  );
 
   return {
     events: state.historyEvents,
-    startTime: playback.startTime,
-    endTime: playback.endTime,
-    currentTime: playback.currentTime,
+    startTime: fallback ? fallback.start : playback.startTime,
+    endTime: fallback ? fallback.end : playback.endTime,
+    currentTime: fallback ? fallback.end : playback.currentTime,
     visible: state.historyVisible,
     enabled: state.enabled,
     ready: state.ready,
@@ -94,14 +106,13 @@ export function createReplayPanelProps(host: ReplayPanelHost): ReplayPanelRender
     panelId: state.panelId,
     replaySpeed: playback.speed,
     currentTimeLabel,
-    startInputValue: formatReplayInputValue(state.startTime),
-    endInputValue: formatReplayInputValue(state.endTime),
+    startInputValue: formatReplayInputValue(windowStart),
+    endInputValue: formatReplayInputValue(windowEnd),
     onToggleVisible: (visible: boolean) => host.toggleHistoryVisible(visible),
     onRangeChange: (kind: "start" | "end", value: string) => {
       host.handleRangeChange(kind, { target: { value } } as unknown as Event);
     },
     onZoom: (direction: -1 | 1) => host.zoomWindow(direction),
-    onToggleReplay: () => { void host.toggleReplay(); },
     onJump: (delta: number) => host.jumpReplay(delta),
     onStep: (direction: -1 | 1) => host.stepReplay(direction),
     onPlayToggle: () => (playback.playing ? host.pauseReplay() : host.playReplay()),
@@ -142,7 +153,6 @@ export function renderReplayPanel(props: ReplayPanelRenderProps): TemplateResult
         props.onRangeChange(kind, ev.detail.value);
       }}
       @zoom=${(ev: CustomEvent<{ direction: -1 | 1 }>) => props.onZoom(ev.detail?.direction ?? 1)}
-      @toggle-replay=${() => props.onToggleReplay()}
       @jump=${(ev: CustomEvent<{ delta: number }>) => props.onJump(ev.detail?.delta ?? 0)}
       @step=${(ev: CustomEvent<{ direction: -1 | 1 }>) => props.onStep(ev.detail?.direction ?? 1)}
       @play-toggle=${() => props.onPlayToggle()}
@@ -221,22 +231,22 @@ export class ReplayPanel extends LitElement {
       gap: 8px;
       flex-wrap: wrap;
     }
-    .replay-chip {
-      display: inline-flex;
-      align-items: center;
-      padding: 2px 8px;
-      border-radius: 999px;
-      background: var(--card-background-color, #fff);
-      color: var(--primary-text-color);
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
+    /*
+     * The moment being drawn, painted as its own thing rather than set in a
+     * line of grey text. This is the one fact the panel exists to report --
+     * with the panel open the plan is always showing the past, so "where in
+     * time am I" is the only question left -- and a plain timestamp beside a
+     * row of controls does not read as an answer to it. Matches the clock
+     * riding the timeline playhead, which wears the same accent.
+     */
     .replay-time {
       font-size: 12px;
       font-variant-numeric: tabular-nums;
-      color: var(--primary-text-color);
+      padding: 3px 9px;
+      border-radius: 999px;
+      background: var(--fp-skin-accent, var(--primary-color, #03a9f4));
+      color: var(--fp-skin-accent-ink, var(--text-primary-color, #fff));
+      font-weight: 600;
     }
     .replay-status {
       font-size: 12px;
@@ -595,17 +605,20 @@ export class ReplayPanel extends LitElement {
     const currentEvent = this._getCurrentEvent();
     return html`
       <div class="replay-panel" id=${this.panelId}>
+        <!-- Closing the panel is how you get back to now, so the button says
+             so. It used to say "hide", next to a separate Live button that did
+             the returning; one control does both because they were never two
+             things (see ReplayController.toggleHistoryVisible). -->
         <button
           class="replay-hide-toggle"
-          aria-label="Hide replay panel"
+          aria-label="Close replay and return to live"
           aria-controls=${this.panelId}
           @click=${() => this._dispatch("toggle-visible", { visible: false })}
         >
-          hide
+          live
         </button>
         <div class="replay-header">
           <div class="replay-meta">
-            <span class="replay-chip">${this.ready ? "Replay ready" : this.enabled ? "Loading replay…" : "Replay paused"}</span>
             <span class="replay-time">${this.currentTimeLabel}</span>
           </div>
           <div class="replay-status">
@@ -642,7 +655,6 @@ export class ReplayPanel extends LitElement {
         </div>
         <div class="replay-toolbar">
           <div class="replay-transport" role="group" aria-label="Replay transport controls">
-            <button title="Toggle replay mode" @click=${() => this._dispatch("toggle-replay")}>${this.enabled ? "Disable" : "Enable"}</button>
             <button class="replay-icon-button" aria-label="Jump back 30 seconds" title="Jump back 30 seconds" @click=${() => this._dispatch("jump", { delta: -30 })}>
               <ha-icon icon="mdi:rewind-30"></ha-icon>
             </button>

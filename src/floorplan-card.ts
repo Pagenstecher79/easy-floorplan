@@ -22,6 +22,8 @@ import {
   DEFAULT_ITEM_SIZE,
   DEFAULT_TEXT_SIZE,
   DEFAULT_RIPPLE_SIZE,
+  DEFAULT_RIPPLE_DIRECTION,
+  DEFAULT_RIPPLE_WIDTH,
   DEFAULT_AREA_LABEL_SIZE,
   MIN_TOUCH_TARGET,
   DEFAULT_SUN_MIN,
@@ -115,7 +117,8 @@ import {
   resolveItemIcon,
   resolveIconAnimation,
   itemIconSize,
-  normalizePlanRotation,
+  resolvePlanRotation,
+  subscribeOrientation,
   rotatedCanvasSize,
   rotatePlanPoint,
   planRotationTransform,
@@ -202,6 +205,35 @@ export class FloorplanCard extends LitElement {
     ]);
   }
 
+  /**
+   * Whether the screen is portrait, for the per-orientation rotations (issue
+   * #237). `undefined` until asked, and where there is nothing to ask —
+   * `resolvePlanRotation` reads that as "no orientation known" and stays on
+   * the plain `rotation` rather than guessing.
+   */
+  @state() private _portrait?: boolean;
+  /** Undoes the orientation subscription; set while connected (issue #237). */
+  private _unsubscribeOrientation?: () => void;
+  // Takes the narrowest thing it uses, so it fits both a `MediaQueryList` read
+  // directly on load and the `change` event that follows.
+  private readonly _onOrientation = (e: { matches: boolean }): void => {
+    this._portrait = e.matches;
+  };
+
+  public connectedCallback(): void {
+    super.connectedCallback();
+    // Subscribed unconditionally rather than only when an override is set:
+    // the config can change under a live card, and a query that is listened
+    // to but never read costs nothing.
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const q = window.matchMedia("(orientation: portrait)");
+    // Read first, subscribe second — deliberately in that order. The initial
+    // read is what gets the rotation right on load, and it works even on a
+    // WebView that offers no subscription at all, so the worst case is a plan
+    // that is correct until the device is turned rather than one that is wrong.
+    this._onOrientation(q);
+    this._unsubscribeOrientation = subscribeOrientation(q, this._onOrientation);
+  }
 
   public setConfig(config: FloorplanCardConfig): void {
     // Cheap shape assertions so malformed YAML surfaces as HA's error card
@@ -214,7 +246,7 @@ export class FloorplanCard extends LitElement {
       if (raw[key] != null && !Array.isArray(raw[key]))
         throw new Error(`Invalid configuration: "${key}" must be a list`);
     }
-    for (const key of ["width", "height", "grid", "rotation"]) {
+    for (const key of ["width", "height", "grid", "rotation", "rotationPortrait", "rotationLandscape"]) {
       if (raw[key] != null && typeof raw[key] !== "number")
         throw new Error(`Invalid configuration: "${key}" must be a number`);
     }
@@ -240,12 +272,13 @@ export class FloorplanCard extends LitElement {
       this._lastReplayCacheKey = replayKey;
       this._replayController.historyService().clearCache();
     }
-    if (!this._replayController.state.configured) {
-      this._replayController.pausePlayback();
-      this._replayController.stopReplayLoop();
-    } else if (this.hass) {
-      this._replayController.ensureStarted();
-    }
+    // A plan not showing the replay panel has no clock to run, and nothing on
+    // screen to stop one with. `enabled` in the config means the control is
+    // offered, not that the card hands the plan over to it; opening the panel
+    // is what does that. Switching the feature off with the panel open takes
+    // the control away without taking replay with it, which is the one case
+    // that leaves a plan in history with no way out (issue #256).
+    this._replayController.syncToConfig();
     // Restore the floor this plan was last viewed on (issue #81). Only when
     // this instance has no floor of its own yet — a live floor switch always
     // wins — and only if that floor still exists.
@@ -288,12 +321,6 @@ export class FloorplanCard extends LitElement {
     super.updated(changed);
     if (changed.has("hass") || changed.has("_activeFloorId")) {
       this._syncHistoryServiceContext();
-    }
-    if (
-      (changed.has("hass") || changed.has("_activeFloorId"))
-      && this._replayController.shouldAutoStart()
-    ) {
-      this._replayController.ensureStarted();
     }
   }
 
@@ -385,6 +412,12 @@ export class FloorplanCard extends LitElement {
 
   public disconnectedCallback(): void {
     this._replayController.stopReplayLoop();
+    // Orientation subscription for the per-screen rotations (issue #237).
+    // Folded in here rather than declared as a second `disconnectedCallback`:
+    // a class may only have one, and the later declaration would silently
+    // replace this one — taking the replay loop's cleanup with it.
+    this._unsubscribeOrientation?.();
+    this._unsubscribeOrientation = undefined;
     super.disconnectedCallback();
   }
 
@@ -603,7 +636,12 @@ export class FloorplanCard extends LitElement {
     // Animation goes on the inner ha-icon, not the badge: the badge carries
     // the user's `angle` rotation, and a spin on the same element would
     // overwrite it.
-    const st = item.entity ? hassContext?.states[item.entity] : undefined;
+    // From the state being *drawn*, not the live one. Everything else in this
+    // badge — the glyph, the reading — comes from `renderHass`, and an
+    // animation resolved from `this.hass` disagrees with all of it the moment
+    // replay moves the head: a motion sensor pulsing because something is
+    // happening now, on a plan showing an hour ago.
+    const st = item.entity ? renderHass?.states[item.entity] : undefined;
     const anim = resolveIconAnimation(item, st?.state, st?.attributes);
     // "Show the reading, not a picture" (issue #106). Same badge — size, angle,
     // state colour, ripple stacking all unchanged — with the glyph swapped for
@@ -682,8 +720,12 @@ export class FloorplanCard extends LitElement {
     // grey on load.
     const offline = !!this.hass && itemIsOffline(item, st?.state);
 
-    // Hide badge by state or operator (preserve layout space via CSS visibility)
-    const isBadgeHidden = itemBadgeHidden(item, st?.state, this.hass);
+    // Hide badge by state or operator (preserve layout space via CSS
+    // visibility). Judged on the same instant as everything else it sits
+    // beside: the condition can name a *different* entity, and reading that
+    // one live would hide or show a badge on grounds the rest of the plan
+    // cannot see.
+    const isBadgeHidden = itemBadgeHidden(item, st?.state, renderHass);
     // "none" is the old `showIcon: false` — no badge, label only (issue #106).
     const showIcon = badgeContentOf(item) !== "none";
 
@@ -705,6 +747,8 @@ export class FloorplanCard extends LitElement {
     // var()/color-mix()/gradient keeps the theme ink, exactly as before.
     const badgeInk = contrastText(stateColor ?? activeColor);
     const rippleSize = item.rippleSize ?? DEFAULT_RIPPLE_SIZE;
+    const rippleDirection = item.rippleDirection ?? DEFAULT_RIPPLE_DIRECTION;
+    const rippleWidth = item.rippleWidth ?? DEFAULT_RIPPLE_WIDTH;
 
     // Apply visibility hidden to keep the layout space intact for the label
     const hiddenStyle = isBadgeHidden ? "visibility: hidden; pointer-events: none;" : "";
@@ -712,16 +756,16 @@ export class FloorplanCard extends LitElement {
     let visual: TemplateResult | typeof nothing = nothing;
     if (display === "ripple") {
       visual = html`<span style="${hiddenStyle}">
-        ${renderRipple(on, rippleColor, rippleSize, 3, scale)}
+        ${renderRipple(on, rippleColor, rippleSize, rippleDirection, rippleWidth, 3, scale)}
       </span>`;
     } else if (display === "iconRipple") {
       visual = html`<div class="stack" style="${hiddenStyle}">
-        ${renderRipple(on, rippleColor, rippleSize, 3, scale)}
+        ${renderRipple(on, rippleColor, rippleSize, rippleDirection, rippleWidth, 3, scale)}
         ${showIcon ? html`<div class="stack-icon">${this._renderBadge(item, scale, renderHass)}</div>` : nothing}
       </div>`;
     } else if (showIcon) {
       visual = html`<span style="${hiddenStyle}">
-        ${this._renderBadge(item, scale)}
+        ${this._renderBadge(item, scale, renderHass)}
       </span>`;
     }
 
@@ -844,7 +888,7 @@ export class FloorplanCard extends LitElement {
     // Whole-plan display rotation (issue #33): the SVG rotates via one group
     // transform below; the HTML overlay remaps per point in _renderItem /
     // _renderText. Both must use the same mapping (rotatePlanPoint).
-    const rot = normalizePlanRotation(c.rotation);
+    const rot = resolvePlanRotation(c, this._portrait);
     const dims = rotatedCanvasSize(cssNumber(c.width, DEFAULT_WIDTH), cssNumber(c.height, DEFAULT_HEIGHT), rot);
     const rotTransform = planRotationTransform(c.width, c.height, rot);
     // Overlay sizing mode. --fp-plan-w is the canvas width *as displayed*, so a
@@ -2192,6 +2236,20 @@ export class FloorplanCard extends LitElement {
       border-radius: 50%;
       border: 2px solid var(--fp-ripple-color);
       opacity: 0;
+
+      /* Keep only the angular slice the ring should travel along */
+      -webkit-mask: conic-gradient(
+        from calc(var(--fp-ripple-direction) * 1deg - var(--fp-ripple-width) * 1deg / 2),
+        #000 0deg,
+        #000 calc(var(--fp-ripple-width) * 1deg),
+        transparent calc(var(--fp-ripple-width) * 1deg)
+      );
+      mask: conic-gradient(
+        from calc(var(--fp-ripple-direction) * 1deg - var(--fp-ripple-width) * 1deg / 2),
+        #000 0deg,
+        #000 calc(var(--fp-ripple-width) * 1deg),
+        transparent calc(var(--fp-ripple-width) * 1deg)
+      );
     }
     .ripple.active .ring {
       animation: fp-ripple 1.8s ease-out infinite;
