@@ -99,6 +99,7 @@ import {
   itemHiddenWhenInactive,
   itemBadgeHidden,
   itemLabelSize,
+  itemLabelColor,
   areaLabelFontSize,
   wallStrokeStyle,
   normalizeOverlayScale,
@@ -628,6 +629,10 @@ export class FloorplanCard extends LitElement {
   private _renderBadge(item: FloorItem, scale: OverlayScale, renderHass?: RenderHass): TemplateResult {
     const size = cssNumber(item.size, DEFAULT_ITEM_SIZE);
     const box = overlayLength(size, scale);
+    
+    // Use renderHass when available to keep state context consistent, fallback to this.hass
+    const hassContext = renderHass ?? this.hass;
+
     // Animation goes on the inner ha-icon, not the badge: the badge carries
     // the user's `angle` rotation, and a spin on the same element would
     // overwrite it.
@@ -641,7 +646,7 @@ export class FloorplanCard extends LitElement {
     // "Show the reading, not a picture" (issue #106). Same badge — size, angle,
     // state colour, ripple stacking all unchanged — with the glyph swapped for
     // the number. A device with nothing numeric to show keeps its icon.
-    const value = badgeContentOf(item) === "value" ? badgeValue(renderHass, item) : undefined;
+    const value = badgeContentOf(item) === "value" ? badgeValue(hassContext, item) : undefined;
     return html`
       <div
         class="badge"
@@ -655,7 +660,7 @@ export class FloorplanCard extends LitElement {
             >`
           : html`<ha-icon
               class=${anim ? `anim-${anim}` : ""}
-              icon=${this._itemIcon(item, renderHass)}
+              icon=${this._itemIcon(item, hassContext)}
               style="--mdc-icon-size:${overlayLength(itemIconSize(size), scale)};"
             ></ha-icon>`}
       </div>
@@ -708,7 +713,7 @@ export class FloorplanCard extends LitElement {
     // active state alone left threshold colours invisible on exactly the
     // devices they were written for.
     const stateColor = cssColor(resolveStateColor(item.stateColor, rawValue));
-    const labelColor = stateColor;
+    const labelColor = itemLabelColor(item, stateColor);
     // Offline (issue #162): the entity is unavailable, unknown, or gone from
     // Home Assistant altogether. Guarded on `hass` — before the first states
     // arrive every device would answer "offline" and the plan would flash

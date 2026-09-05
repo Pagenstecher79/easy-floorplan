@@ -116,6 +116,7 @@ import {
   itemLabelSize,
   textLabel,
   labelPositionOf,
+  itemLabelColor,
   itemReadings,
   itemHasLabel,
   snapToWall,
@@ -4290,7 +4291,7 @@ export class FloorplanCardEditor extends LitElement {
     // will actually render (state rules first, then the active colour).
     const rawValue = itemRawValue(it, st);
     const stateColor = cssColor(resolveStateColor(it.stateColor, rawValue));
-    // …and the same badge contents, so "Badge shows: Value" previews here too.
+    const labelColor = itemLabelColor(it, stateColor);   
     const value = badgeContentOf(it) === "value" ? badgeValue(this.hass, it) : undefined;
     // The active colour — the one the user set, else the bulb's own colour
     // (issue #106). The canvas never previewed either, so setting "Active
@@ -4372,15 +4373,15 @@ export class FloorplanCardEditor extends LitElement {
              The Labels toolbar toggle hides either on dense plans (issue
              #52), and the size previews the card's labelSize (issue #59). -->
         ${this._hideLabels
-          ? nothing
-          : html`<span
-              class="ilabel ${cardLabel ? "live" : ""} ilabel-${labelPositionOf(it)}"
-              style="font-size:${overlayLength(
-                cardLabel || it.labelSize != null ? itemLabelSize(it.labelSize) : 11,
-                scale
-              )};${cardLabel && stateColor ? `color:${stateColor};` : ""}"
-              >${label}</span
-            >`}
+        ? nothing
+        : html`<span
+            class="ilabel ${cardLabel ? "live" : ""} ilabel-${labelPositionOf(it)}"
+            style="font-size:${overlayLength(
+              cardLabel || it.labelSize != null ? itemLabelSize(it.labelSize) : 11,
+              scale
+            )};${cardLabel && labelColor ? `color:${labelColor};` : ""}"
+            >${label}</span
+          >`}
       </div>
     `;
   }
@@ -4768,8 +4769,20 @@ export class FloorplanCardEditor extends LitElement {
           this._renderItemReadings(it)
         )}
         ${itemHasLabel(it)
-          ? // Nothing to place or size while the device draws no label at all.
-            this._renderGroup("Label", this._renderForm(itemLabelForm(it), apply))
+          ? this._renderGroup(
+              "Label",
+              this._renderForm(itemLabelForm(it), apply),
+              it.disableLabelColor && it.useCustomLabelColor
+                ? this._renderColorRow({
+                    label: "Custom color",
+                    value: it.labelCustomColor,
+                    swatch: "#ffffff",
+                    placeholder: "e.g. #ff0000 or red",
+                    onLive: (labelCustomColor) => this._updateItemLive(it.id, { labelCustomColor }),
+                    onCommit: (labelCustomColor) => this._updateItem(it.id, { labelCustomColor }),
+                  })
+                : nothing
+            )
           : nothing}
         ${this._renderGroup(
           "Badge",

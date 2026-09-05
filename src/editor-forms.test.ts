@@ -494,7 +494,7 @@ describe("itemForm", () => {
       ["name", "showName"], // 1. Identity — what it is
       ["entity", "attribute"], // 2. What it reads…
       ["showState"], //         …including whether its own state shows
-      ["labelPosition", "labelSize"], // 3. Label
+      ["labelPosition", "labelSize", "disableLabelColor"], // 3. Label
       ["badgeMode", "size", "angle"], // 4. Badge
       // 5. Colour and the readings list are hand-rolled rows, not ha-form
       //    fields, so they do not appear here — the editor slots them into
@@ -2006,5 +2006,63 @@ describe("formSlice", () => {
     // renders nothing rather than throwing.
     expect(formSlice(spec, ["shutterStyle", "type"]).fields.map((f) => f.name)).toEqual(["type"]);
     expect(formSlice(spec, []).fields).toEqual([]);
+  });
+});
+
+describe("itemLabelForm — disableLabelColor and custom color state machine", () => {
+  const item = { id: "i", entity: "light.a", kind: "light", x: 0, y: 0, showName: true } as FloorItem;
+
+  it("offers disableLabelColor field when labelled", () => {
+    const fields = itemLabelForm(item)?.fields.map((f) => f.name) ?? [];
+    expect(fields).toContain("disableLabelColor");
+  });
+
+  it("clears custom color fields when disableLabelColor is toggled off", () => {
+    const form = itemLabelForm({
+      ...item,
+      disableLabelColor: true,
+      useCustomLabelColor: true,
+      labelCustomColor: "#ff0000",
+    } as FloorItem);
+
+    // Toggling disableLabelColor OFF must clear both useCustomLabelColor and labelCustomColor
+    const patch = form!.toPatch({ disableLabelColor: false });
+    expect(patch).toEqual({
+      disableLabelColor: undefined,
+      useCustomLabelColor: undefined,
+      labelCustomColor: undefined,
+    });
+  });
+
+  it("clears only labelCustomColor when useCustomLabelColor is toggled off", () => {
+    const form = itemLabelForm({
+      ...item,
+      disableLabelColor: true,
+      useCustomLabelColor: true,
+      labelCustomColor: "#ff0000",
+    } as FloorItem);
+
+    // Toggling useCustomLabelColor OFF must clear only labelCustomColor, keeping disableLabelColor
+    const patch = form!.toPatch({ useCustomLabelColor: false });
+    expect(patch).toEqual({
+      useCustomLabelColor: undefined,
+      labelCustomColor: undefined,
+    });
+  });
+
+  it("round-trips custom color when both toggles are enabled", () => {
+    const form = itemLabelForm(item);
+    
+    expect(
+      form!.toPatch({
+        disableLabelColor: true,
+        useCustomLabelColor: true,
+        labelCustomColor: "#00ff00",
+      })
+    ).toEqual({
+      disableLabelColor: true,
+      useCustomLabelColor: true,
+      labelCustomColor: "#00ff00",
+    });
   });
 });

@@ -127,6 +127,37 @@ then pick the entity in the **Element** section below the canvas.
 - **Label position** — **Below** the badge (the default), or hung off its **left** or
   **right**. A reading under a badge grows in both directions and meets whatever sits
   beside it; hung off one side it grows one way only.
+- **Disable Label Color** (disableLabelColor)
+  With the new disableLabelColor boolean toggle (available in Group 3 of the item editor), you can
+  override this behavior per item. When set to true, the label text will stay locked to its default
+  theme color, while the icon and badge continue to reflect the dynamic state colors.
+  **Label Color Customization**
+
+  By default, an item's label text automatically adapts its color based on the state or active color rules.
+  For some items, this can impact readability or clash with the desired design.
+  
+  With the `disableLabelColor` boolean toggle (available in Group 3 of the item editor), you can override this
+  behavior per item. When set to `true`, the label text will stay locked to its default theme color,
+  while the icon and badge continue to reflect the dynamic state colors.
+  
+  You can also optionally assign a fixed custom color using `useCustomLabelColor` and `labelCustomColor`.
+  
+  | YAML Key | Type | Description |
+  | :--- | :--- | :--- |
+  | `disableLabelColor` | boolean | Keeps the text in its default theme color, preventing it from inheriting active or state colors. |
+  | `useCustomLabelColor` | boolean | Activates a custom color option when `disableLabelColor` is enabled ("Own color" toggle in the editor),
+  allowing you to override the theme default. |
+  | `labelCustomColor` | string | The fixed custom color (e.g., `#ff0000` or `red`) applied to the label text. |
+  
+  The `useCustomLabelColor` toggle appears in the visual editor as "Own color" only once `disableLabelColor` is activated,
+  and toggling it reveals the color picker for precise tuning.
+  
+  *Example: Disable automatic state coloring and apply a fixed custom color to a label:*
+  ```yaml
+    disableLabelColor: true
+    useCustomLabelColor: true
+    labelCustomColor: "#00ff00"
+  ```
 - **Badge shows** — one dropdown for what the device draws: *Icon* — **still**,
   **spinning** or **pulsing** — its *Value*, or *Nothing* (label only). **Value** draws
   the reading inside the badge — a thermostat reads `21°` in the circle your state rules
