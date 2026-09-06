@@ -696,7 +696,13 @@ export class FloorplanCard extends LitElement {
     rot: PlanRotation,
     scale: OverlayScale,
     renderHass: RenderHass | undefined
-  ): TemplateResult {
+  ): TemplateResult | typeof nothing {
+    
+    // GUARD: "Only show when zoomed"
+    if (item.showOnlyWhenZoomed && !this._isItemInZoomedArea(item, c)) {
+      return nothing;
+    }
+
     const on = this._isOn(item, renderHass);
     // Name/state composition lives in itemBadgeLabel, including #39's
     // no-entity guard (an unbound device gets no state line).
@@ -832,6 +838,54 @@ export class FloorplanCard extends LitElement {
       </div>
     `;
   }
+
+ /**
+   * Evaluates if an item belongs to the currently zoomed area.
+   */
+ private _isItemInZoomedArea(item: FloorItem, c: FloorplanCardConfig): boolean {
+  if (!this._zoomedAreaId) return false;
+
+  // Find the active floor and the area object safely
+  const floors = getFloors(c);
+  const activeFloor =
+    floors.find((f) => f.id === this._activeFloorId) ??
+    floors.find((f) => f.id === c.defaultFloor) ??
+    floors[0];
+
+  const activeArea = activeFloor?.areas?.find((a) => a.id === this._zoomedAreaId);
+  if (!activeArea) return false;
+
+  // 1. Manual assignment (if explicitly set in the YAML config)
+  if (item.area) {
+    return item.area === activeArea.id || item.area === activeArea.name;
+  }
+
+  // 2. Geometric fallback with strict safety checks & inline ray-casting
+  if (
+    item.x !== undefined &&
+    item.y !== undefined &&
+    Array.isArray(activeArea.points) &&
+    activeArea.points.length >= 3
+  ) {
+    const x = item.x;
+    const y = item.y;
+    const points = activeArea.points;
+    let inside = false;
+
+    for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+      const xi = points[i]!.x, yi = points[i]!.y;
+      const xj = points[j]!.x, yj = points[j]!.y;
+
+      const intersect =
+        yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
+      if (intersect) inside = !inside;
+    }
+
+    return inside;
+  }
+
+  return false;
+}
 
   private _renderAreaLabel(
     a: Area,

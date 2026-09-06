@@ -1167,6 +1167,12 @@ export function itemEffectsForm(it: FloorItem, deviceClass?: string): FormSpec |
 export function itemGroup7aForm(it: FloorItem): FormSpec {
   const fields: FormField[] = [
     {
+      name: "showOnlyWhenZoomed",
+      label: "Only show when zoomed into area",
+      helper: "Hides this item at 1x view, revealing it only when zoomed into the area containing it",
+      selector: { boolean: {} },
+    },
+    {
       name: "enableHideByEntity",
       label: "Hide by condition (Entire Object)",
       selector: { boolean: {} },
@@ -1379,6 +1385,7 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
   return {
     fields,
     data: {
+      showOnlyWhenZoomed: it.showOnlyWhenZoomed ?? false, // <--- Wichtig: Hier ergänzt!
       enableHideByEntity: it.enableHideByEntity ?? false,
       hideEntity: it.hideEntity ?? "",
       hideAttribute: it.hideAttribute ?? "",
@@ -1406,7 +1413,14 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
       hideBadgeThreshold: it.hideBadgeThreshold ?? 0,
       hideBadgeInvert: it.hideBadgeInvert ?? false,
     },
-    toPatch: identity,
+    toPatch: (patch) => {
+      const out = { ...patch };
+      // Wenn showOnlyWhenZoomed false ist, aus dem YAML entfernen, um es sauber zu halten
+      if (!out.showOnlyWhenZoomed) {
+        out.showOnlyWhenZoomed = undefined;
+      }
+      return out;
+    },
   };
 }
 /** Group 7: when the device is drawn at all, and what a press does. */

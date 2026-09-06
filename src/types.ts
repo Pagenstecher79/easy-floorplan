@@ -587,8 +587,12 @@ export interface FloorItem {
    * "Active" is the same domain-aware test the badge highlight uses
    * ({@link entityIsActive}), so a lock reads unlocked, a vacuum cleaning.
    */
-  // --- Extended hide logic for the entire item (Whole-Item) ---
   hideWhenInactive?: boolean;
+  /** Hides the item at 1x view and only reveals it when zoomed. */
+  showOnlyWhenZoomed?: boolean;
+  /** Optional manual override to associate an item directly with an area ID or name. */
+  area?: string;
+  // --- Extended hide logic for the entire item (Whole-Item) ---
   enableHideByEntity?: boolean;
   hideEntity?: string;
   /** Attribute to read instead of the state for the hide condition. */

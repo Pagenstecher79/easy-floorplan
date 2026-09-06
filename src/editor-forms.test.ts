@@ -26,6 +26,7 @@ import {
   floorImageForm,
   areaForm,
   areaNameForm,
+  itemGroup7aForm,
 } from "./editor-forms";
 import { itemHasLabel } from "./render";
 import type { FormField } from "./editor-forms";
@@ -2064,5 +2065,35 @@ describe("itemLabelForm — disableLabelColor and custom color state machine", (
       useCustomLabelColor: true,
       labelCustomColor: "#00ff00",
     });
+  });
+});
+
+describe("itemGroup7aForm - showOnlyWhenZoomed", () => {
+  it("includes showOnlyWhenZoomed field and handles patching correctly", () => {
+    // Provide a fully compliant FloorItem mock
+    const item: FloorItem = { 
+      id: "test-item", 
+      x: 10, 
+      y: 10, 
+      entity: "sensor.test", 
+      kind: "sensor" 
+    };
+    const spec = itemGroup7aForm(item);
+
+    // 1. Verify the field exists in the form schema
+    const field = spec.fields.find((f) => f.name === "showOnlyWhenZoomed");
+    expect(field).toBeDefined();
+    expect(field?.selector).toEqual({ boolean: {} });
+
+    // 2. Verify data initialization defaults to false/undefined
+    expect(spec.data.showOnlyWhenZoomed).toBe(false);
+
+    // 3. Verify toPatch keeps true values
+    const patchTrue = spec.toPatch({ showOnlyWhenZoomed: true });
+    expect(patchTrue.showOnlyWhenZoomed).toBe(true);
+
+    // 4. Verify toPatch cleans up falsy/undefined values
+    const patchFalse = spec.toPatch({ showOnlyWhenZoomed: false });
+    expect(patchFalse.showOnlyWhenZoomed).toBeUndefined();
   });
 });
