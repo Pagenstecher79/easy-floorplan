@@ -2137,7 +2137,14 @@ export class FloorplanCardEditor extends LitElement {
   ): TemplateResult | typeof nothing {
     const palette = this._palette();
     if (!palette.length) return nothing;
-    const current = paletteRefSlug(value);
+    // Only a slug the palette actually has counts as "on a name". A reference
+    // to a name that is gone matches no <option>, so the browser falls back to
+    // showing "Custom…" while this thought otherwise — and picking "Custom…"
+    // would then commit the dangling value back unchanged, spending an undo
+    // step on nothing. Reading it as custom is also what the plan shows, since
+    // a dangling reference is not a colour.
+    const slug = paletteRefSlug(value);
+    const current = slug && palette.some((p) => paletteSlug(p.name) === slug) ? slug : undefined;
     return html`
       <select
         class="palette-pick"

@@ -328,3 +328,35 @@ describe("rewritePaletteRefs — renaming and deleting keep the plan honest", ()
     });
   });
 });
+
+describe("rewritePaletteRefs — every spelling the card recognises", () => {
+  // paletteRefSlug is what the rest of the card reads a reference with, and it
+  // accepts more than the canonical spelling the editor writes. Anything it
+  // resolves must be rewritable, or a rename leaves a reference pointing at a
+  // property nothing declares — and that paints black rather than falling back.
+  const cases: [string, string][] = [
+    ["canonical", "var(--fp-color-warm)"],
+    ["inner whitespace", "var( --fp-color-warm )"],
+    ["surrounding whitespace", "  var(--fp-color-warm)  "],
+    ["uppercase", "VAR(--FP-COLOR-WARM)"],
+    ["with a fallback", "var(--fp-color-warm, red)"],
+  ];
+
+  for (const [name, ref] of cases) {
+    it(`rewrites a reference written ${name}`, () => {
+      expect(paletteRefSlug(ref)).toBe("warm");
+      const out = rewritePaletteRefs({ areas: [{ color: ref }] }, "warm", "#ff8800");
+      expect(out.areas[0].color).toBe("#ff8800");
+    });
+  }
+
+  it("leaves a reference to a different name alone", () => {
+    const out = rewritePaletteRefs({ areas: [{ color: "var(--fp-color-alert)" }] }, "warm", "#ff8800");
+    expect(out.areas[0].color).toBe("var(--fp-color-alert)");
+  });
+
+  it("leaves an ordinary colour alone", () => {
+    const out = rewritePaletteRefs({ areas: [{ color: "#123456" }] }, "warm", "#ff8800");
+    expect(out.areas[0].color).toBe("#123456");
+  });
+});

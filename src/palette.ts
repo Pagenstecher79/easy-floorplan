@@ -186,9 +186,15 @@ export function resolvePaletteColor(value: unknown, palette: unknown): unknown {
  */
 export function rewritePaletteRefs<T>(value: T, fromSlug: string, to: string): T {
   if (!fromSlug) return value;
-  const ref = `var(${PALETTE_VAR_PREFIX}${fromSlug})`;
   const walk = (node: unknown): unknown => {
-    if (typeof node === "string") return node.trim() === ref ? to : node;
+    // Matched with the same parser the rest of the card reads references with,
+    // not by string equality against the canonical spelling. The editor only
+    // ever writes `var(--fp-color-slug)`, but a hand-written plan is a
+    // supported way in — and `var( --fp-color-warm )`, a `, fallback`, or a
+    // different case all resolve as this reference everywhere else. Missing
+    // them here would leave exactly the dangling reference this function
+    // exists to prevent, and a dangling reference paints black.
+    if (typeof node === "string") return paletteRefSlug(node) === fromSlug ? to : node;
     if (Array.isArray(node)) return node.map(walk);
     if (node && typeof node === "object") {
       return Object.fromEntries(Object.entries(node).map(([k, v]) => [k, walk(v)]));

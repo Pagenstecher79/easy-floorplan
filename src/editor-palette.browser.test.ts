@@ -55,6 +55,23 @@ async function mountEditor() {
  * The palette fields sit behind two collapses — the Project section, then the
  * "Named colors" group inside it — and neither is open on mount.
  */
+async function openGroup(ed: FloorplanCardEditor, title: string): Promise<void> {
+  const root = () => ed.shadowRoot!;
+  const project = root().querySelector<HTMLButtonElement>("button.section-toggle");
+  if (!project) throw new Error("Project section toggle not found — did the panel change?");
+  if (project.getAttribute("aria-expanded") !== "true") {
+    project.click();
+    await ed.updateComplete;
+  }
+  const group = [...root().querySelectorAll<HTMLButtonElement>("button.cfg-group-title")]
+    .find((b) => b.textContent?.trim().startsWith(title));
+  if (!group) throw new Error(`'${title}' group not found — did the Project panel change?`);
+  if (group.getAttribute("aria-expanded") !== "true") {
+    group.click();
+    await ed.updateComplete;
+  }
+}
+
 async function openNamedColors(ed: FloorplanCardEditor): Promise<void> {
   const root = () => ed.shadowRoot!;
   if (root().querySelector("input.palette-name")) return;
@@ -134,5 +151,54 @@ describe("renaming a named colour", () => {
 
     // Refused and put back, rather than two names reducing to one property.
     expect(input.value).toBe("Warm");
+  });
+});
+
+describe("the palette picker on a colour field", () => {
+  /** Background, in Project → Look, carries a picker like every colour field. */
+  async function picker(ed: FloorplanCardEditor): Promise<HTMLSelectElement> {
+    await openGroup(ed, "Look");
+    const found = ed.shadowRoot?.querySelector<HTMLSelectElement>("select.palette-pick");
+    if (!found) throw new Error("palette picker not found — did the Look group change?");
+    return found;
+  }
+
+  async function withBackground(color: string) {
+    const t = await mountEditor();
+    t.ed.setConfig({ ...config(), background: color } as unknown as FloorplanCardConfig);
+    await t.ed.updateComplete;
+    return t;
+  }
+
+  it("sits on the name a field references", async () => {
+    const t = await withBackground("var(--fp-color-warm)");
+    expect((await picker(t.ed)).value).toBe("warm");
+  });
+
+  it("reads as Custom when the name it references is gone", async () => {
+    // A reference to a name the palette no longer has matches no <option>.
+    // Treated as "on a name", the control disagrees with what it displays — and
+    // with the plan, where a dangling reference is not a colour at all.
+    const t = await withBackground("var(--fp-color-deleted)");
+    const sel = await picker(t.ed);
+    expect(sel.value).toBe("");
+    // `value` alone would pass either way — with nothing marked selected the
+    // browser falls back to the first option, which is Custom. What separates
+    // "chose Custom" from "matched no option" is whether the markup says so.
+    const custom = sel.querySelector<HTMLOptionElement>('option[value=""]')!;
+    expect(custom.defaultSelected).toBe(true);
+  });
+
+  it("does not spend an undo step choosing Custom on a dangling reference", async () => {
+    const t = await withBackground("var(--fp-color-deleted)");
+    const sel = await picker(t.ed);
+    const before = t.emitted.length;
+
+    sel.value = "";
+    sel.dispatchEvent(new Event("change", { bubbles: true }));
+    await t.ed.updateComplete;
+
+    // There is nothing to resolve it to, so committing writes the same value.
+    expect(t.emitted.length).toBe(before);
   });
 });
