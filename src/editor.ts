@@ -4772,12 +4772,23 @@ export class FloorplanCardEditor extends LitElement {
     const list = this._config.palette ?? [];
     const entry = list[i];
     if (!entry) return;
-    const name = input.value;
+    // Trimmed before anything else reads it. `paletteSlug` trims, so " Warm "
+    // and "Warm" are the same colour and nothing would be rewritten — but the
+    // untrimmed spelling would still be stored, and `paletteEntries` trims for
+    // display, so the palette panel would show a label none of the dropdowns do.
+    const name = input.value.trim();
     const from = paletteSlug(entry.name);
     const to = paletteSlug(name);
     if (from === to) {
       // Same colour, different spelling ("Warm" → "warm"). Nothing to rewrite.
       this._paletteError = "";
+      if (name === (entry.name ?? "")) {
+        // Only surrounding whitespace changed, so the config will not, and Lit
+        // has no reason to re-render the field just typed into. Put it back, the
+        // same way a refused rename does.
+        input.value = name;
+        return;
+      }
       this._patchConfig({ palette: list.map((p, j) => (j === i ? { ...p, name } : p)) });
       return;
     }

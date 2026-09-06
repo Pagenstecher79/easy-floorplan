@@ -1410,10 +1410,15 @@ export interface HistoryReplayConfig {
  * One named colour in a plan's palette (issue #265).
  *
  * The `name` is both the label in the dropdown and the identity of the colour:
- * the custom property it declares is derived from it, so renaming an entry does
- * **not** move the elements already pointing at the old name — they keep
- * referencing a property nothing declares any more and fall back to whatever
- * that field's default is. The editor warns before letting that happen.
+ * the custom property every reference points at is derived from it. So the
+ * editor rewrites the references rather than leaving them behind — a rename
+ * moves them to the new name, and a delete freezes them at the colour the name
+ * was holding.
+ *
+ * That rewriting is not politeness. A reference to a property nothing declares
+ * is not a colour to fall back from: the declaration is dropped, the element
+ * inherits, and an SVG `fill` inherits **black**. A dangling reference would
+ * repaint half a plan.
  */
 export interface PaletteColor {
   /** Shown in the dropdown, e.g. `Warm white`. */
