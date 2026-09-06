@@ -68,13 +68,19 @@ export const MAX_PALETTE = 24;
  * two entries can collide, so {@link paletteEntries} drops the later of any two
  * that produce the same slug. Returns `""` for a name with nothing usable in
  * it, which that same function treats as unusable.
+ *
+ * "Letter" means any letter, not an ASCII one. Restricted to `a-z`, a name in
+ * Japanese, Cyrillic, Greek or Arabic slugs to `""` — so the entry is dropped as
+ * unusable and the colour silently never appears, with nothing on screen saying
+ * why. "Café" fared no better, quietly becoming `caf`. CSS custom properties
+ * take non-ASCII identifiers, so there is nothing to gain by narrowing here.
  */
 export function paletteSlug(name: unknown): string {
   if (typeof name !== "string") return "";
   return name
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
     .replace(/^-+|-+$/g, "");
 }
 
@@ -140,8 +146,19 @@ export function paletteKey(palette: unknown): string {
     .join(",");
 }
 
-/** `var(--fp-color-slug)` or `var(--fp-color-slug, …)`, captured to the slug. */
-const PALETTE_REF = /^var\(\s*--fp-color-([a-z0-9-]+)\s*(?:,[^)]*)?\)$/i;
+/**
+ * `var(--fp-color-slug)` or `var(--fp-color-slug, …)`, captured to the slug.
+ *
+ * The fallback may itself contain one level of parentheses — `rgb(255,136,0)`
+ * and `var(--other)` are both ordinary things to write there. Stopping at the
+ * first `)` read those as not-a-reference at all, so the editor showed the field
+ * as custom and a rename quietly stopped following it. Deliberately only one
+ * level: a pattern that swallowed anything up to the last `)` would also match a
+ * compound value like `var(--fp-color-a, b) var(--c)`, and rewriting that would
+ * replace the whole thing.
+ */
+const PALETTE_REF =
+  /^var\(\s*--fp-color-([\p{L}\p{N}-]+)\s*(?:,(?:[^()]|\([^()]*\))*)?\)$/iu;
 
 /**
  * The slug a value references, or `undefined` if it is an ordinary colour.

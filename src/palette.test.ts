@@ -360,3 +360,59 @@ describe("rewritePaletteRefs — every spelling the card recognises", () => {
     expect(out.areas[0].color).toBe("#123456");
   });
 });
+
+describe("names and references that are not ASCII", () => {
+  // CSS custom properties take non-ASCII identifiers, and restricting the slug
+  // to a-z did not merely mangle these names — a name written entirely in a
+  // non-Latin script slugged to "", so paletteEntries dropped the entry and the
+  // colour never appeared, with nothing on screen saying why.
+  it("slugs a name in any script", () => {
+    expect(paletteSlug("温かい")).toBe("温かい");
+    expect(paletteSlug("Тёплый")).toBe("тёплый");
+    expect(paletteSlug("Café")).toBe("café");
+    expect(paletteSlug("Ünter Blau")).toBe("ünter-blau");
+  });
+
+  it("keeps an entry whose name is not Latin", () => {
+    const kept = paletteEntries([
+      { name: "温かい", color: "#ff8800" },
+      { name: "Café", color: "#00ff00" },
+    ]);
+    expect(kept.map((p) => p.name)).toEqual(["温かい", "Café"]);
+  });
+
+  it("still refuses a name with no letter or digit in it at all", () => {
+    expect(paletteSlug("!!!")).toBe("");
+    expect(paletteSlug("   ")).toBe("");
+  });
+
+  it("resolves a reference built from such a name", () => {
+    expect(paletteRefSlug("var(--fp-color-温かい)")).toBe("温かい");
+  });
+});
+
+describe("a reference whose fallback has parentheses of its own", () => {
+  // `rgb(...)` and `var(...)` are ordinary things to write as a fallback.
+  // Stopping at the first `)` read them as not-a-reference, so the editor showed
+  // the field as custom and a rename quietly stopped following it.
+  it("resolves through a function-valued fallback", () => {
+    expect(paletteRefSlug("var(--fp-color-warm, rgb(255,136,0))")).toBe("warm");
+    expect(paletteRefSlug("var(--fp-color-warm, var(--other))")).toBe("warm");
+  });
+
+  it("rewrites one, so the link survives a rename", () => {
+    const out = rewritePaletteRefs(
+      { areas: [{ color: "var(--fp-color-warm, rgb(255,136,0))" }] },
+      "warm",
+      "var(--fp-color-warm-white)"
+    );
+    expect(out.areas[0].color).toBe("var(--fp-color-warm-white)");
+  });
+
+  it("does not swallow a compound value that merely ends in a paren", () => {
+    // Matching up to the *last* `)` would call this a reference to `a`, and
+    // rewriting it would replace the whole declaration.
+    expect(paletteRefSlug("var(--fp-color-a, b) var(--c)")).toBeUndefined();
+    expect(paletteRefSlug("var(--other)")).toBeUndefined();
+  });
+});
