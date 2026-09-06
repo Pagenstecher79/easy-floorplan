@@ -353,19 +353,19 @@ export class FloorplanCard extends LitElement {
     return { columns: 12, rows: 8, min_columns: 6, min_rows: 4 };
   }
 
-  private _isOn(item: FloorItem, renderHass?: RenderHass): boolean {
+  private _isOn(item: FloorItem, renderHass: RenderHass | undefined): boolean {
     // Domain-aware: locks say "unlocked", vacuums "cleaning" — never "on".
     return entityIsActive(item.entity, renderHass?.states[item.entity]?.state);
   }
 
   /** How far open an opening should be drawn (0..1), from its entity (or default). */
-  private _openingAmount(o: Opening, renderHass?: RenderHass): number {
+  private _openingAmount(o: Opening, renderHass: RenderHass | undefined): number {
     const state = o.entity ? renderHass?.states[o.entity] : undefined;
     return resolveOpeningAmount(o, state);
   }
 
   /** Whether an opening wears its accent: drawn open, or a cover still in transit. */
-  private _openingActive(o: Opening, renderHass?: RenderHass): boolean {
+  private _openingActive(o: Opening, renderHass: RenderHass | undefined): boolean {
     const state = o.entity ? renderHass?.states[o.entity] : undefined;
     return openingIsActive(o, state);
   }
@@ -376,7 +376,7 @@ export class FloorplanCard extends LitElement {
    * `undefined` — no second sensor, or a shape with only one leaf — leaves both
    * on the first entity, so nothing about a single-sensor opening changes.
    */
-  private _openingSecond(o: Opening, renderHass?: RenderHass): { amount: number; active: boolean } | undefined {
+  private _openingSecond(o: Opening, renderHass: RenderHass | undefined): { amount: number; active: boolean } | undefined {
     if (!o.secondaryEntity || !openingHasTwoLeaves(o)) return undefined;
     const leaf = secondLeafOf(o);
     const state = renderHass?.states[o.secondaryEntity];
@@ -389,7 +389,7 @@ export class FloorplanCard extends LitElement {
    * is drawn from `shutterAmount` / `shutterActive`, not the sash's — and only
    * for a `swing` shutter, since a roll curtain has no second panel to drive.
    */
-  private _shutterSecond(o: Opening, renderHass?: RenderHass): { amount: number; active: boolean } | undefined {
+  private _shutterSecond(o: Opening, renderHass: RenderHass | undefined): { amount: number; active: boolean } | undefined {
     if (!o.shutterSecondaryEntity || shutterStyleOf(o) !== "swing") return undefined;
     const state = renderHass?.states[o.shutterSecondaryEntity];
     return {
@@ -398,7 +398,7 @@ export class FloorplanCard extends LitElement {
     };
   }
 
-  private _itemIcon(item: FloorItem, renderHass?: RenderHass): string {
+  private _itemIcon(item: FloorItem, renderHass: RenderHass | undefined): string {
     return resolveItemIcon(
       item,
       renderHass?.states[item.entity],
@@ -406,7 +406,7 @@ export class FloorplanCard extends LitElement {
     );
   }
 
-  private _label(item: FloorItem, renderHass?: RenderHass): string {
+  private _label(item: FloorItem, renderHass: RenderHass | undefined): string {
     return item.name ?? renderHass?.states[item.entity]?.attributes?.friendly_name ?? item.entity ?? "";
   }
 
@@ -481,7 +481,7 @@ export class FloorplanCard extends LitElement {
     c: FloorplanCardConfig,
     rot: PlanRotation,
     scale: OverlayScale,
-    renderHass?: RenderHass
+    renderHass: RenderHass | undefined
   ): TemplateResult {
     const id = o.shutterEntity!;
     const st = renderHass?.states[id];
@@ -543,7 +543,7 @@ export class FloorplanCard extends LitElement {
     c: FloorplanCardConfig,
     rot: PlanRotation,
     scale: OverlayScale,
-    renderHass?: RenderHass
+    renderHass: RenderHass | undefined
   ): TemplateResult {
     const id = o.entity!;
     const st = renderHass?.states[id];
@@ -626,7 +626,7 @@ export class FloorplanCard extends LitElement {
     executeAction(this, this.hass, { entity: press.entity }, press.config);
   }
 
-  private _renderBadge(item: FloorItem, scale: OverlayScale, renderHass?: RenderHass): TemplateResult {
+  private _renderBadge(item: FloorItem, scale: OverlayScale, renderHass: RenderHass | undefined): TemplateResult {
     const size = cssNumber(item.size, DEFAULT_ITEM_SIZE);
     const box = overlayLength(size, scale);
     // Animation goes on the inner ha-icon, not the badge: the badge carries
@@ -694,7 +694,7 @@ export class FloorplanCard extends LitElement {
     c: FloorplanCardConfig,
     rot: PlanRotation,
     scale: OverlayScale,
-    renderHass?: RenderHass
+    renderHass: RenderHass | undefined
   ): TemplateResult {
     const on = this._isOn(item, renderHass);
     // Name/state composition lives in itemBadgeLabel, including #39's
