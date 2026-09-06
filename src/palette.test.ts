@@ -338,7 +338,7 @@ describe("rewritePaletteRefs — every spelling the card recognises", () => {
     ["canonical", "var(--fp-color-warm)"],
     ["inner whitespace", "var( --fp-color-warm )"],
     ["surrounding whitespace", "  var(--fp-color-warm)  "],
-    ["uppercase", "VAR(--FP-COLOR-WARM)"],
+    ["with the function name in caps", "VAR(--fp-color-warm)"],
     ["with a fallback", "var(--fp-color-warm, red)"],
   ];
 
@@ -400,13 +400,28 @@ describe("a reference whose fallback has parentheses of its own", () => {
     expect(paletteRefSlug("var(--fp-color-warm, var(--other))")).toBe("warm");
   });
 
-  it("rewrites one, so the link survives a rename", () => {
+  it("rewrites one, keeping the fallback the config was written with", () => {
+    // An earlier version of this test asserted the fallback was dropped. It is
+    // the one thing a hand-written reference says about what to do when the
+    // name is not there, and a rename is no reason to throw it away.
     const out = rewritePaletteRefs(
       { areas: [{ color: "var(--fp-color-warm, rgb(255,136,0))" }] },
       "warm",
       "var(--fp-color-warm-white)"
     );
-    expect(out.areas[0].color).toBe("var(--fp-color-warm-white)");
+    expect(out.areas[0].color).toBe("var(--fp-color-warm-white, rgb(255,136,0))");
+  });
+
+  it("drops the fallback when the rewrite lands on a literal", () => {
+    // Deleting freezes at the colour the element was already showing, and a
+    // literal has nowhere to carry a fallback — nor any need to, since the case
+    // it described cannot arise once nothing references the name.
+    const out = rewritePaletteRefs(
+      { areas: [{ color: "var(--fp-color-warm, #333333)" }] },
+      "warm",
+      "#ff8800"
+    );
+    expect(out.areas[0].color).toBe("#ff8800");
   });
 
   it("does not swallow a compound value that merely ends in a paren", () => {
@@ -414,5 +429,26 @@ describe("a reference whose fallback has parentheses of its own", () => {
     // rewriting it would replace the whole declaration.
     expect(paletteRefSlug("var(--fp-color-a, b) var(--c)")).toBeUndefined();
     expect(paletteRefSlug("var(--other)")).toBeUndefined();
+  });
+});
+
+describe("the case rules CSS actually applies", () => {
+  // Checked in a browser, both halves: `VAR(--fp-color-warm)` paints orange,
+  // `var(--FP-COLOR-WARM)` paints as though nothing were declared. Function
+  // names are case-insensitive in CSS; custom property names are not.
+  it("accepts the function name in any case", () => {
+    expect(paletteRefSlug("VAR(--fp-color-warm)")).toBe("warm");
+    expect(paletteRefSlug("Var(--fp-color-warm)")).toBe("warm");
+  });
+
+  it("does not claim a differently-cased property is the same colour", () => {
+    // Matching this case-insensitively made the editor report the field as on a
+    // name while the plan drew it black.
+    expect(paletteRefSlug("var(--FP-COLOR-WARM)")).toBeUndefined();
+  });
+
+  it("leaves a differently-cased reference alone on rename", () => {
+    const out = rewritePaletteRefs({ areas: [{ color: "var(--FP-COLOR-WARM)" }] }, "warm", "#ff8800");
+    expect(out.areas[0].color).toBe("var(--FP-COLOR-WARM)");
   });
 });

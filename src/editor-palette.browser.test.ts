@@ -202,3 +202,85 @@ describe("the palette picker on a colour field", () => {
     expect(t.emitted.length).toBe(before);
   });
 });
+
+describe("the invariant that nothing dangles", () => {
+  async function withPalette(palette: unknown[], background = "var(--fp-color-warm)") {
+    const t = await mountEditor();
+    t.ed.setConfig({ ...config(), palette, background } as unknown as FloorplanCardConfig);
+    await t.ed.updateComplete;
+    await openNamedColors(t.ed);
+    return t;
+  }
+  const rows = (ed: FloorplanCardEditor) => [
+    ...(ed.shadowRoot?.querySelectorAll<HTMLInputElement>("input.palette-color") ?? []),
+  ];
+  const removeButtons = (ed: FloorplanCardEditor) => [
+    ...(ed.shadowRoot?.querySelectorAll<HTMLButtonElement>(".palette-row button") ?? []),
+  ];
+
+  it("refuses a colour the card cannot use, instead of quietly unpublishing the name", async () => {
+    // Clearing this field drops the entry from paletteEntries, so the property
+    // stops being declared and every reference to it goes black — the same
+    // damage a delete does, but with no rewrite, no error, and the row still
+    // sitting there looking live.
+    const t = await withPalette([{ name: "Warm", color: "#ff8800" }]);
+    const before = t.emitted.length;
+    const field = rows(t.ed)[0];
+
+    field.value = "";
+    field.dispatchEvent(new Event("change", { bubbles: true }));
+    await t.ed.updateComplete;
+
+    expect(t.emitted.length).toBe(before);
+    expect(field.value).toBe("#ff8800");
+    expect(t.ed.shadowRoot?.textContent).toContain("needs a color");
+  });
+
+  it("refuses whitespace as readily as an empty field", async () => {
+    // `cssColor` is a safety filter rather than a validity check — it lets any
+    // bare identifier through on purpose, since the card cannot know every
+    // colour keyword a theme or a future CSS level might use. So the set it
+    // rejects, and the set that would silently unpublish a name, is the blank
+    // one.
+    const t = await withPalette([{ name: "Warm", color: "#ff8800" }]);
+    const before = t.emitted.length;
+    const field = rows(t.ed)[0];
+
+    field.value = "   ";
+    field.dispatchEvent(new Event("change", { bubbles: true }));
+    await t.ed.updateComplete;
+
+    expect(t.emitted.length).toBe(before);
+    expect(field.value).toBe("#ff8800");
+  });
+
+  it("leaves references alone when a twin still declares the same name", async () => {
+    // paletteEntries keeps the first of two entries sharing a slug. Deleting the
+    // shadowed second one used to rewrite every reference to that slug —
+    // references belonging to the survivor — freezing them at the deleted
+    // entry's colour. The plan repaints wrong and a live link is severed.
+    const t = await withPalette([
+      { name: "Warm", color: "#ff8800" },
+      { name: "warm", color: "#000000" },
+    ]);
+    const buttons = removeButtons(t.ed);
+    expect(buttons.length).toBe(2);
+
+    buttons[1].click();
+    await t.ed.updateComplete;
+
+    const last = t.emitted[t.emitted.length - 1];
+    expect(last.palette).toHaveLength(1);
+    // Still pointing at the surviving entry, not frozen at #000000.
+    expect(last.background).toBe("var(--fp-color-warm)");
+  });
+
+  it("still freezes references when the name is genuinely gone", async () => {
+    const t = await withPalette([{ name: "Warm", color: "#ff8800" }]);
+    removeButtons(t.ed)[0].click();
+    await t.ed.updateComplete;
+
+    const last = t.emitted[t.emitted.length - 1];
+    expect(last.background).toBe("#ff8800");
+  });
+});

@@ -155,18 +155,43 @@ export function paletteKey(palette: unknown): string {
  * as custom and a rename quietly stopped following it. Deliberately only one
  * level: a pattern that swallowed anything up to the last `)` would also match a
  * compound value like `var(--fp-color-a, b) var(--c)`, and rewriting that would
- * replace the whole thing.
+ * replace the whole thing. The fallback text is captured too, so a rewrite can
+ * put it back.
+ *
+ * Case-sensitivity is split, because CSS splits it. Function names are
+ * case-insensitive, so `VAR(--fp-color-warm)` resolves and has to match here.
+ * Custom property *names* are not, so `var(--FP-COLOR-WARM)` does **not**
+ * resolve — it renders as if nothing were declared. Verified in a browser, both
+ * halves. A blanket `/i` made this parser claim the second one was a live
+ * reference while the plan drew it black; dropping `/i` altogether would have
+ * stopped recognising the first, which is a real reference someone may have
+ * written. Hence the spelled-out `[Vv][Aa][Rr]` and an otherwise exact match.
  */
 const PALETTE_REF =
-  /^var\(\s*--fp-color-([\p{L}\p{N}-]+)\s*(?:,(?:[^()]|\([^()]*\))*)?\)$/iu;
+  /^[Vv][Aa][Rr]\(\s*--fp-color-([\p{L}\p{N}-]+)\s*(?:,((?:[^()]|\([^()]*\))*))?\)$/u;
 
 /**
  * The slug a value references, or `undefined` if it is an ordinary colour.
  * Used by the editor to show which palette entry a field is on.
  */
 export function paletteRefSlug(value: unknown): string | undefined {
+  return paletteRefParts(value)?.slug;
+}
+
+/**
+ * A reference broken into the name it points at and the fallback it carries, or
+ * `undefined` for an ordinary colour. The fallback is what a rewrite has to put
+ * back — dropping it would rewrite a hand-written `var(--fp-color-warm, #333)`
+ * into something that no longer says what to do when the name is not there.
+ */
+export function paletteRefParts(
+  value: unknown
+): { slug: string; fallback?: string } | undefined {
   if (typeof value !== "string") return undefined;
-  return PALETTE_REF.exec(value.trim())?.[1].toLowerCase();
+  const m = PALETTE_REF.exec(value.trim());
+  if (!m) return undefined;
+  const fallback = m[2]?.trim();
+  return { slug: m[1], fallback: fallback ? fallback : undefined };
 }
 
 /**
@@ -211,7 +236,21 @@ export function rewritePaletteRefs<T>(value: T, fromSlug: string, to: string): T
     // different case all resolve as this reference everywhere else. Missing
     // them here would leave exactly the dangling reference this function
     // exists to prevent, and a dangling reference paints black.
-    if (typeof node === "string") return paletteRefSlug(node) === fromSlug ? to : node;
+    if (typeof node === "string") {
+      const parts = paletteRefParts(node);
+      if (parts?.slug !== fromSlug) return node;
+      // A rename lands on another reference, which can still carry the fallback
+      // the config was written with. A delete lands on a literal colour, where
+      // there is nowhere to put one — and none is needed: the literal is what
+      // the element was already showing while the name existed, and the
+      // fallback described the case that is now impossible.
+      const target = paletteRefParts(to);
+      // Only splice into a target that is a reference and does not already
+      // carry a fallback of its own — otherwise `to` is already complete.
+      return parts.fallback && target && !target.fallback
+        ? `var(${PALETTE_VAR_PREFIX}${target.slug}, ${parts.fallback})`
+        : to;
+    }
     if (Array.isArray(node)) return node.map(walk);
     if (node && typeof node === "object") {
       return Object.fromEntries(Object.entries(node).map(([k, v]) => [k, walk(v)]));

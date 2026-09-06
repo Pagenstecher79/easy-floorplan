@@ -2145,10 +2145,17 @@ export class FloorplanCardEditor extends LitElement {
     // a dangling reference is not a colour.
     const slug = paletteRefSlug(value);
     const current = slug && palette.some((p) => paletteSlug(p.name) === slug) ? slug : undefined;
+    // `.value` as well as `?selected`: the attribute only sets what the option
+    // defaults to, and once the user has picked from this dropdown the option is
+    // dirty and stops following it. Selecting another element, or undoing, would
+    // otherwise leave the control showing a name the field is not on — and
+    // picking "Custom…" from that stale state does nothing, because the field
+    // was never on a name to leave.
     return html`
       <select
         class="palette-pick"
         title="Use one of the plan's named colours"
+        .value=${current ?? ""}
         @change=${(e: Event) => {
           const slug = (e.target as HTMLSelectElement).value;
           if (!slug) {
@@ -4730,7 +4737,8 @@ export class FloorplanCardEditor extends LitElement {
                 class="palette-color"
                 placeholder="#ff8800"
                 .value=${p.color ?? ""}
-                @change=${(e: Event) => at(i, { color: (e.target as HTMLInputElement).value })}
+                @change=${(e: Event) =>
+                  this._recolorPaletteColor(i, e.target as HTMLInputElement)}
               />
               <button
                 class="rule-remove"
@@ -4808,13 +4816,43 @@ export class FloorplanCardEditor extends LitElement {
     }
     this._paletteError = "";
     const renamed = list.map((p, j) => (j === i ? { ...p, name } : p));
+    const config = { ...this._config, palette: renamed };
     this._patchConfig(
-      // An empty new name leaves the entry unusable, so its references have
-      // nothing to point at — freeze them at the colour, as a delete does.
-      to
-        ? rewritePaletteRefs({ ...this._config, palette: renamed }, from, paletteRef(name))
-        : rewritePaletteRefs({ ...this._config, palette: renamed }, from, entry.color)
+      // Same shadowing caveat as delete: if another entry still declares the old
+      // slug, its references are none of this rename's business.
+      this._slugStillResolves(from, config)
+        ? config
+        : // An empty new name leaves the entry unusable, so its references have
+          // nothing to point at — freeze them at the colour, as a delete does.
+          rewritePaletteRefs(config, from, to ? paletteRef(name) : entry.color)
     );
+  }
+
+  /**
+   * The colour half of a palette row.
+   *
+   * Guarded like the name half, and for the same reason. An empty or invalid
+   * colour drops the entry from `paletteEntries`, so `paletteStyle` stops
+   * declaring its property and every reference to it dangles — which is not a
+   * fallback, it is black. That is the same damage deleting the entry does, but
+   * reached without a rewrite, without an error, and with the row still sitting
+   * there looking live. Refuse it and put the field back instead; the way out
+   * is the remove button, which freezes the references properly.
+   */
+  private _recolorPaletteColor(i: number, input: HTMLInputElement): void {
+    const list = this._config.palette ?? [];
+    const entry = list[i];
+    if (!entry) return;
+    const color = input.value.trim();
+    if (!cssColor(color)) {
+      this._paletteError = color
+        ? `“${color}” is not a color the card can use.`
+        : "A named color needs a color. Use the remove button to take the name away.";
+      input.value = entry.color ?? "";
+      return;
+    }
+    this._paletteError = "";
+    this._patchConfig({ palette: list.map((p, j) => (j === i ? { ...p, color } : p)) });
   }
 
   private _removePaletteColor(i: number): void {
@@ -4823,13 +4861,24 @@ export class FloorplanCardEditor extends LitElement {
     if (!entry) return;
     this._paletteError = "";
     const next = list.filter((_, j) => j !== i);
+    const config = { ...this._config, palette: next.length ? next : undefined };
+    // Only freeze the references if the name they point at is actually gone.
+    // Two entries may share a slug — `paletteEntries` keeps the first and
+    // shadows the rest — so deleting the shadowed one leaves the property still
+    // declared by its twin. Rewriting then, references that belong to the
+    // survivor would be frozen at the *deleted* entry's colour: the plan
+    // repaints wrong and a live link is cut, with nothing said about it.
     this._patchConfig(
-      rewritePaletteRefs(
-        { ...this._config, palette: next.length ? next : undefined },
-        paletteSlug(entry.name),
-        entry.color
-      )
+      this._slugStillResolves(paletteSlug(entry.name), config)
+        ? config
+        : rewritePaletteRefs(config, paletteSlug(entry.name), entry.color)
     );
+  }
+
+  /** Whether a slug is still declared by the palette in `config`. */
+  private _slugStillResolves(slug: string, config: FloorplanCardConfig): boolean {
+    if (!slug) return false;
+    return paletteEntries(config.palette).some((p) => paletteSlug(p.name) === slug);
   }
 
   private _renderSymbolsPanel(): TemplateResult {
