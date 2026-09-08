@@ -1266,7 +1266,7 @@ describe("a window can be hinged at the top (issue #272)", () => {
 
   it("projects a tapered blade once it is open", () => {
     const svg = svgOf(awning, { color: "#000", open: true, amount: 1 });
-    expect(svg).toContain("<polygon");
+    expect(svg).toContain("<polyline");
     // Tapered, not a rectangle: the two far corners are pulled in.
     const pts = /points="([^"]+)"/.exec(svg)?.[1].split(" ").map((p) => p.split(",").map(Number));
     expect(pts).toHaveLength(4);
@@ -1280,6 +1280,17 @@ describe("a window can be hinged at the top (issue #272)", () => {
 
   it("draws no blade while it is shut", () => {
     const svg = svgOf(awning, { color: "#000", open: false, amount: 0 });
+    expect(svg).not.toContain("<polyline");
+  });
+
+  it("leaves the broken glass line showing under the blade", () => {
+    // The blade is an open shape on purpose. As a polygon it stroked its own
+    // base straight back along the wall line — solid, over the dashes — and
+    // the only glass left uncovered was the sliver outside the blade, which is
+    // exactly where the knuckles sit. The dash pattern was in the markup and
+    // the line was solid on screen at every size, so the test above passed on
+    // a picture that never showed it.
+    const svg = svgOf(awning, { color: "#000", open: true, amount: 1 });
     expect(svg).not.toContain("<polygon");
   });
 

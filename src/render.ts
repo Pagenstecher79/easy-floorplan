@@ -3448,7 +3448,13 @@ export function renderOpening(o: Opening, style: OpeningStyle): SVGTemplateResul
               stroke-dasharray=${openNow ? "6 4" : nothing} />
         ${
           openNow
-            ? svg`<polygon
+            ? // A polyline, not a polygon, and that is the whole point of the
+              // broken line above it. A closed shape strokes its own base back
+              // along y=0 — straight over the dashes, solid — and the only
+              // glass left uncovered would be the sliver outside `bx`, which
+              // is exactly where the knuckles sit. The line would have been
+              // dashed in the markup and solid on the screen at every size.
+              svg`<polyline
                     points="${-bx},0 ${-bx + taper},${-depth} ${bx - taper},${-depth} ${bx},0"
                     fill="none" stroke=${tone} stroke-width="1.5"
                     stroke-linejoin="round" />`
