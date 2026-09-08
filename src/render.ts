@@ -3302,7 +3302,12 @@ export function renderOpening(o: Opening, style: OpeningStyle): SVGTemplateResul
   const cutH = WALL_THICKNESS + 4;
   // The moving parts take the accent color when actively open (sensor-driven).
   // Sanitised: color/accent are config-supplied and land in `style="stroke/fill:…"`.
-  const shut = style.inactive ?? color;
+  // Sanitised here rather than left to `cssColorOr` below, which falls back to
+  // the *accent* — the colour this symbol wears when it is open. `inactive` is
+  // documented to default to `color`, so a value cssColor refuses has to land
+  // on the wall colour; passing it through raw drew a shut door as an open one
+  // on nothing worse than a typo.
+  const shut = cssColor(style.inactive) ?? color;
   const tone = cssColorOr(active ? accent : shut, SKIN_ACCENT);
   // Fraction open (0..1) drives partial swing/slide. Defaults to the binary
   // `open` so callers that don't pass `amount` render exactly as before.

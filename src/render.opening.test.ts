@@ -1348,3 +1348,22 @@ describe("an opening can say what colour it is when closed (issue #228)", () => 
     expect(svg).toContain("#c62828");
   });
 });
+
+describe("an unusable closed colour falls back to the wall, not the accent (issue #228)", () => {
+  // `inactive` is documented to default to `color`. It reached
+  // `cssColorOr(…, SKIN_ACCENT)` unsanitised, so a value cssColor refuses did
+  // not fall back to the wall — it fell all the way through to the accent,
+  // which is the colour this symbol wears when it is *open*. A typo in
+  // `inactiveColor` therefore drew a shut door as an open one.
+  const shut = { color: "#123456", open: false, amount: 0 } as const;
+
+  it("draws an unsanitisable value as the wall colour", () => {
+    const svg = svgOf({ type: "door" }, { ...shut, inactive: "url(javascript:alert(1))" });
+    expect(svg).toContain("#123456");
+    expect(svg).not.toContain("javascript");
+  });
+
+  it("still honours a usable one", () => {
+    expect(svgOf({ type: "door" }, { ...shut, inactive: "#c62828" })).toContain("#c62828");
+  });
+});

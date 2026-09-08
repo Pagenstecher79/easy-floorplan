@@ -159,10 +159,11 @@ describe("a device can say what colour it is when off", () => {
     expect(t.background()).toBe(OFF_RED);
   });
 
-  it("does not paint a sensor, which is never 'on' but is not off either", async () => {
-    // entityIsActive is what decides, and a numeric sensor reads inactive —
-    // so this one *does* paint. Pinned because it is the case most likely to
-    // surprise, and thresholds are the right tool there.
+  it("paints a sensor too, which is the case most likely to surprise", async () => {
+    // entityIsActive is what decides, and a numeric sensor reads inactive, so
+    // a reading of 21.5 wears the off colour. Pinned rather than argued with:
+    // thresholds are the right tool for a sensor, and `stateColor` rules win
+    // over this anyway.
     const t = await mount({ entity: "sensor.a", inactiveColor: "#c62828" });
     expect(t.background()).toBe(OFF_RED);
   });
