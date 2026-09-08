@@ -5125,7 +5125,7 @@ export class FloorplanCardEditor extends LitElement {
               // both invites setting one and seeing the other. Say which one is
               // in charge instead of leaving a dead control on screen.
               html`<p class="hint rule-note">
-                Colored by the state rules below — they replace the active color.
+                Colored by the state rules below — they replace the active and inactive colors.
               </p>`
             : html`${this._renderColorRow({
                 label: "Active color",
