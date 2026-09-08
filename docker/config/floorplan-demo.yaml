@@ -134,6 +134,11 @@ views:
                     length: 120
                     angle: 0
                     entity: binary_sensor.front_door
+                    # On *and* off (issue #228): green while the sash is open,
+                    # red while it is shut. Flip binary_sensor.front_door on the
+                    # History view to watch it change.
+                    activeColor: var(--fp-color-good)
+                    inactiveColor: var(--fp-color-bad)
                   # One sensor per leaf (issue #159). All three share the same
                   # pair of contacts, so flipping "Left leaf" on the History view
                   # swings a casement sash, a door leaf and a shutter panel at
@@ -178,6 +183,18 @@ views:
                     shutterSecondaryEntity: binary_sensor.right_leaf
 
                 items:
+                  # On *and* off (issue #228). The garage door is the case the
+                  # request was about: a badge that is green when it is open and
+                  # red when it is shut, so the one you need to notice is the one
+                  # that catches your eye. `inactiveColor` reads "closed" here
+                  # without the plan naming the word -- the same key on a lock
+                  # would mean `locked`.
+                  - id: garage
+                    entity: cover.garage_door
+                    x: 900
+                    y: 240
+                    activeColor: var(--fp-color-good)
+                    inactiveColor: var(--fp-color-bad)
                   # Paired temperature/humidity: stored at two decimals, displayed at
                   # one. Should read like "17.9 °C · 49.3%".
                   # Many readings on one device (issue #180): one list, in the

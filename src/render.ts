@@ -3244,6 +3244,17 @@ export interface OpeningStyle {
    */
   accent?: string;
   /**
+   * Color of the moving parts while **not** `active` (issue #228). Defaults to
+   * `color`, which is what every opening drew before this existed.
+   *
+   * Deliberately separate from `color` rather than reusing it: `color` also
+   * draws the jambs and the static frame, and those must stay the wall's colour
+   * whichever way the door is — recolouring them would turn the symbol from a
+   * hole in a wall into a coloured shape. This is the leaf, the sash, the swing
+   * arc, and a shutter that is down.
+   */
+  inactive?: string;
+  /**
    * External roller shutter layered over the opening (issue #74): how far
    * open (0..1, see {@link shutterAmount}) and whether it wears the accent.
    * Rendered as the roll curtain on top of the sash.
@@ -3291,7 +3302,8 @@ export function renderOpening(o: Opening, style: OpeningStyle): SVGTemplateResul
   const cutH = WALL_THICKNESS + 4;
   // The moving parts take the accent color when actively open (sensor-driven).
   // Sanitised: color/accent are config-supplied and land in `style="stroke/fill:…"`.
-  const tone = cssColorOr(active ? accent : color, SKIN_ACCENT);
+  const shut = style.inactive ?? color;
+  const tone = cssColorOr(active ? accent : shut, SKIN_ACCENT);
   // Fraction open (0..1) drives partial swing/slide. Defaults to the binary
   // `open` so callers that don't pass `amount` render exactly as before.
   const amt = Math.max(0, Math.min(1, style.amount ?? (open ? 1 : 0)));
@@ -3302,7 +3314,7 @@ export function renderOpening(o: Opening, style: OpeningStyle): SVGTemplateResul
   // hinged double — and both read the same pair.
   const amt2 = style.second ? Math.max(0, Math.min(1, style.second.amount)) : amt;
   const tone2 = style.second
-    ? cssColorOr(style.second.active ? accent : color, SKIN_ACCENT)
+    ? cssColorOr(style.second.active ? accent : shut, SKIN_ACCENT)
     : tone;
 
   let body: SVGTemplateResult;
@@ -3553,8 +3565,10 @@ export function renderOpening(o: Opening, style: OpeningStyle): SVGTemplateResul
   // sash so a shut shutter visibly covers an open window. Its own
   // active/accent state is independent of the window's.
   if (style.shutter) {
+    // A shutter that is down follows the opening's closed colour, the way one
+    // that is up follows its accent (issue #228).
     const shutterTone = cssColorOr(
-      style.shutter.active ? (style.shutter.accent ?? accent) : color,
+      style.shutter.active ? (style.shutter.accent ?? accent) : shut,
       SKIN_ACCENT
     );
     const shutterAmt = Math.max(0, Math.min(1, style.shutter.amount));
@@ -3563,7 +3577,7 @@ export function renderOpening(o: Opening, style: OpeningStyle): SVGTemplateResul
     const second = style.shutter.second;
     const shutterTone2 = second
       ? cssColorOr(
-          second.active ? (style.shutter.accent ?? accent) : color,
+          second.active ? (style.shutter.accent ?? accent) : shut,
           SKIN_ACCENT
         )
       : shutterTone;

@@ -736,6 +736,12 @@ export class FloorplanCard extends LitElement {
     // stated explicitly, and only when the bulb actually reports a colour.
     const lightColor = lightBadgePaint(st);
     const activeColor = cssColor(item.activeColor) ?? lightColor;
+    // The off colour (issue #228): "users could specify separate colors for
+    // switches or doors when they are on/open and off/closed". Only painted
+    // while the device is actually inactive — `on` comes from entityIsActive,
+    // so this means off for a switch, closed for a cover and locked for a
+    // lock without the plan having to name each word.
+    const inactiveColor = on ? undefined : cssColor(item.inactiveColor);
     const rippleColor =
       item.rippleColor ?? stateColor ?? item.activeColor ?? lightColor ?? SKIN_ACCENT;
     // Ink that can actually be read on whatever the badge ended up painted
@@ -746,8 +752,14 @@ export class FloorplanCard extends LitElement {
     // stores a var(), which contrastText cannot read and would answer
     // undefined for — so moving a badge onto a named colour would quietly cost
     // it the ink it had as a literal hex.
+    // Ink follows whatever the badge actually ends up painted — which since
+    // issue #228 is the inactive colour when the device is off, not the active
+    // one it was never going to wear.
     const badgeInk = contrastText(
-      resolvePaletteColor(stateColor ?? activeColor, this._config?.palette)
+      resolvePaletteColor(
+        stateColor ?? (on ? activeColor : inactiveColor),
+        this._config?.palette
+      )
     );
     const rippleSize = item.rippleSize ?? DEFAULT_RIPPLE_SIZE;
     const rippleDirection = item.rippleDirection ?? DEFAULT_RIPPLE_DIRECTION;
@@ -791,7 +803,7 @@ export class FloorplanCard extends LitElement {
       <div
         class="item fp-item ${on ? "on" : "off"} ${offline ? "offline" : ""} ${stateColor
           ? "state-colored"
-          : ""} ${interactive ? "interactive" : ""}"
+          : ""} ${inactiveColor ? "inactive-colored" : ""} ${interactive ? "interactive" : ""}"
         data-id=${cssIdent(item.id) ?? nothing}
         data-entity=${cssEntityId(item.entity) ?? nothing}
         data-kind=${cssIdent(item.kind) ?? nothing}
@@ -799,6 +811,8 @@ export class FloorplanCard extends LitElement {
           ? `--fp-state:${stateColor};`
           : ""}${activeColor
           ? `--fp-active:${activeColor};`
+          : ""}${inactiveColor
+          ? `--fp-inactive:${inactiveColor};`
           : ""}${badgeInk ? `--fp-ink:${badgeInk};` : ""}"
         title=${this._label(item, renderHass)}
         role=${interactive ? "button" : nothing}
@@ -1253,6 +1267,9 @@ export class FloorplanCard extends LitElement {
                 : undefined;
               const symbol = renderOpening(o, {
                 color: SKIN_WALL,
+                // The closed tone (issue #228). Absent, the moving parts stay
+                // the wall colour, which is what a closed opening always was.
+                inactive: o.inactiveColor,
                 open: amount > 0,
                 amount,
                 active: this._openingActive(o, renderHass),
@@ -2100,6 +2117,15 @@ export class FloorplanCard extends LitElement {
          so the skin states its own ink. A pastel badge under a dark Home
          Assistant theme would otherwise take that theme's near-white text. */
       color: var(--fp-ink, var(--fp-skin-active-ink, var(--text-primary-color, #212121)));
+    }
+    /* The off colour (issue #228). Its own class rather than a var() fallback
+       on the base .badge rule, so a plan that never sets one emits nothing new
+       and looks exactly as it did. Declared before .state-colored, which still
+       wins — a threshold rule is the more specific statement. */
+    .item.inactive-colored .badge {
+      background: var(--fp-inactive);
+      border-color: var(--fp-inactive);
+      color: var(--fp-ink, var(--text-primary-color, #212121));
     }
     /* A resolved state colour paints the badge whatever the on/off state —
        thresholds exist for sensors, which are never "on". Declared *after* the

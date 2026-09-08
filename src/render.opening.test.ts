@@ -1247,3 +1247,104 @@ describe("renderOpening — a sash narrower than its frame (issue #218)", () => 
     expect(two).toContain("width=45"); // each leaf still half the opening
   });
 });
+
+describe("an opening can say what colour it is when closed (issue #228)", () => {
+  // "users could specify separate colors for switches or doors when they are
+  // on/open and off/closed". A closed door was always a line the same colour
+  // as the wall it sits in, which is exactly wrong when the thing you need to
+  // notice is a door that is shut.
+  const door = { type: "door", entity: "binary_sensor.front" } as Partial<Opening>;
+
+  it("paints the moving parts with the closed colour", () => {
+    const svg = svgOf(door, { color: "#000", inactive: "#c62828", active: false, open: false });
+    expect(svg).toContain("#c62828");
+  });
+
+  it("leaves the frame the wall colour, and only moves the sash", () => {
+    // `color` also draws the static frame. Recolouring that would turn the
+    // symbol from a hole in a wall into a coloured shape, so the closed colour
+    // must not reach it. A window is the case that draws both at once — a
+    // closed door and a closed slider draw no frame stroke to check.
+    const svg = svgOf(
+      { type: "window", entity: "binary_sensor.front" },
+      { color: "#0000ff", inactive: "#c62828", active: false, open: false },
+    );
+    expect(svg).toContain("#0000ff");
+    expect(svg).toContain("#c62828");
+  });
+
+  it("works for every kind of opening, not just the one it was written for", () => {
+    // Both types, and both motions — a slider's panel is drawn by a different
+    // branch from a swing leaf, so covering one proves nothing about the other.
+    const shapes = [
+      { type: "door" },
+      { type: "window" },
+      { type: "door", motion: "slide" },
+      { type: "window", motion: "slide" },
+    ] as const;
+    for (const shape of shapes) {
+      const svg = svgOf(
+        { ...shape, entity: "binary_sensor.front" },
+        { color: "#000", inactive: "#c62828", active: false, open: false },
+      );
+      expect(svg, `${JSON.stringify(shape)} should paint its closed colour`).toContain("#c62828");
+    }
+  });
+
+  it("is ignored while the opening is open, where the accent belongs", () => {
+    const svg = svgOf(door, {
+      color: "#000",
+      inactive: "#c62828",
+      active: true,
+      open: true,
+      accent: "#00ff00",
+    });
+    expect(svg).toContain("#00ff00");
+    expect(svg).not.toContain("#c62828");
+  });
+
+  it("changes nothing for an opening that does not set one", () => {
+    // The default path has to be byte-identical, since every existing plan is
+    // on it.
+    const withOut = svgOf(door, { color: "#123456", active: false, open: false });
+    const withUndefined = svgOf(door, {
+      color: "#123456",
+      inactive: undefined,
+      active: false,
+      open: false,
+    });
+    expect(withUndefined).toBe(withOut);
+  });
+
+  it("carries the second leaf of a double, which has its own state", () => {
+    // A pair of sashes with one open and one shut should show both colours —
+    // the shut one is the whole point of the feature.
+    const svg = svgOf(
+      { ...door, sash: "double" },
+      {
+        color: "#000",
+        inactive: "#c62828",
+        accent: "#00ff00",
+        active: true,
+        open: true,
+        second: { amount: 0, active: false },
+      },
+    );
+    expect(svg).toContain("#00ff00");
+    expect(svg).toContain("#c62828");
+  });
+
+  it("takes a shutter down with it, as the accent takes one up", () => {
+    const svg = svgOf(
+      { ...door, shutterEntity: "cover.shutter" },
+      {
+        color: "#000",
+        inactive: "#c62828",
+        active: false,
+        open: false,
+        shutter: { amount: 0, active: false, style: "roll" },
+      },
+    );
+    expect(svg).toContain("#c62828");
+  });
+});

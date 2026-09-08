@@ -137,6 +137,58 @@ leave those out. It sits under **Behavior** in the furniture panel.
 This does not replace the floor switcher in the card's corner; the stairs are a second way
 up. Set `floors` and you get both.
 
+## Colors for on and off
+
+A device badge has always been able to say what colour it is when it is **on**,
+and nothing at all about when it is **off** — every off device is the same
+neutral badge. Same for an opening: a closed door is a line the same colour as
+the wall it sits in. Which is exactly backwards when the thing you need to
+notice is the door that is *shut*, or the valve that is *closed*.
+
+![The same plan twice: on the left every shut device is a neutral badge and every
+closed sash is a line the colour of the wall; on the right they are red](img/inactive-color.png)
+
+`inactiveColor` is the counterpart to `activeColor`, on both:
+
+```yaml
+items:
+  - id: garage
+    entity: cover.garage_door
+    activeColor: "#2e7d32"    # open — fine
+    inactiveColor: "#c62828"  # closed — look at me
+
+openings:
+  - id: front
+    type: door
+    entity: binary_sensor.front_door
+    activeColor: "#2e7d32"
+    inactiveColor: "#c62828"
+```
+
+### Why not just a state rule
+
+A `stateColor` rule can already paint a badge, and for a plain switch
+`{ state: "off", color: "#c62828" }` does the same job. The catch is that it
+requires knowing the word. A lock says `locked`, a cover says `closed`, a vacuum
+says `docked` — a rule written for one is silently wrong on the next, and the
+symptom is a badge that simply never changes colour.
+
+`inactiveColor` is resolved through the same domain table that decides whether a
+device is drawn as "on" at all, so it means off for every domain at once.
+
+Rules still win over it, exactly as they win over `activeColor`: a threshold or
+an exact state is the more specific statement about what this element should
+look like right now.
+
+### What it does not touch
+
+- **The jambs and frame of an opening.** Only the leaf, the sash and the swing
+  arc move — recolouring the frame would turn the symbol from a hole in a wall
+  into a coloured shape.
+- **Furniture and areas.** Both already have a static `color`, which *is* their
+  off colour: `activeColor` paints over it while the entity is on, and it shows
+  through the rest of the time.
+
 ## Offline devices
 
 An entity that has dropped out no longer looks like one that is simply switched off.
