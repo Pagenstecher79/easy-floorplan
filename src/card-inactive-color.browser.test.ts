@@ -179,7 +179,7 @@ describe("an opening can say what colour it is when shut", () => {
     document.body.innerHTML = "";
   });
 
-  async function mountOpening(entity: string | undefined) {
+  async function mountOpening(entity: string | undefined, type = "door") {
     const host = document.createElement("div");
     host.style.width = "900px";
     host.style.height = "540px";
@@ -195,7 +195,7 @@ describe("an opening can say what colour it is when shut", () => {
           name: "Floor 1",
           walls: [{ id: "w1", x1: 100, y1: 300, x2: 900, y2: 300 }],
           openings: [
-            { id: "o1", type: "door", x: 500, y: 300, length: 120, angle: 0, entity,
+            { id: "o1", type, x: 500, y: 300, length: 120, angle: 0, entity,
               inactiveColor: "#c62828" },
           ],
           items: [],
@@ -224,7 +224,18 @@ describe("an opening can say what colour it is when shut", () => {
     expect((await mountOpening("cover.gone")).paintsShut()).toBe(false);
   });
 
-  it("still paints an opening drawn without a sensor", async () => {
-    expect((await mountOpening(undefined)).paintsShut()).toBe(true);
+  it("still paints a window drawn without a sensor, which renders shut", async () => {
+    // A hand-drawn shut window has nothing about it that could be wrong: it is
+    // a statement about the plan rather than a missing reading.
+    expect((await mountOpening(undefined, "window")).paintsShut()).toBe(true);
   });
+
+  it("does not paint an unbound door, which the plan convention draws open", async () => {
+    // The case that showed "not active" and "shut" are not the same question.
+    // A swing door with no sensor is drawn *open* (openingDefaultOpen) and is
+    // never active, so reading one as the other painted a wide-open door in
+    // the colour documented to mean closed.
+    expect((await mountOpening(undefined, "door")).paintsShut()).toBe(false);
+  });
+
 });

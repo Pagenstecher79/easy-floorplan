@@ -3313,7 +3313,6 @@ export function renderOpening(o: Opening, style: OpeningStyle): SVGTemplateResul
   // on the wall colour; passing it through raw drew a shut door as an open one
   // on nothing worse than a typo.
   const shut = cssColor(style.inactive) ?? color;
-  const tone = cssColorOr(active ? accent : shut, SKIN_ACCENT);
   // Fraction open (0..1) drives partial swing/slide. Defaults to the binary
   // `open` so callers that don't pass `amount` render exactly as before.
   const amt = Math.max(0, Math.min(1, style.amount ?? (open ? 1 : 0)));
@@ -3323,9 +3322,28 @@ export function renderOpening(o: Opening, style: OpeningStyle): SVGTemplateResul
   // a branch because two shapes now have two leaves — sliding panels and a
   // hinged double — and both read the same pair.
   const amt2 = style.second ? Math.max(0, Math.min(1, style.second.amount)) : amt;
-  const tone2 = style.second
-    ? cssColorOr(style.second.active ? accent : shut, SKIN_ACCENT)
-    : tone;
+  /**
+   * The colour a leaf wears, from what it is *doing* rather than from what its
+   * sensor says (issue #228).
+   *
+   * `active` and "drawn shut" agree for every entity-bound opening, which is
+   * why this started life as `active ? accent : shut`. They come apart with no
+   * entity: a swing door with no sensor is drawn **open** by the static
+   * floor-plan convention ({@link openingDefaultOpen}) and is never active, so
+   * reading "not active" as "closed" painted a wide-open door in the colour
+   * that is documented to mean shut.
+   *
+   * Asking the amount instead makes the option mean what it says on all four
+   * corners: an unbound window (drawn shut) wears it, an unbound door (drawn
+   * open) does not, and a bound opening is unchanged either way. It also gets
+   * the per-leaf case right for free — a double with one sash open and one shut
+   * paints each from its own amount, which a single `active` flag could not
+   * express.
+   */
+  const leafTone = (isActive: boolean, a: number) =>
+    cssColorOr(isActive ? accent : a === 0 ? shut : color, SKIN_ACCENT);
+  const tone = leafTone(active, amt);
+  const tone2 = style.second ? leafTone(!!style.second.active, amt2) : tone;
 
   let body: SVGTemplateResult;
   if (openingMotion(o) === "swing") {
@@ -3647,21 +3665,17 @@ export function renderOpening(o: Opening, style: OpeningStyle): SVGTemplateResul
   if (style.shutter) {
     // A shutter that is down follows the opening's closed colour, the way one
     // that is up follows its accent (issue #228).
-    const shutterTone = cssColorOr(
-      style.shutter.active ? (style.shutter.accent ?? accent) : shut,
-      SKIN_ACCENT
-    );
     const shutterAmt = Math.max(0, Math.min(1, style.shutter.amount));
+    // Same rule as the leaf above, with the shutter's own accent: a shutter is
+    // "shut" when it is down, not merely when its contact is quiet.
+    const shutterLeaf = (isActive: boolean | undefined, a: number) =>
+      cssColorOr(isActive ? (style.shutter!.accent ?? accent) : a === 0 ? shut : color, SKIN_ACCENT);
+    const shutterTone = shutterLeaf(style.shutter.active, shutterAmt);
     // The hinged pair's other panel, on its own contact when it has one
     // (issue #159); without one it folds with the first, as before.
     const second = style.shutter.second;
-    const shutterTone2 = second
-      ? cssColorOr(
-          second.active ? (style.shutter.accent ?? accent) : shut,
-          SKIN_ACCENT
-        )
-      : shutterTone;
     const shutterAmt2 = second ? Math.max(0, Math.min(1, second.amount)) : shutterAmt;
+    const shutterTone2 = second ? shutterLeaf(second.active, shutterAmt2) : shutterTone;
     body = svg`${body}${
       style.shutter.style === "swing"
         ? swingShutter(

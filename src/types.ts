@@ -199,6 +199,13 @@ export interface Opening {
    * a hole in a wall rather than a coloured shape. An external shutter follows
    * this too when it is down, the way it follows {@link activeColor} when it
    * is up.
+   *
+   * Applies while the leaf is **drawn shut**, which is not quite the same
+   * question as "its entity is not active". The two agree for anything with a
+   * contact on it; without one they part company, because a swing door with no
+   * sensor is drawn open by the plan convention (see {@link
+   * openingDefaultOpen}) and is never active. Each leaf of a double is asked
+   * separately, so a pair with one sash open and one shut shows both colours.
    */
   inactiveColor?: string;
   /**

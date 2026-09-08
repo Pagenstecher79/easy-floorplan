@@ -198,6 +198,13 @@ look like right now.
 An element with **no entity bound at all** is a different thing and does paint:
 there is nothing about a hand-drawn shut window that could be wrong.
 
+For an opening the question asked is whether it is *drawn shut*, not whether its
+sensor is quiet. The two agree for anything with a contact on it, and come apart
+without one: a swing door with no sensor is drawn **open** by the usual
+floor-plan convention, so it keeps the wall colour, while an unbound window
+renders shut and wears the closed one. Each leaf of a double is asked
+separately, so a pair with one sash open and one shut shows both colours.
+
 The editor's canvas follows the same rule. A preview that disagrees with the
 card is worse than no preview, because the plan gets tuned against a picture the
 dashboard will not draw.

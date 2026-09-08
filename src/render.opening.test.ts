@@ -1341,6 +1341,46 @@ describe("an opening can say what colour it is when closed (issue #228)", () => 
     expect(svg).toContain("#c62828");
   });
 
+  it("follows what the leaf is doing, not what its sensor says", () => {
+    // `active` and "drawn shut" agree for every entity-bound opening, which is
+    // why the tone started life as `active ? accent : shut`. They come apart
+    // with no entity: a swing door is drawn *open* by the plan convention and
+    // is never active, so reading one as the other painted a wide-open door in
+    // the colour documented to mean closed.
+    const openDoor = svgOf(
+      { type: "door" },
+      { color: "#0000ff", inactive: "#c62828", active: false, open: true, amount: 1 },
+    );
+    expect(openDoor).not.toContain("#c62828");
+    expect(openDoor).toContain("#0000ff");
+
+    // Shut, the same door does wear it.
+    const shutDoor = svgOf(
+      { type: "door" },
+      { color: "#0000ff", inactive: "#c62828", active: false, open: false, amount: 0 },
+    );
+    expect(shutDoor).toContain("#c62828");
+  });
+
+  it("paints one sash of a double and not the other", () => {
+    // Falls out of asking each leaf's own amount rather than one `active` flag,
+    // which could not express a pair with one sash open and one shut.
+    const svg = svgOf(
+      { type: "window", sash: "double", entity: "binary_sensor.a" },
+      {
+        color: "#0000ff",
+        inactive: "#c62828",
+        accent: "#00ff00",
+        active: true,
+        open: true,
+        amount: 1,
+        second: { amount: 0, active: false },
+      },
+    );
+    expect(svg).toContain("#00ff00"); // the open sash
+    expect(svg).toContain("#c62828"); // the shut one
+  });
+
   it("reaches a top-hinged sash too, which arrived at the same time", () => {
     // #272 merged while this was open, and its blade and glass line are drawn
     // from the same `tone` every other motion uses — so it gets a closed colour
