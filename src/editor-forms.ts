@@ -251,7 +251,11 @@ export function openingForm(o: Opening, featuresOf: (entityId: string) => number
         // here would only invite drawing one. A hand-written config may still
         // set it on a door, and the card draws that honestly as a sealed
         // panel — this is about what the editor suggests, not what it allows.
-        ...(o.type === "window" ? [opt("fixed", "Fixed (does not open)")] : [])
+        // Windows only, for the same reason `fixed` is (issue #272): a
+        // top-hung sash is a window, and a top-hung door is not a thing.
+        ...(o.type === "window"
+          ? [opt("fixed", "Fixed (does not open)"), opt("awning", "Top-hinged (awning)")]
+          : [])
       ),
     },
     { name: "length", label: "Length", required: true, selector: { number: { min: 1, mode: "box" } } },
@@ -620,8 +624,8 @@ export function openingForm(o: Opening, featuresOf: (entityId: string) => number
         }
         else if (k === "motion") {
           const motion =
-            v === "slide" || v === "roll" || v === "fixed"
-              ? (v as "slide" | "roll" | "fixed")
+            v === "slide" || v === "roll" || v === "fixed" || v === "awning"
+              ? (v as "slide" | "roll" | "fixed" | "awning")
               : undefined;
           out.motion = motion;
           // sliderStyle only applies while sliding — drop it when switching

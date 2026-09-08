@@ -113,8 +113,22 @@ export interface Opening {
    * but keeps everything else an opening has: it is still tappable, still
    * badges, and still glass to the light. What it never is, is a gap: see
    * {@link openingClearFraction}, which answers 0 for it whatever a sensor says.
+   *
+   * `awning` is the top-hinged window (issue #272): hinged at its head, swung
+   * out at the sill. A fifth motion for the same reason `fixed` is a fourth —
+   * it is a different way of moving, and in plan it is a different drawing
+   * entirely. A casement rotates *within* the plan and sweeps an arc across the
+   * floor; an awning rotates about a horizontal axis and leaves the plan
+   * altogether, so you see it edge-on projecting from the wall with the hinge
+   * knuckles left behind on the wall line.
+   *
+   * Calling it a hinge direction on `swing` was the alternative, and it would
+   * have made {@link sash} and {@link flipH} meaningless without saying so:
+   * an awning has no hinge jamb to pick and no second leaf to hang. {@link flipV}
+   * stays meaningful — it is which side of the wall the sash swings out to, so
+   * it is also how you draw a bottom-hinged hopper opening inward.
    */
-  motion?: "swing" | "slide" | "roll" | "fixed";
+  motion?: "swing" | "slide" | "roll" | "fixed" | "awning";
   /**
    * How much of the opening the operable sash actually covers, as a fraction
    * of `length` (0..1]. Default 1 — the sash fills the opening, which is what
