@@ -8,16 +8,23 @@
  * stays green however wrong it is. That is exactly how the duplicate `test:`
  * key in `vite.config.ts` survived a merge.
  *
- * So this asks git for the repo's files and asserts the two `include` lists
- * actually reach every one of them. Adding a `playwright.config.ts` or a
- * second docker script that nobody checks fails here, at the point it is
- * added, rather than the next time a merge quietly drops half of one.
+ * So this asks git for the repo's files, asks TypeScript which files each
+ * project actually resolves, and asserts the second set covers the first.
+ * Adding a `playwright.config.ts` or a second docker script that nobody checks
+ * fails here, at the point it is added, rather than the next time a merge
+ * quietly drops half of one.
+ *
+ * Both halves are asked of the tool that owns the answer rather than worked out
+ * here — `git ls-files` for what is in the repo, the compiler's own config
+ * parser for what is checked. Every version of this test that guessed at either
+ * one was wrong about it.
  */
 import { describe, it, expect } from "vitest";
+import ts from "typescript";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 
 // `import.meta.url`, not `__dirname`: the package is `"type": "module"`, and
 // the only reason the CJS name resolved here at all is that vitest's transform
@@ -55,37 +62,48 @@ function repoFiles(): string[] {
 }
 
 /**
- * A tsconfig's `include` list. Read with a comment-stripping pass rather than
- * `JSON.parse` alone, because both configs are commented — the explanation of
- * *why* `tsconfig.node.json` is separate belongs in the file, and jsonc is what
- * TypeScript actually accepts.
+ * The files a tsconfig actually checks — asked of TypeScript rather than
+ * worked out here.
+ *
+ * This used to strip `//` lines and `JSON.parse` the rest, then match the
+ * `include` globs with a small regex of its own. Both halves were guesses at
+ * what the compiler does, and the first one broke on config TypeScript is
+ * perfectly happy with: a block comment or a trailing comma — both legal jsonc
+ * — threw at import time, so a harmless edit to either tsconfig took the whole
+ * suite down while `tsc -p` still accepted the file. Reproduced before
+ * changing it.
+ *
+ * `readConfigFile` is the compiler's own jsonc reader and
+ * `parseJsonConfigFileContent` its own `include`/`exclude` resolution, so what
+ * comes back is the file list `tsc` will really check. That retires the glob
+ * matcher along with the parser, and it means a config form nobody here
+ * anticipated — `files`, `extends`, a negated `exclude` — is understood for
+ * free rather than silently mis-read.
+ *
+ * Both kinds of error are thrown rather than swallowed: a tsconfig this cannot
+ * parse is itself a failure worth reporting, and returning an empty list would
+ * make every assertion below fail in a way that named the wrong culprit.
  */
-function includesOf(file: string): string[] {
-  const raw = readFileSync(join(ROOT, file), "utf8");
-  const stripped = raw.replace(/^\s*\/\/.*$/gm, "");
-  return JSON.parse(stripped).include as string[];
-}
-
-/** Does one `include` entry cover this path? Handles the two forms we use. */
-function covers(pattern: string, file: string): boolean {
-  if (pattern === file) return true;
-  // A bare directory ("src") covers everything under it.
-  if (!pattern.includes("*")) return file.startsWith(`${pattern}/`);
-  // Otherwise a glob; only `*` and `**` appear in these configs.
-  const re = new RegExp(
-    "^" +
-      pattern
-        .split("**")
-        .map((part) => part.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*"))
-        .join(".*") +
-      "$"
-  );
-  return re.test(file);
+function checkedBy(file: string): string[] {
+  const { config, error } = ts.readConfigFile(join(ROOT, file), (p) => readFileSync(p, "utf8"));
+  if (error) {
+    throw new Error(`${file}: ${ts.flattenDiagnosticMessageText(error.messageText, " ")}`);
+  }
+  const parsed = ts.parseJsonConfigFileContent(config, ts.sys, ROOT);
+  if (parsed.errors.length) {
+    throw new Error(
+      `${file}: ` +
+        parsed.errors.map((d) => ts.flattenDiagnosticMessageText(d.messageText, " ")).join("; ")
+    );
+  }
+  return parsed.fileNames.map((f) => relative(ROOT, f).split("\\").join("/"));
 }
 
 describe("nothing escapes the type-check", () => {
   const files = repoFiles();
-  const patterns = [...includesOf("tsconfig.json"), ...includesOf("tsconfig.node.json")];
+  const app = checkedBy("tsconfig.json");
+  const node = checkedBy("tsconfig.node.json");
+  const checked = new Set([...app, ...node]);
 
   it("finds the files it is supposed to be checking", () => {
     // Guards the listing itself: a `git ls-files` that came back empty would
@@ -104,14 +122,21 @@ describe("nothing escapes the type-check", () => {
   });
 
   it("covers every checkable file with one of the two projects", () => {
-    const uncovered = files.filter((f) => !patterns.some((p) => covers(p, f)));
+    const uncovered = files.filter((f) => !checked.has(f));
     expect(uncovered).toEqual([]);
   });
 
-  it("still knows how to spot one that is not covered", () => {
-    // The test above passes when `covers` is broken *open* too, so prove it
-    // can still say no.
-    expect(patterns.some((p) => covers(p, "playwright.config.ts"))).toBe(false);
+  it("puts each file in the project that should own it", () => {
+    // The coverage test above is satisfied by one project swallowing
+    // everything, which would quietly hand `src` the Node globals the split
+    // exists to keep away from it. So assert the two are actually distinct,
+    // and each one non-empty — a project resolving to nothing would otherwise
+    // only show up as a confusing "uncovered" list from the other side.
+    expect(app).toContain("src/render.ts");
+    expect(app).not.toContain("vite.config.ts");
+    expect(node).toContain("vite.config.ts");
+    expect(node).toContain("docker/prepare.mjs");
+    expect(node).not.toContain("src/render.ts");
   });
 
   it("runs both projects from `npm run typecheck`", () => {
