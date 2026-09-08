@@ -29,7 +29,9 @@ nothing says so.
 | `tsconfig.json` | `src` | The shipped card: browser lib, Vite's client types, no Node globals to reach for. |
 | `tsconfig.node.json` | `vite.config.ts`, `vitest.browser.config.ts`, `vitest.setup.ts`, `docker/*.mjs` | Runs under Node, imports Node builtins. `checkJs` is on for the `.mjs` scripts, with `noImplicitAny` off — they walk untyped JSON out of Home Assistant's `.storage`, and annotating every parameter would be a rewrite rather than a fix. |
 
-Adding a config file at the repo root means adding it to
+`@types/node` tracks the Node major the workflows run, so the type-check
+describes the runtime CI actually uses — bumping one without the other fails
+the same test. Adding a config file at the repo root means adding it to
 `tsconfig.node.json`'s `include`. `src/tsconfig-coverage.test.ts` fails if you
 forget, which is the point: before the second project existed, nothing checked
 the build config at all, and a merge that left two `test:` keys in

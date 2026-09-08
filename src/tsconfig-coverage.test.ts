@@ -139,6 +139,29 @@ describe("nothing escapes the type-check", () => {
     expect(node).not.toContain("src/render.ts");
   });
 
+  it("types the Node the workflows actually run", () => {
+    // `tsconfig.node.json` describes the docker scripts and the build config
+    // against whatever major `@types/node` is installed. Pin it to the one CI
+    // runs, or the type-check is an opinion about a Node this project does not
+    // use: under the 20 typings, `fs/promises.glob` — which exists on CI's
+    // Node 24 — is a compile error, so a script could be rejected for using an
+    // API that is right there at runtime. The reverse drifts too, and more
+    // quietly.
+    //
+    // Read off the workflows rather than written down twice, so bumping CI's
+    // Node is what fails here rather than a comment going stale.
+    const workflows = ["validate.yml", "release.yml"]
+      .map((f) => readFileSync(join(ROOT, ".github/workflows", f), "utf8"))
+      .join("\n");
+    const versions = [...workflows.matchAll(/node-version:\s*(\d+)/g)].map((m) => m[1]);
+    expect(versions.length).toBeGreaterThan(0);
+    expect([...new Set(versions)]).toHaveLength(1); // one answer, or this has no meaning
+
+    const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
+    const typesMajor = /(\d+)/.exec(pkg.devDependencies["@types/node"])?.[1];
+    expect(typesMajor).toBe(versions[0]);
+  });
+
   it("runs both projects from `npm run typecheck`", () => {
     // Covering a file in a config that no script invokes checks nothing.
     const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
