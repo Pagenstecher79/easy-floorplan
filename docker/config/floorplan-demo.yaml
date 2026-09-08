@@ -124,6 +124,18 @@ views:
                     length: 140
                     angle: 90
                     entity: cover.garage_door
+                  # Top-hinged / awning (issue #272): hinged at the head, swung
+                  # out at the sill. Shares the door contact so flipping
+                  # binary_sensor.front_door on the History view tilts it out
+                  # beside the casement below -- the two motions side by side.
+                  - id: o8
+                    type: window
+                    motion: awning
+                    x: 845
+                    y: 500
+                    length: 90
+                    angle: 0
+                    entity: binary_sensor.front_door
                   # A window whose contact is the door sensor, so there is one opening
                   # driven by a binary_sensor rather than a cover -- the two read
                   # open/closed by different rules.

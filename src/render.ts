@@ -689,6 +689,10 @@ export function openingClearFraction(o: Opening, amount: number, secondAmount?: 
   // the identity for every opening that has always filled its frame.
   if (openingMotion(o) === "swing")
     return openingSash(o) === "double" ? (a1 + a2) / 2 : a1 * openingSashSpan(o);
+  // A top-hinged sash leaves the plan rather than sweeping across it (issue
+  // #272), so nothing of it is left in the gap: open it and the whole width is
+  // clear. One leaf, so `secondAmount` has nothing to average with.
+  if (openingMotion(o) === "awning") return a1;
   switch (sliderStyleOf(o)) {
     case "biparting":
       // Each leaf recesses into its own wall, so between them they can clear
@@ -2444,9 +2448,10 @@ export function kindFromEntity(entity: string): ItemKind {
 /**
  * How an opening moves — `swing` (hinged door / casement window), `slide`
  * (panels travelling along the wall), `roll` (a curtain leaving the floor
- * plane) or `fixed` (issue #218: it does not). Defaults to `swing`.
+ * plane), `fixed` (issue #218: it does not) or `awning` (issue #272: hinged at
+ * the head, swung out at the sill). Defaults to `swing`.
  */
-export function openingMotion(o: Opening): "swing" | "slide" | "roll" | "fixed" {
+export function openingMotion(o: Opening): "swing" | "slide" | "roll" | "fixed" | "awning" {
   return o.motion ?? "swing";
 }
 
@@ -3420,6 +3425,76 @@ export function renderOpening(o: Opening, style: OpeningStyle): SVGTemplateResul
         }
         <line x1=${-half} y1="0" x2=${half} y2="0"
               stroke=${color} stroke-width=${t} />`;
+  } else if (openingMotion(o) === "awning") {
+    // Top-hinged window (issue #272): hinged at its head, swinging out at the
+    // sill. "My windows are hinged at the top and swing out at the bottom."
+    //
+    // Every other opening we draw rotates *within* the plan — a casement
+    // sweeps an arc across the floor, a slider travels along the wall. This one
+    // rotates about a horizontal axis and leaves the plan altogether, so the
+    // plan view is the sash seen edge-on: a blade projecting from the wall,
+    // narrowing as it goes because you are looking along it, with the hinge
+    // knuckles left behind on the wall line and the glass it vacated drawn as
+    // a broken line.
+    //
+    // Only `amount` drives it. `sash` and `flipH` are meaningless here (there
+    // is no hinge jamb to pick and no second leaf to hang), while `flipV` falls
+    // out of the mirror every opening already gets — which is also how you draw
+    // a bottom-hinged hopper that opens inward.
+    const hingeW = Math.min(12, o.length * 0.16);
+    const hingeH = 5;
+    // Knuckle centres, tucked just inside each jamb.
+    const hx = half - hingeW / 2 - 1;
+    // The blade spans between the knuckles, and projects with `amt`. Capped
+    // against the opening's own half-length so a wide window does not throw a
+    // blade halfway across the room.
+    const bx = Math.max(0, hx - hingeW / 2);
+    const depth = Math.min(half * 0.62, 34) * amt;
+    // Capped against the blade's own half-width. A tiny opening leaves almost
+    // no room between the knuckles — `bx` reaches 0 below about 3.5 units —
+    // and an uncapped taper then pulls the far corners past each other, so the
+    // "trapezoid" crosses itself and draws inverted. Nothing that small is
+    // legible on a plan, but the editor's Length field allows it, and a shape
+    // that folds through itself is not a drawing of anything. The cap only
+    // engages under ~4.5 units; at every size you would actually draw, the
+    // taper is well under it.
+    const taper = Math.min(depth * 0.16, bx * 0.4);
+    const openNow = amt > 0.02;
+    body = svg`
+        <!-- jambs, as any window -->
+        <line x1=${-half} y1=${-cutH / 2} x2=${-half} y2=${cutH / 2}
+              stroke=${color} stroke-width="2" />
+        <line x1=${half} y1=${-cutH / 2} x2=${half} y2=${cutH / 2}
+              stroke=${color} stroke-width="2" />
+        <!-- The glass line: solid while the sash is shut and sitting in it,
+             broken once the sash has swung out and left the gap behind. -->
+        <line x1=${-half} y1="0" x2=${half} y2="0"
+              stroke=${tone} stroke-width="1.5"
+              stroke-dasharray=${openNow ? "6 4" : nothing} />
+        ${
+          openNow
+            ? // A polyline, not a polygon, and that is the whole point of the
+              // broken line above it. A closed shape strokes its own base back
+              // along y=0 — straight over the dashes, solid — and the only
+              // glass left uncovered would be the sliver outside `bx`, which
+              // is exactly where the knuckles sit. The line would have been
+              // dashed in the markup and solid on the screen at every size.
+              svg`<polyline
+                    points="${-bx},0 ${-bx + taper},${-depth} ${bx - taper},${-depth} ${bx},0"
+                    fill="none" stroke=${tone} stroke-width="1.5"
+                    stroke-linejoin="round" />`
+            : nothing
+        }
+        <!-- Hinge knuckles, drawn whether or not it is open: they are what says
+             this window is top-hung rather than fixed when it happens to be
+             shut, and the request asked for them by name. -->
+        ${[-hx, hx].map(
+          (cx) => svg`
+          <rect x=${cx - hingeW / 2} y=${-hingeH / 2} width=${hingeW} height=${hingeH}
+                fill="none" stroke=${tone} stroke-width="1.25" />
+          <line x1=${cx} y1=${-hingeH / 2} x2=${cx} y2=${hingeH / 2}
+                stroke=${tone} stroke-width="1.25" />`
+        )}`;
   } else if (openingMotion(o) === "roll") {
     // Roll-up cover — garage door, roller shutter (issues #45 / #47). Unlike a
     // slider nothing travels along the wall: the curtain leaves the floor
