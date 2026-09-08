@@ -16,9 +16,14 @@
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { dirname, join, resolve } from "node:path";
 
-const ROOT = resolve(__dirname, "..");
+// `import.meta.url`, not `__dirname`: the package is `"type": "module"`, and
+// the only reason the CJS name resolved here at all is that vitest's transform
+// injects a shim. This file is the repo's statement about what is checked and
+// what is not — it should not be the one file that needs a shim to load.
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** Extensions TypeScript can check. */
 const CHECKABLE = [".ts", ".tsx", ".mts", ".cts", ".js", ".mjs", ".cjs"];
