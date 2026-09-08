@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { renderOpening, renderSunlight, SUN_REACH, SUN_ACROSS } from "./render";
+import {
+  openingClearFraction,
+  openingHasTwoLeaves,
+  renderOpening,
+  renderSunlight,
+  SUN_REACH,
+  SUN_ACROSS,
+} from "./render";
 import type { OpeningStyle } from "./render";
 import type { Opening, Wall } from "./types";
 import { nothing } from "lit";
@@ -1245,5 +1252,162 @@ describe("renderOpening — a sash narrower than its frame (issue #218)", () => 
     });
     expect(two).toContain("fp-leaf-r");
     expect(two).toContain("width=45"); // each leaf still half the opening
+  });
+});
+
+describe("a window can be hinged at the top (issue #272)", () => {
+  // "My windows are hinged at the top and swing out at the bottom." Every
+  // other opening rotates within the plan; this one rotates about a horizontal
+  // axis and leaves it, so the plan view is the sash edge-on — a blade
+  // projecting from the wall, with the hinges left on the wall line.
+  const awning = { type: "window", motion: "awning", entity: "cover.win" } as Partial<Opening>;
+  /** The broken-line pattern the vacated glass line is drawn with. */
+  const DASH = "6 4";
+
+  it("projects a tapered blade once it is open", () => {
+    const svg = svgOf(awning, { color: "#000", open: true, amount: 1 });
+    expect(svg).toContain("<polyline");
+    // Tapered, not a rectangle: the two far corners are pulled in.
+    const pts = /points="([^"]+)"/.exec(svg)?.[1].split(" ").map((p) => p.split(",").map(Number));
+    expect(pts).toHaveLength(4);
+    const [base1, far1, far2, base2] = pts!;
+    expect(Math.abs(far1[0])).toBeLessThan(Math.abs(base1[0]));
+    expect(Math.abs(far2[0])).toBeLessThan(Math.abs(base2[0]));
+    // …and it projects away from the wall line rather than sitting on it.
+    expect(far1[1]).toBeLessThan(0);
+    expect(base1[1]).toBe(0);
+  });
+
+  it("draws no blade while it is shut", () => {
+    const svg = svgOf(awning, { color: "#000", open: false, amount: 0 });
+    expect(svg).not.toContain("<polyline");
+  });
+
+  it("stays a trapezoid at any length, rather than folding through itself", () => {
+    // The taper is a fraction of how far the sash projects, and the blade's
+    // half-width shrinks to nothing on a very short opening — so uncapped, the
+    // two far corners cross and the shape draws inverted. Below ~3.5 units
+    // that is every awning. Nothing that small is legible on a plan, but the
+    // editor's Length field goes down to 1, and a shape folded through itself
+    // is not a drawing of anything.
+    const far = (length: number) => {
+      const svg = svgOf({ ...awning, length }, { color: "#000", open: true, amount: 1 });
+      const pts = /points="([^"]+)"/.exec(svg)![1].split(" ").map((p) => p.split(",").map(Number));
+      return [pts[1]![0], pts[2]![0]] as const;
+    };
+    for (const length of [1, 2, 3, 3.5, 5, 20, 140]) {
+      const [left, right] = far(length);
+      expect(left, `length ${length}`).toBeLessThanOrEqual(right);
+    }
+  });
+
+  it("does not blunt the taper at a length anyone would draw", () => {
+    // The guard against the cap quietly reshaping ordinary windows: at 140
+    // units the taper is a sixth of the projection, nowhere near the cap.
+    const svg = svgOf({ ...awning, length: 140 }, { color: "#000", open: true, amount: 1 });
+    const pts = /points="([^"]+)"/.exec(svg)![1].split(" ").map((p) => p.split(",").map(Number));
+    const [base, far1] = [pts[0]![0], pts[1]![0]];
+    expect(Math.abs(far1 - base)).toBeCloseTo(5.44, 2);
+  });
+
+  it("leaves the broken glass line showing under the blade", () => {
+    // The blade is an open shape on purpose. As a polygon it stroked its own
+    // base straight back along the wall line — solid, over the dashes — and
+    // the only glass left uncovered was the sliver outside the blade, which is
+    // exactly where the knuckles sit. The dash pattern was in the markup and
+    // the line was solid on screen at every size, so the test above passed on
+    // a picture that never showed it.
+    const svg = svgOf(awning, { color: "#000", open: true, amount: 1 });
+    expect(svg).not.toContain("<polygon");
+  });
+
+  it("projects further the wider it is open", () => {
+    const depth = (amount: number) => {
+      const svg = svgOf(awning, { color: "#000", open: true, amount });
+      return Math.abs(Number(/points="[^"]*?,(-[\d.]+)/.exec(svg)![1]));
+    };
+    expect(depth(1)).toBeGreaterThan(depth(0.4));
+    expect(depth(0.4)).toBeGreaterThan(0);
+  });
+
+  it("breaks the glass line only once the sash has left it", () => {
+    // Shut, the sash is sitting in the opening and the line is solid. Open,
+    // the line is what the sash vacated.
+    // Asserted on the dash pattern rather than the attribute name: the
+    // attribute is bound to lit's `nothing` when shut, which removes it in a
+    // real DOM but survives this serializer as a placeholder.
+    expect(svgOf(awning, { color: "#000", open: false, amount: 0 })).not.toContain(DASH);
+    expect(svgOf(awning, { color: "#000", open: true, amount: 1 })).toContain(DASH);
+  });
+
+  it("shows the hinges whether or not it is open", () => {
+    // The request asked for them by name, and shut they are the only thing
+    // that says this window is top-hung rather than fixed.
+    for (const amount of [0, 1]) {
+      const svg = svgOf(awning, { color: "#000", open: amount > 0, amount });
+      expect((svg.match(/<rect/g) ?? []).length, `amount=${amount}`).toBe(2);
+    }
+  });
+
+  it("is not a casement — no swinging leaf, no arc", () => {
+    const svg = svgOf(awning, { color: "#000", open: true, amount: 1 });
+    expect(svg).not.toContain("fp-door-leaf");
+    expect(svg).not.toContain("fp-door-arc");
+    expect(svg).not.toContain("fp-slide-panel");
+  });
+
+  it("wears the accent while it is actively open", () => {
+    const svg = svgOf(awning, { color: "#000", open: true, amount: 1, active: true, accent: "#00ff00" });
+    expect(svg).toContain("#00ff00");
+  });
+
+  it("opens the other way with flipV, which is how a hopper is drawn", () => {
+    // A bottom-hinged sash tilting inward is the same picture on the other
+    // side of the wall, so it needs no motion of its own.
+    const out = svgOf(awning, { color: "#000", open: true, amount: 1 });
+    const inward = svgOf({ ...awning, flipV: true }, { color: "#000", open: true, amount: 1 });
+    expect(out).toContain("scale(1 1)");
+    expect(inward).toContain("scale(1 -1)");
+  });
+
+  it("ignores sash and flipH, which have nothing to describe here", () => {
+    // There is no hinge jamb to pick and no second leaf to hang. Pinned so a
+    // config carrying them from a previous motion cannot change the drawing.
+    const plain = svgOf(awning, { color: "#000", open: true, amount: 1 });
+    const noisy = svgOf({ ...awning, sash: "single", flipH: true }, {
+      color: "#000",
+      open: true,
+      amount: 1,
+    });
+    expect(noisy.replace(/scale\(-1 1\)/, "scale(1 1)")).toBe(plain);
+  });
+});
+
+describe("openingClearFraction — a top-hinged sash leaves the plan (issue #272)", () => {
+  const awning = {
+    id: "a",
+    x: 0,
+    y: 0,
+    length: 100,
+    angle: 0,
+    type: "window",
+    motion: "awning",
+  } as Opening;
+
+  it("clears its whole width when open, because nothing is left in the gap", () => {
+    expect(openingClearFraction(awning, 1)).toBe(1);
+    expect(openingClearFraction(awning, 0.5)).toBe(0.5);
+    expect(openingClearFraction(awning, 0)).toBe(0);
+  });
+
+  it("has one leaf, so a second amount changes nothing", () => {
+    expect(openingClearFraction(awning, 1, 0)).toBe(1);
+  });
+
+  it("is a one-sash opening, so the editor offers it no second contact", () => {
+    // A casement pair and a biparting slider each take a sensor per leaf. A
+    // top-hung sash is one piece, and offering a second contact would be a
+    // control that drives nothing.
+    expect(openingHasTwoLeaves(awning)).toBe(false);
   });
 });
