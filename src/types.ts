@@ -855,7 +855,9 @@ export type FurnitureType =
   | "sectional"
   | "fishTank"
   | "piano"
-  | "hotTub";
+  | "hotTub"
+  | "quarterTub"
+  | "cornerShowerCurved";
 
 /**
  * Which end of an L-shaped sectional the chaise sits on, facing the sofa from

@@ -1,8 +1,8 @@
 {
   "id": "quarterTub",
-  "name": "Corner Hot Tub",
+  "name": "corner hot tub",
   "category": "bath",
-  "keywords": ["hottub", "jacuzzi"],
+  "keywords": ["hottub", "jacuzzi", "corner", "quarter", "spa", "whirlpool"],
   "size": { "w": 140, "h": 140 },
   "parts": [
     { "path": [["M", 100, 0], ["L", 100, 100], ["C", 50, 100, 0, 50, 0, 0], ["Z"]], "role": "body" },
