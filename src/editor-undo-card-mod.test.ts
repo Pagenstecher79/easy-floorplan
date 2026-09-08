@@ -21,7 +21,7 @@
  * write on the way out lands on the object the editor kept as `_lastEmitted` —
  * so the config it compared against was one it had never emitted.
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import "./editor";
 import type { FloorplanCardConfig } from "./types";
 
@@ -47,18 +47,22 @@ function dashboard(config: FloorplanCardConfig, mod: boolean) {
   const editor = document.createElement("easy-floorplan-card-editor") as any;
   document.body.appendChild(editor);
 
-  let saved: any;
+  // card-mod's `_cardModData`: created by its setConfig wrapper, and what its
+  // config-changed handler tests before writing. Note it tests the *record*,
+  // not the value in it -- so once a config has been through, it writes
+  // `card_mod` back unconditionally, `undefined` included.
+  let cardModData: { card: unknown } | undefined;
   const setConfig = (c: any) => {
     if (!mod) return editor.setConfig(c);
     const clone = JSON.parse(JSON.stringify(c));
-    saved = clone.card_mod;
+    cardModData = { card: clone.card_mod };
     delete clone.card_mod;
     editor.setConfig(clone);
   };
 
   let held: any;
   editor.addEventListener("config-changed", (ev: any) => {
-    if (mod && saved !== undefined) ev.detail.config.card_mod = saved;
+    if (mod && cardModData) ev.detail.config.card_mod = cardModData.card;
     held = ev.detail.config;
   });
 
@@ -75,6 +79,12 @@ function dashboard(config: FloorplanCardConfig, mod: boolean) {
 }
 
 describe("undo with card-mod installed (issue #257)", () => {
+  // The editor binds window-level listeners in connectedCallback, so an editor
+  // left mounted keeps listening across the tests that follow it.
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
   it("keeps one undo step per edit", () => {
     const d = dashboard(plan({ card_mod: CARD_MOD }), true);
     d.editThenEcho({ width: 1200 });
