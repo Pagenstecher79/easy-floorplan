@@ -46,6 +46,10 @@ const states: Record<string, { entity_id: string; state: string; attributes: obj
   "cover.a": { entity_id: "cover.a", state: "closed", attributes: {} },
   "vacuum.a": { entity_id: "vacuum.a", state: "docked", attributes: {} },
   "sensor.a": { entity_id: "sensor.a", state: "21.5", attributes: {} },
+  // Issue #162's three ways of having dropped out. `cover.gone` is deliberately
+  // absent from this table — an entity id nothing answers to is the third.
+  "cover.dead": { entity_id: "cover.dead", state: "unavailable", attributes: {} },
+  "cover.blank": { entity_id: "cover.blank", state: "unknown", attributes: {} },
 };
 
 const hass = {
@@ -134,11 +138,92 @@ describe("a device can say what colour it is when off", () => {
     expect(t.background()).not.toBe(OFF_RED);
   });
 
+  it("stands down for an entity that has dropped out", async () => {
+    // The one case where "not active" must not be read as "off" (issue #162):
+    // unavailable, unknown, and an entity id nothing answers to. Painting them
+    // would tell "we have no reading" as "the reading is closed" — and under
+    // `offlineStyle: none`, in a colour indistinguishable from the real thing.
+    for (const entity of ["cover.dead", "cover.blank", "cover.gone"]) {
+      const t = await mount({ entity, inactiveColor: "#c62828" });
+      expect(t.background(), `${entity} should keep the resting badge`).not.toBe(OFF_RED);
+      expect(t.classes(), entity).not.toContain("inactive-colored");
+      document.body.innerHTML = "";
+    }
+  });
+
+  it("still paints a device with no entity at all", async () => {
+    // Not the same thing as offline: issue #39's plain markers have nothing
+    // that could be wrong, and a shut window drawn without a sensor is still
+    // shut. `itemIsOffline` says so, and this pins that it keeps saying so.
+    const t = await mount({ inactiveColor: "#c62828" });
+    expect(t.background()).toBe(OFF_RED);
+  });
+
   it("does not paint a sensor, which is never 'on' but is not off either", async () => {
     // entityIsActive is what decides, and a numeric sensor reads inactive —
     // so this one *does* paint. Pinned because it is the case most likely to
     // surprise, and thresholds are the right tool there.
     const t = await mount({ entity: "sensor.a", inactiveColor: "#c62828" });
     expect(t.background()).toBe(OFF_RED);
+  });
+});
+
+/**
+ * The same rule on an opening. Node tests cover what `renderOpening` draws for
+ * a given `inactive` tone; what they cannot see is the card deciding whether to
+ * hand it one at all, which is where the offline case lives.
+ */
+describe("an opening can say what colour it is when shut", () => {
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  async function mountOpening(entity: string | undefined) {
+    const host = document.createElement("div");
+    host.style.width = "900px";
+    host.style.height = "540px";
+    document.body.appendChild(host);
+    const card = document.createElement("easy-floorplan-card") as FloorplanCard;
+    card.setConfig({
+      type: "custom:easy-floorplan-card",
+      width: 1000,
+      height: 600,
+      floors: [
+        {
+          id: "f1",
+          name: "Floor 1",
+          walls: [{ id: "w1", x1: 100, y1: 300, x2: 900, y2: 300 }],
+          openings: [
+            { id: "o1", type: "door", x: 500, y: 300, length: 120, angle: 0, entity,
+              inactiveColor: "#c62828" },
+          ],
+          items: [],
+          texts: [],
+          furniture: [],
+          trackers: [],
+          areas: [],
+        },
+      ],
+    } as unknown as FloorplanCardConfig);
+    card.hass = hass;
+    host.appendChild(card);
+    await card.updateComplete;
+    return { paintsShut: () => card.shadowRoot!.querySelector("svg")!.outerHTML.includes("#c62828") };
+  }
+
+  it("paints the leaf while the opening is shut", async () => {
+    expect((await mountOpening("cover.a")).paintsShut()).toBe(true);
+  });
+
+  it("stands down for a contact that has dropped out", async () => {
+    // A dead sensor drew the same emphatic red as a door that really is shut,
+    // and under `offlineStyle: none` the two were the same picture (#162).
+    expect((await mountOpening("cover.dead")).paintsShut()).toBe(false);
+    document.body.innerHTML = "";
+    expect((await mountOpening("cover.gone")).paintsShut()).toBe(false);
+  });
+
+  it("still paints an opening drawn without a sensor", async () => {
+    expect((await mountOpening(undefined)).paintsShut()).toBe(true);
   });
 });

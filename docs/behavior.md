@@ -188,6 +188,15 @@ look like right now.
 - **Furniture and areas.** Both already have a static `color`, which *is* their
   off colour: `activeColor` paints over it while the entity is on, and it shows
   through the rest of the time.
+- **An entity that has dropped out.** `unavailable`, `unknown`, or an entity id
+  Home Assistant does not answer to falls back to the resting badge and the wall
+  colour, exactly as it did before this option existed. It is not active either,
+  so without that it would wear the same emphatic "shut" as a device that really
+  is — and under `offlineStyle: none`, which draws no fading, the two would be
+  the same picture. See [Offline devices](#offline-devices).
+
+An element with **no entity bound at all** is a different thing and does paint:
+there is nothing about a hand-drawn shut window that could be wrong.
 
 ## Offline devices
 

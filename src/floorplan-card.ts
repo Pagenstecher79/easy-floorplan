@@ -741,7 +741,17 @@ export class FloorplanCard extends LitElement {
     // while the device is actually inactive — `on` comes from entityIsActive,
     // so this means off for a switch, closed for a cover and locked for a
     // lock without the plan having to name each word.
-    const inactiveColor = on ? undefined : cssColor(item.inactiveColor);
+    //
+    // It stands down for an offline entity, and that is not a detail. An
+    // entity that has dropped out is not active either, so without this a dead
+    // cover would wear the same confident red as one that is genuinely shut —
+    // identical under `offlineStyle: none`, which draws no fading at all. That
+    // is exactly the picture issue #162 exists to prevent: "we have no
+    // reading" must not be told as "the reading is closed", least of all in
+    // the loudest colour on the plan. A device with no entity bound is not
+    // offline (issue #39's plain markers), so a shut window with no sensor
+    // still paints.
+    const inactiveColor = on || offline ? undefined : cssColor(item.inactiveColor);
     const rippleColor =
       item.rippleColor ?? stateColor ?? item.activeColor ?? lightColor ?? SKIN_ACCENT;
     // Ink that can actually be read on whatever the badge ended up painted
@@ -1268,8 +1278,18 @@ export class FloorplanCard extends LitElement {
               const symbol = renderOpening(o, {
                 color: SKIN_WALL,
                 // The closed tone (issue #228). Absent, the moving parts stay
-                // the wall colour, which is what a closed opening always was.
-                inactive: o.inactiveColor,
+                // the wall colour, which is what a closed opening always was —
+                // and that is also what an opening whose contact has dropped
+                // out falls back to, so a dead sensor does not draw the same
+                // emphatic "shut" as a door that really is (issue #162).
+                // Guarded on `hass` for the same reason the device path is:
+                // before the first states arrive every opening would read as
+                // offline and the closed colour would flash off on load.
+                inactive:
+                  !!this.hass &&
+                  itemIsOffline(o, o.entity ? renderHass?.states[o.entity]?.state : undefined)
+                    ? undefined
+                    : o.inactiveColor,
                 open: amount > 0,
                 amount,
                 active: this._openingActive(o, renderHass),
@@ -2147,6 +2167,13 @@ export class FloorplanCard extends LitElement {
        entity is never entityIsActive, so it has already fallen back to the
        resting badge. What is added is the *fading*, which says "we have no
        reading" rather than "the reading is off".
+
+       That "already fallen back" is load-bearing, and issue #228 is the first
+       thing that could have broken it: inactiveColor paints on exactly the
+       not-active test an offline entity also fails. It is gated on this one
+       too, in _renderItem — otherwise a dead device would be drawn in the
+       loudest colour on the plan, and offline-none would make it identical to
+       a device that really is shut.
 
        offline-none declares nothing at all, which is the point of it. */
     .offline-dim .item.offline {
