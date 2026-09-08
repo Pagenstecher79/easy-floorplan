@@ -528,6 +528,12 @@ export class FloorplanCardEditor extends LitElement {
     // A setConfig that isn't the echo of our own emission is an external change
     // (YAML-tab edit, a different card loaded into the dialog): stale undo/redo
     // snapshots would silently revert it, so drop them.
+    //
+    // The identity check is the fast path and not the guarantee: HA hands our
+    // own object straight back, but anything patching the editor between the
+    // two can replace it with a copy. card-mod deep-clones every config on its
+    // way in, so with it installed this comparison is always the deep one --
+    // which is why `_lastEmitted` has to be a snapshot nobody else holds.
     if (this._lastEmitted && config !== this._lastEmitted && !configsEqual(config, this._lastEmitted)) {
       this._history = [];
       this._future = [];
@@ -905,7 +911,15 @@ export class FloorplanCardEditor extends LitElement {
     for (const key of ["walls", "openings", "items", "texts", "furniture", "trackers", "areas"] as const) {
       if (!out[key]?.length) delete out[key];
     }
-    this._lastEmitted = out;
+    // A snapshot, not the object being handed out. `out` travels on the event
+    // and whoever catches it may write to it before HA hands it back: card-mod
+    // patches the editor's config-changed handler and puts the user's
+    // `card_mod` block *back onto this very object* on its way past. Keeping a
+    // reference here meant comparing the next setConfig against a config we
+    // never emitted -- it had grown a key -- so the echo never matched, every
+    // edit looked like an external YAML change, and the undo stack was cleared
+    // on every keystroke (issue #257).
+    this._lastEmitted = structuredClone(out);
     this.dispatchEvent(
       new CustomEvent("config-changed", { detail: { config: out }, bubbles: true, composed: true })
     );
