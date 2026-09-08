@@ -198,6 +198,10 @@ look like right now.
 An element with **no entity bound at all** is a different thing and does paint:
 there is nothing about a hand-drawn shut window that could be wrong.
 
+The editor's canvas follows the same rule. A preview that disagrees with the
+card is worse than no preview, because the plan gets tuned against a picture the
+dashboard will not draw.
+
 ## Offline devices
 
 An entity that has dropped out no longer looks like one that is simply switched off.

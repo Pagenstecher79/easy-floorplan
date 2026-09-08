@@ -104,6 +104,7 @@ import {
   resolveStateColor,
   entityIsActive,
   lightBadgePaint,
+  itemIsOffline,
   itemRawValue,
   isRippleEntity,
   badgeContentOf,
@@ -4404,7 +4405,17 @@ export class FloorplanCardEditor extends LitElement {
     const activeColor = active ? (cssColor(it.activeColor) ?? lightBadgePaint(st)) : undefined;
     // Its counterpart (issue #228), previewed for the same reason: a field
     // that changes nothing on the canvas reads as a field that does nothing.
-    const inactiveColor = active ? undefined : cssColor(it.inactiveColor);
+    //
+    // Offline stands down here exactly as it does on the card, and the reason
+    // is the same one: an entity that has dropped out is not active either, so
+    // without this a dead sensor previews in the loudest colour on the plan as
+    // though it were genuinely shut (issue #162). It also has to be the same
+    // *because* it is a preview — one that disagrees with the card is worse
+    // than none, since the plan gets tuned against a picture the dashboard
+    // will not draw. `hass` is guarded for the card's reason too: before the
+    // first states arrive every device reads as offline.
+    const offline = !!this.hass && itemIsOffline(it, st?.state);
+    const inactiveColor = active || offline ? undefined : cssColor(it.inactiveColor);
     // Ink that reads on whatever the badge ends up painted, same rule as the card.
     // Palette references resolved first, for the reason the card documents.
     const badgeInk = contrastText(
