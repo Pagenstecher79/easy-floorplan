@@ -1169,7 +1169,8 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
     {
       name: "showOnlyWhenZoomed",
       label: "Only show when zoomed into area",
-      helper: "Hides this item at 1x view, revealing it only when zoomed into the area containing it",
+      helper:
+        "Hidden on the full plan, and shown once the room it sits in is zoomed into",
       selector: { boolean: {} },
     },
     {
@@ -1385,7 +1386,7 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
   return {
     fields,
     data: {
-      showOnlyWhenZoomed: it.showOnlyWhenZoomed ?? false, // <--- Wichtig: Hier ergänzt!
+      showOnlyWhenZoomed: it.showOnlyWhenZoomed ?? false,
       enableHideByEntity: it.enableHideByEntity ?? false,
       hideEntity: it.hideEntity ?? "",
       hideAttribute: it.hideAttribute ?? "",
@@ -1413,14 +1414,9 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
       hideBadgeThreshold: it.hideBadgeThreshold ?? 0,
       hideBadgeInvert: it.hideBadgeInvert ?? false,
     },
-    toPatch: (patch) => {
-      const out = { ...patch };
-      // Wenn showOnlyWhenZoomed false ist, aus dem YAML entfernen, um es sauber zu halten
-      if (!out.showOnlyWhenZoomed) {
-        out.showOnlyWhenZoomed = undefined;
-      }
-      return out;
-    },
+    // Off is the default, so it leaves no key behind — an untouched device's
+    // YAML stays as short as it was before this switch existed.
+    toPatch: (patch) => ({ ...patch, showOnlyWhenZoomed: patch.showOnlyWhenZoomed || undefined }),
   };
 }
 /** Group 7: when the device is drawn at all, and what a press does. */

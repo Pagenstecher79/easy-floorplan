@@ -105,6 +105,47 @@ anything.
 A room with an action bound announces itself as a button and takes a tab stop; a room that
 only zooms does not, exactly as before.
 
+## Devices that only appear up close
+
+A busy plan cannot show every minor sensor at full zoom and stay readable. `showOnlyWhenZoomed`
+keeps a device off the overview and brings it back when its room is zoomed into (issue #222):
+
+```yaml
+items:
+  - id: bath_humidity
+    entity: sensor.bathroom_humidity
+    kind: sensor
+    x: 300
+    y: 250
+    showOnlyWhenZoomed: true
+```
+
+Which room a device belongs to is answered from the plan itself: the area polygon it is drawn
+inside. Nothing to keep in step — move the device or redraw the room and the answer follows.
+
+For a device that belongs to a room without sitting inside it — a doorbell out on the porch, a
+thermostat in the hall — name the room with `area`, by its `id` or its `name`:
+
+```yaml
+  - id: doorbell
+    entity: binary_sensor.doorbell
+    x: 960
+    y: 560
+    showOnlyWhenZoomed: true
+    area: porch
+```
+
+`area` wins over where the device is drawn, so it also corrects a device that sits in the wrong
+polygon.
+
+Two things worth knowing before you use it:
+
+- A device with the flag and **no room to be in** — no `area`, and inside no polygon — never
+  appears on the card. The editor still draws it, so it stays selectable and fixable; the card
+  is simply doing what it was asked.
+- The way in is the room tap, so a room whose `tap_action` [replaces the zoom](#actions-on-rooms)
+  has no way to reveal its devices. Put that action on `hold_action` instead.
+
 ## Stairs that change floor
 
 A staircase already draws an arrow saying which way it goes. `goToFloor` makes that a
