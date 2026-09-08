@@ -8,31 +8,45 @@
  * stays green however wrong it is. That is exactly how the duplicate `test:`
  * key in `vite.config.ts` survived a merge.
  *
- * So this walks the repo and asserts the two `include` lists actually reach
- * every file. Adding a `playwright.config.ts` or a second docker script that
- * nobody checks fails here, at the point it is added, rather than the next
- * time a merge quietly drops half of one.
+ * So this asks git for the repo's files and asserts the two `include` lists
+ * actually reach every one of them. Adding a `playwright.config.ts` or a
+ * second docker script that nobody checks fails here, at the point it is
+ * added, rather than the next time a merge quietly drops half of one.
  */
 import { describe, it, expect } from "vitest";
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 
 const ROOT = resolve(__dirname, "..");
-
-/** Directories that hold no first-party source. */
-const SKIP_DIRS = new Set(["node_modules", "dist", ".git", ".github", "docs", "furniture"]);
 
 /** Extensions TypeScript can check. */
 const CHECKABLE = [".ts", ".tsx", ".mts", ".cts", ".js", ".mjs", ".cjs"];
 
-function walk(dir: string, out: string[] = []): string[] {
-  for (const name of readdirSync(dir)) {
-    if (SKIP_DIRS.has(name)) continue;
-    const full = join(dir, name);
-    if (statSync(full).isDirectory()) walk(full, out);
-    else if (CHECKABLE.some((ext) => name.endsWith(ext))) out.push(relative(ROOT, full));
-  }
-  return out;
+/**
+ * The repo's own files, from git rather than from a directory walk.
+ *
+ * A walk has to be told what to skip, and the list is never finished: it began
+ * as node_modules and dist, and the first thing it missed was
+ * `.claude/worktrees/`, where this project keeps a full checkout per branch. A
+ * walk from the repo root found 226 "uncovered" files there and failed the
+ * suite for everyone with a worktree open — while CI, which clones fresh,
+ * stayed green. Any ignored scratch file at the root would have done the same.
+ *
+ * `git ls-files` already knows the answer, and it is the same answer
+ * `.gitignore` gives: `--cached` for what is committed, `--others
+ * --exclude-standard` for what is new but not ignored — so a `playwright.config.ts`
+ * is caught the moment it is written, before it is even staged.
+ */
+function repoFiles(): string[] {
+  const out = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], {
+    cwd: ROOT,
+    encoding: "utf8",
+    maxBuffer: 32 * 1024 * 1024,
+  });
+  return out
+    .split("\0")
+    .filter((f) => f && CHECKABLE.some((ext) => f.endsWith(ext)));
 }
 
 /**
@@ -65,15 +79,23 @@ function covers(pattern: string, file: string): boolean {
 }
 
 describe("nothing escapes the type-check", () => {
-  const files = walk(ROOT);
+  const files = repoFiles();
   const patterns = [...includesOf("tsconfig.json"), ...includesOf("tsconfig.node.json")];
 
   it("finds the files it is supposed to be checking", () => {
-    // Guards the walk itself: a broken skip list that found nothing would make
-    // every assertion below vacuously true.
+    // Guards the listing itself: a `git ls-files` that came back empty would
+    // make every assertion below vacuously true.
     expect(files).toContain("vite.config.ts");
     expect(files).toContain("docker/prepare.mjs");
     expect(files.some((f) => f.startsWith("src/"))).toBe(true);
+  });
+
+  it("does not reach into a nested checkout or anything else git ignores", () => {
+    // The failure this replaced: `.claude/worktrees/<branch>/` holds a whole
+    // second copy of the repo, and a directory walk counted every file in it.
+    expect(files.filter((f) => f.startsWith(".claude/"))).toEqual([]);
+    expect(files.filter((f) => f.startsWith("node_modules/"))).toEqual([]);
+    expect(files.filter((f) => f.startsWith("dist/"))).toEqual([]);
   });
 
   it("covers every checkable file with one of the two projects", () => {
