@@ -22,6 +22,14 @@ export interface HomeAssistant extends BaseHomeAssistant {
    */
   formatEntityState(stateObj: HassEntity, state?: string): string;
   /**
+   * The same, for one of an entity's attributes. Carried by HA since 2023.9
+   * and, like `formatEntityState`, the only thing that knows a cover position
+   * is a percentage or a temperature has a degree sign — the raw attribute is
+   * a bare number. Optional because a frontend older than that has none, which
+   * {@link entityAttributeText} falls back for.
+   */
+  formatEntityAttributeValue?(stateObj: HassEntity, attribute: string): string;
+  /**
    * The entity registry as the frontend exposes it. `custom-card-helpers` does
    * not declare it, though HA has handed it to cards since 2023.4. It carries
    * the user's per-entity icon override, which never appears in the state's
@@ -30,10 +38,19 @@ export interface HomeAssistant extends BaseHomeAssistant {
   entities?: Record<string, { icon?: string } | undefined>;
 }
 
-/** The slice of `hass` the card draws from. */
+/**
+ * The slice of `hass` the card draws from.
+ *
+ * Every wording HA owns has to be listed here, not just reachable off the real
+ * `hass`: this is what the card renders through, and anything missing silently
+ * degrades to whatever the raw state object says. A cover position left off
+ * this interface drew "50" on the card and "50%" in the editor, because the
+ * editor hands the real `hass` straight to the same helper (issue #260).
+ */
 export interface RenderHass {
   states: Record<string, HassEntity | undefined>;
   formatEntityState(stateObj: HassEntity): string;
+  formatEntityAttributeValue?(stateObj: HassEntity, attribute: string): string;
 }
 
 /** A straight wall segment in virtual coordinate space. */
