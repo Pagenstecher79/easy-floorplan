@@ -3433,7 +3433,15 @@ export function renderOpening(o: Opening, style: OpeningStyle): SVGTemplateResul
     // blade halfway across the room.
     const bx = Math.max(0, hx - hingeW / 2);
     const depth = Math.min(half * 0.62, 34) * amt;
-    const taper = depth * 0.16;
+    // Capped against the blade's own half-width. A tiny opening leaves almost
+    // no room between the knuckles — `bx` reaches 0 below about 3.5 units —
+    // and an uncapped taper then pulls the far corners past each other, so the
+    // "trapezoid" crosses itself and draws inverted. Nothing that small is
+    // legible on a plan, but the editor's Length field allows it, and a shape
+    // that folds through itself is not a drawing of anything. The cap only
+    // engages under ~4.5 units; at every size you would actually draw, the
+    // taper is well under it.
+    const taper = Math.min(depth * 0.16, bx * 0.4);
     const openNow = amt > 0.02;
     body = svg`
         <!-- jambs, as any window -->

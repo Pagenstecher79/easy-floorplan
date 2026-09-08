@@ -1283,6 +1283,33 @@ describe("a window can be hinged at the top (issue #272)", () => {
     expect(svg).not.toContain("<polyline");
   });
 
+  it("stays a trapezoid at any length, rather than folding through itself", () => {
+    // The taper is a fraction of how far the sash projects, and the blade's
+    // half-width shrinks to nothing on a very short opening — so uncapped, the
+    // two far corners cross and the shape draws inverted. Below ~3.5 units
+    // that is every awning. Nothing that small is legible on a plan, but the
+    // editor's Length field goes down to 1, and a shape folded through itself
+    // is not a drawing of anything.
+    const far = (length: number) => {
+      const svg = svgOf({ ...awning, length }, { color: "#000", open: true, amount: 1 });
+      const pts = /points="([^"]+)"/.exec(svg)![1].split(" ").map((p) => p.split(",").map(Number));
+      return [pts[1]![0], pts[2]![0]] as const;
+    };
+    for (const length of [1, 2, 3, 3.5, 5, 20, 140]) {
+      const [left, right] = far(length);
+      expect(left, `length ${length}`).toBeLessThanOrEqual(right);
+    }
+  });
+
+  it("does not blunt the taper at a length anyone would draw", () => {
+    // The guard against the cap quietly reshaping ordinary windows: at 140
+    // units the taper is a sixth of the projection, nowhere near the cap.
+    const svg = svgOf({ ...awning, length: 140 }, { color: "#000", open: true, amount: 1 });
+    const pts = /points="([^"]+)"/.exec(svg)![1].split(" ").map((p) => p.split(",").map(Number));
+    const [base, far1] = [pts[0]![0], pts[1]![0]];
+    expect(Math.abs(far1 - base)).toBeCloseTo(5.44, 2);
+  });
+
   it("leaves the broken glass line showing under the blade", () => {
     // The blade is an open shape on purpose. As a polygon it stroked its own
     // base straight back along the wall line — solid, over the dashes — and
