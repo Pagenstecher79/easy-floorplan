@@ -188,6 +188,27 @@ export interface Opening {
   /** Color of the leaf/sash and swing arc while actively open. Falls back to the primary color. */
   activeColor?: string;
   /**
+   * Color of the leaf/sash and swing arc while **closed** (issue #228). Falls
+   * back to the wall color, which is what every opening drew before this
+   * existed — a closed door has always been a line the same colour as the wall
+   * it sits in, and that is exactly the problem when the thing you need to
+   * notice is a door that is *shut*.
+   *
+   * The moving parts only: the jambs and the static frame stay the wall's
+   * colour whether the opening is open or closed, so the symbol still reads as
+   * a hole in a wall rather than a coloured shape. An external shutter follows
+   * this too when it is down, the way it follows {@link activeColor} when it
+   * is up.
+   *
+   * Applies while the leaf is **drawn shut**, which is not quite the same
+   * question as "its entity is not active". The two agree for anything with a
+   * contact on it; without one they part company, because a swing door with no
+   * sensor is drawn open by the plan convention (see {@link
+   * openingDefaultOpen}) and is never active. Each leaf of a double is asked
+   * separately, so a pair with one sash open and one shut shows both colours.
+   */
+  inactiveColor?: string;
+  /**
    * Mirror the symbol left↔right in the opening's local frame. For a swing door
    * this moves the hinge to the other jamb; for a slider it reverses the slide
    * direction. Absent = the default orientation (hinge/anchor at the left jamb).
@@ -671,6 +692,22 @@ export interface FloorItem {
    * Same meaning as {@link Opening.activeColor}.
    */
   activeColor?: string;
+  /**
+   * Badge color while the entity is **not** active (issue #228) — off, closed,
+   * locked, docked, whatever this domain's word for it is. Falls back to the
+   * neutral badge every device has always shown when it is off.
+   *
+   * A {@link stateColor} rule can already paint a badge, and for a plain switch
+   * `state: "off"` would do the same job. This exists because that requires
+   * knowing the word: a lock says `locked`, a cover says `closed`, a vacuum
+   * says `docked`, and a rule written for one is silently wrong on another.
+   * `inactiveColor` is resolved through {@link entityIsActive}, which already
+   * knows each domain's answer — so it means "off" for every domain at once.
+   *
+   * Rules still win over it, as they win over {@link activeColor}: they are the
+   * more specific statement about what this device should look like right now.
+   */
+  inactiveColor?: string;
   /** Disables the state-driven color inheritance for the label, falling back to the default theme text color. */
   disableLabelColor?: boolean;
   /** Activates a custom color override for the label. Only applies when disableLabelColor is true. */
