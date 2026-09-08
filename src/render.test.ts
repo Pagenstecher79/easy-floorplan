@@ -154,6 +154,7 @@ import {
   itemBadgeHidden,
   itemLabelColor,
 } from "./render";
+import { buildRenderHass } from "./replay-history/render-state-service";
 import type { FloorplanCardConfig, Opening, RenderHass } from "./types";
 import { symbolCatalog, symbolSize } from "./symbols";
 
@@ -2181,6 +2182,34 @@ describe("itemStateText with attributes (issue #70)", () => {
 
   it("missing attribute renders the em dash", () => {
     expect(itemStateText(climate(), { entity: "climate.home", attribute: "nope" })).toBe("—");
+  });
+
+  it("carries that formatter through the slice the card renders from (issue #260)", () => {
+    // The editor hands the real `hass` to these helpers; the card hands them a
+    // RenderHass built from it. Anything the build drops is not missing, it is
+    // replaced by the raw attribute — which is how a cover position read "50%"
+    // in the editor and "50" on the card.
+    const h = climate() as unknown as Record<string, unknown>;
+    h.formatEntityAttributeValue = (_s: unknown, a: string) => `fmt:${a}`;
+    const rendered = buildRenderHass(
+      h as never,
+      ["climate.home"],
+      { getStateAt: () => new Map() } as never,
+      false,
+      0,
+    );
+    expect(itemStateText(rendered, { entity: "climate.home", attribute: "current_temperature" }))
+      .toBe("fmt:current_temperature");
+  });
+
+  it("re-renders when HA rebuilds the attribute formatter", () => {
+    // A plan built only out of attribute readings never calls the state
+    // formatter, so its identity is not a signal that this plan's wording
+    // changed.
+    const base = climate() as unknown as Record<string, unknown>;
+    const prev = { ...base, formatEntityAttributeValue: () => "old" } as never;
+    const next = { ...base, formatEntityAttributeValue: () => "new" } as never;
+    expect(hassRenderInputsChanged(prev, next, ["climate.home"])).toBe(true);
   });
 });
 

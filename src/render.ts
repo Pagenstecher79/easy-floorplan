@@ -114,6 +114,9 @@ export function hassRenderInputsChanged(
   watchedEntities: Iterable<string>,
 ): boolean {
   if (prev.formatEntityState !== next.formatEntityState) return true;
+  // Both formatters, because a plan can be built entirely out of attribute
+  // readings and would otherwise be watching a function it never calls.
+  if (prev.formatEntityAttributeValue !== next.formatEntityAttributeValue) return true;
   for (const id of watchedEntities) {
     if (prev.states[id] !== next.states[id]) return true;
   }
@@ -201,8 +204,7 @@ export function entityAttributeText(
   if (!entityId || !hass) return NO_STATE;
   const stateObj = hass.states[entityId];
   if (!stateObj) return NO_STATE;
-  const fmt = (hass as { formatEntityAttributeValue?: (s: unknown, a: string) => string })
-    .formatEntityAttributeValue;
+  const fmt = hass.formatEntityAttributeValue;
   if (typeof fmt === "function") return fmt(stateObj, attribute);
   const raw = (stateObj.attributes as Record<string, unknown>)?.[attribute];
   return raw === undefined || raw === null || raw === "" ? NO_STATE : String(raw);
