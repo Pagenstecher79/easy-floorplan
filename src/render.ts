@@ -114,6 +114,9 @@ export function hassRenderInputsChanged(
   watchedEntities: Iterable<string>,
 ): boolean {
   if (prev.formatEntityState !== next.formatEntityState) return true;
+  // Both formatters, because a plan can be built entirely out of attribute
+  // readings and would otherwise be watching a function it never calls.
+  if (prev.formatEntityAttributeValue !== next.formatEntityAttributeValue) return true;
   for (const id of watchedEntities) {
     if (prev.states[id] !== next.states[id]) return true;
   }
@@ -201,8 +204,7 @@ export function entityAttributeText(
   if (!entityId || !hass) return NO_STATE;
   const stateObj = hass.states[entityId];
   if (!stateObj) return NO_STATE;
-  const fmt = (hass as { formatEntityAttributeValue?: (s: unknown, a: string) => string })
-    .formatEntityAttributeValue;
+  const fmt = hass.formatEntityAttributeValue;
   if (typeof fmt === "function") return fmt(stateObj, attribute);
   const raw = (stateObj.attributes as Record<string, unknown>)?.[attribute];
   return raw === undefined || raw === null || raw === "" ? NO_STATE : String(raw);
@@ -3249,6 +3251,17 @@ export interface OpeningStyle {
    */
   accent?: string;
   /**
+   * Color of the moving parts while **not** `active` (issue #228). Defaults to
+   * `color`, which is what every opening drew before this existed.
+   *
+   * Deliberately separate from `color` rather than reusing it: `color` also
+   * draws the jambs and the static frame, and those must stay the wall's colour
+   * whichever way the door is — recolouring them would turn the symbol from a
+   * hole in a wall into a coloured shape. This is the leaf, the sash, the swing
+   * arc, and a shutter that is down.
+   */
+  inactive?: string;
+  /**
    * External roller shutter layered over the opening (issue #74): how far
    * open (0..1, see {@link shutterAmount}) and whether it wears the accent.
    * Rendered as the roll curtain on top of the sash.
@@ -3296,7 +3309,12 @@ export function renderOpening(o: Opening, style: OpeningStyle): SVGTemplateResul
   const cutH = WALL_THICKNESS + 4;
   // The moving parts take the accent color when actively open (sensor-driven).
   // Sanitised: color/accent are config-supplied and land in `style="stroke/fill:…"`.
-  const tone = cssColorOr(active ? accent : color, SKIN_ACCENT);
+  // Sanitised here rather than left to `cssColorOr` below, which falls back to
+  // the *accent* — the colour this symbol wears when it is open. `inactive` is
+  // documented to default to `color`, so a value cssColor refuses has to land
+  // on the wall colour; passing it through raw drew a shut door as an open one
+  // on nothing worse than a typo.
+  const shut = cssColor(style.inactive) ?? color;
   // Fraction open (0..1) drives partial swing/slide. Defaults to the binary
   // `open` so callers that don't pass `amount` render exactly as before.
   const amt = Math.max(0, Math.min(1, style.amount ?? (open ? 1 : 0)));
@@ -3306,9 +3324,28 @@ export function renderOpening(o: Opening, style: OpeningStyle): SVGTemplateResul
   // a branch because two shapes now have two leaves — sliding panels and a
   // hinged double — and both read the same pair.
   const amt2 = style.second ? Math.max(0, Math.min(1, style.second.amount)) : amt;
-  const tone2 = style.second
-    ? cssColorOr(style.second.active ? accent : color, SKIN_ACCENT)
-    : tone;
+  /**
+   * The colour a leaf wears, from what it is *doing* rather than from what its
+   * sensor says (issue #228).
+   *
+   * `active` and "drawn shut" agree for every entity-bound opening, which is
+   * why this started life as `active ? accent : shut`. They come apart with no
+   * entity: a swing door with no sensor is drawn **open** by the static
+   * floor-plan convention ({@link openingDefaultOpen}) and is never active, so
+   * reading "not active" as "closed" painted a wide-open door in the colour
+   * that is documented to mean shut.
+   *
+   * Asking the amount instead makes the option mean what it says on all four
+   * corners: an unbound window (drawn shut) wears it, an unbound door (drawn
+   * open) does not, and a bound opening is unchanged either way. It also gets
+   * the per-leaf case right for free — a double with one sash open and one shut
+   * paints each from its own amount, which a single `active` flag could not
+   * express.
+   */
+  const leafTone = (isActive: boolean, a: number) =>
+    cssColorOr(isActive ? accent : a === 0 ? shut : color, SKIN_ACCENT);
+  const tone = leafTone(active, amt);
+  const tone2 = style.second ? leafTone(!!style.second.active, amt2) : tone;
 
   let body: SVGTemplateResult;
   if (openingMotion(o) === "swing") {
@@ -3628,21 +3665,19 @@ export function renderOpening(o: Opening, style: OpeningStyle): SVGTemplateResul
   // sash so a shut shutter visibly covers an open window. Its own
   // active/accent state is independent of the window's.
   if (style.shutter) {
-    const shutterTone = cssColorOr(
-      style.shutter.active ? (style.shutter.accent ?? accent) : color,
-      SKIN_ACCENT
-    );
+    // A shutter that is down follows the opening's closed colour, the way one
+    // that is up follows its accent (issue #228).
     const shutterAmt = Math.max(0, Math.min(1, style.shutter.amount));
+    // Same rule as the leaf above, with the shutter's own accent: a shutter is
+    // "shut" when it is down, not merely when its contact is quiet.
+    const shutterLeaf = (isActive: boolean | undefined, a: number) =>
+      cssColorOr(isActive ? (style.shutter!.accent ?? accent) : a === 0 ? shut : color, SKIN_ACCENT);
+    const shutterTone = shutterLeaf(style.shutter.active, shutterAmt);
     // The hinged pair's other panel, on its own contact when it has one
     // (issue #159); without one it folds with the first, as before.
     const second = style.shutter.second;
-    const shutterTone2 = second
-      ? cssColorOr(
-          second.active ? (style.shutter.accent ?? accent) : color,
-          SKIN_ACCENT
-        )
-      : shutterTone;
     const shutterAmt2 = second ? Math.max(0, Math.min(1, second.amount)) : shutterAmt;
+    const shutterTone2 = second ? shutterLeaf(second.active, shutterAmt2) : shutterTone;
     body = svg`${body}${
       style.shutter.style === "swing"
         ? swingShutter(
