@@ -27,6 +27,7 @@ screen size.
 - 🎛️ **Devices** — bind any entity to an icon: tap to toggle or open more-info, live state or attribute label, custom icon, size, rotation.
   - **Presence ripples** — presence and vibration sensors drawn as animated rings instead of a static icon.
   - **Cast light** — a light pools its own color and brightness onto the plan; overlapping pools mix, so a warm lamp and a cool one blend between them.
+  - 🆕 **Only up close** — a device can stay off the full plan and appear only when its room is zoomed into, so a dense floor keeps a readable overview and still holds every minor sensor. See [Devices that only appear up close](https://github.com/nicosandller/easy-floorplan/blob/main/docs/behavior.md#devices-that-only-appear-up-close).
   - **Conditional text / icon / coloring** — threshold and state rules restyle an element from what its entity reads: the badge color, the label, and the glyph itself, so blinds swap between open and closed icons and a thermostat reddens as it heats. The same rules drive furniture and rooms.
 
 <img width="195" height="278" alt="light blend" src="https://github.com/user-attachments/assets/23104587-687b-4c9a-83e8-e83c3d5eb6eb" />
@@ -450,7 +451,7 @@ Everything the card does beyond placing elements, in four guides:
 | ⚙️ | **[Configuration](https://github.com/nicosandller/easy-floorplan/blob/main/docs/configuration.md)** | Every key it accepts — per-element tables, defaults, a worked example |
 | 💡 | **[Lighting](https://github.com/nicosandller/easy-floorplan/blob/main/docs/lighting.md)** | Sun dimming through dusk and dawn · real sunlight through the windows |
 | 🎨 | **[Appearance](https://github.com/nicosandller/easy-floorplan/blob/main/docs/appearance.md)** | Skins · overlay scale · compact header · rotation · card-mod hooks |
-| ⚡ | **[Behaviour](https://github.com/nicosandller/easy-floorplan/blob/main/docs/behavior.md)** | Dead spaces · doors on locks · room actions · stairs between floors · offline devices · hiding logic |
+| ⚡ | **[Behaviour](https://github.com/nicosandller/easy-floorplan/blob/main/docs/behavior.md)** | Dead spaces · doors on locks · room actions · devices that only appear up close · stairs between floors · offline devices · hiding logic |
 
 ## Development
 

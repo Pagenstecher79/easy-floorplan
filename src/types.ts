@@ -639,8 +639,24 @@ export interface FloorItem {
    * "Active" is the same domain-aware test the badge highlight uses
    * ({@link entityIsActive}), so a lock reads unlocked, a vacuum cleaning.
    */
-  // --- Extended hide logic for the entire item (Whole-Item) ---
   hideWhenInactive?: boolean;
+  /**
+   * Keep this device off the full plan and show it only while the room it
+   * belongs to is zoomed into (issue #222). Which room that is comes from the
+   * area polygon it sits inside, or from {@link area} when it is named.
+   *
+   * A device with this set and no room to be in never appears on the card. The
+   * editor still draws it, so it stays selectable and fixable.
+   */
+  showOnlyWhenZoomed?: boolean;
+  /**
+   * The room this device belongs to — an {@link Area} `id` or `name` — for
+   * {@link showOnlyWhenZoomed} to read instead of asking where the device is
+   * drawn. For the one that belongs to a room without sitting inside it: a
+   * doorbell on the porch, a thermostat out in the hall.
+   */
+  area?: string;
+  // --- Extended hide logic for the entire item (Whole-Item) ---
   enableHideByEntity?: boolean;
   hideEntity?: string;
   /** Attribute to read instead of the state for the hide condition. */
