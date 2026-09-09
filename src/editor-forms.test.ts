@@ -2096,4 +2096,28 @@ describe("itemGroup7aForm - showOnlyWhenZoomed", () => {
     const patchFalse = spec.toPatch({ showOnlyWhenZoomed: false });
     expect(patchFalse.showOnlyWhenZoomed).toBeUndefined();
   });
+
+  it("leaves the flag alone when the user is editing something else", () => {
+    // `_renderForm` diffs the form's data against the event and hands `toPatch`
+    // only the keys that changed, and `_updateItem` merges the result with a
+    // spread — so a key merely *present* and undefined overwrites the config.
+    // Group 7a holds two dozen other fields; pruning unconditionally meant
+    // switching on "Hide by condition" quietly switched this off.
+    //
+    // Asserted on key presence, not on the value: `toBeUndefined()` passes
+    // either way, which is exactly how this got through the first time.
+    const on = { id: "i", x: 0, y: 0, entity: "sensor.a", kind: "sensor",
+                 showOnlyWhenZoomed: true } as FloorItem;
+    const patch = itemGroup7aForm(on).toPatch({ enableHideByEntity: true });
+    expect("showOnlyWhenZoomed" in patch).toBe(false);
+    expect({ ...on, ...patch }.showOnlyWhenZoomed).toBe(true);
+  });
+
+  it("still prunes it when the user is the one turning it off", () => {
+    const on = { id: "i", x: 0, y: 0, entity: "sensor.a", kind: "sensor",
+                 showOnlyWhenZoomed: true } as FloorItem;
+    const patch = itemGroup7aForm(on).toPatch({ showOnlyWhenZoomed: false });
+    expect("showOnlyWhenZoomed" in patch).toBe(true);
+    expect({ ...on, ...patch }.showOnlyWhenZoomed).toBeUndefined();
+  });
 });

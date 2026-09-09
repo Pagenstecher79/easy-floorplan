@@ -1416,7 +1416,18 @@ export function itemGroup7aForm(it: FloorItem): FormSpec {
     },
     // Off is the default, so it leaves no key behind — an untouched device's
     // YAML stays as short as it was before this switch existed.
-    toPatch: (patch) => ({ ...patch, showOnlyWhenZoomed: patch.showOnlyWhenZoomed || undefined }),
+    //
+    // Only when the user actually touched it, though. `_renderForm` diffs the
+    // form against the event and passes on just the keys that changed, and
+    // `_updateItem` merges with a spread — so a key that is merely *present*
+    // and undefined overwrites what the config had. Writing it unconditionally
+    // meant every one of this group's two dozen other fields silently switched
+    // this one off. The sibling forms all prune inside a walk of
+    // `Object.entries(patch)`, which has the same guard built in.
+    toPatch: (patch) =>
+      "showOnlyWhenZoomed" in patch
+        ? { ...patch, showOnlyWhenZoomed: patch.showOnlyWhenZoomed || undefined }
+        : patch,
   };
 }
 /** Group 7: when the device is drawn at all, and what a press does. */
