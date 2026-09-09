@@ -1236,6 +1236,39 @@ export function itemHiddenWhenInactive(
   return !entityIsActive(item.entity, state);
 }
 
+/**
+ * Whether a device asked to appear only inside its own room, and the plan is
+ * not in that room right now (issue #222, item 1).
+ *
+ * A dense plan cannot show every minor sensor at full zoom without becoming
+ * unreadable, and the room zoom is already the gesture that says "I care about
+ * this room". So this is not a second hiding mechanism so much as a place to
+ * put the ones that only make sense up close: they drop out of the overview and
+ * come back when the room is tapped.
+ *
+ * Which room a device is in is answered geometrically, from the polygon the
+ * plan already draws — a device sitting inside the room *is* in the room, with
+ * nothing to keep in step when either one moves. `area` overrides that, by the
+ * room's id or its name, for the sensor that belongs to a room but is not drawn
+ * inside it: a doorbell on the porch, a thermostat out in the hall.
+ *
+ * A device with the flag set and no room to be in — no `area`, and not inside
+ * any polygon — never appears on the card. That is the honest reading of what
+ * it asked for, and the editor still draws it, so it stays findable and
+ * fixable rather than becoming furniture the user cannot get back.
+ */
+export function itemHiddenUntilZoomed(
+  item: Pick<FloorItem, "showOnlyWhenZoomed" | "area" | "x" | "y">,
+  zoomedArea: Area | undefined
+): boolean {
+  if (!item.showOnlyWhenZoomed) return false;
+  if (!zoomedArea) return true;
+  // Named room wins over geometry: it is the explicit answer, and it is the
+  // only one available for a device drawn outside every polygon.
+  if (item.area) return item.area !== zoomedArea.id && item.area !== zoomedArea.name;
+  return !pointInPolygon(zoomedArea.points ?? [], item.x, item.y);
+}
+
 export function itemBadgeHidden(
   item: Partial<FloorItem>,
   state: string | undefined,

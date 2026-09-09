@@ -98,6 +98,7 @@ import {
   offlineStyleOf,
   itemIsOffline,
   itemHiddenWhenInactive,
+  itemHiddenUntilZoomed,
   itemBadgeHidden,
   itemLabelSize,
   itemLabelColor,
@@ -1392,14 +1393,15 @@ export class FloorplanCard extends LitElement {
               // No entity filter: devices that exist physically but have no HA
               // entity still deserve their badge (issue #39). Keyed by id so a
               // floor switch builds fresh DOM (see the openings comment).
-              // "Only when active" devices drop out here (issue #55) — the
+              // "Only when active" devices drop out here (issue #55), and so do
+              // the ones that only show inside their own room (#222) — the
               // editor still draws them, dimmed, so they stay editable.
               active.items.filter(
                 (it) =>
                   !itemHiddenWhenInactive(
                     it,
                     it.entity ? renderHass?.states[it.entity]?.state : undefined
-                  )
+                  ) && !itemHiddenUntilZoomed(it, zoomedArea)
               ),
               (it, i) => it.id || i,
               (it) => this._renderItem(it, c, rot, scale, renderHass)
