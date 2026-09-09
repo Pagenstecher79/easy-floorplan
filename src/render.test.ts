@@ -95,6 +95,7 @@ import {
   labelPositionOf,
   editorItemLabel,
   itemHiddenWhenInactive,
+  itemHiddenUntilZoomed,
   resolveStateColor,
   itemLabelSize,
   areaLabelSize,
@@ -154,6 +155,7 @@ import {
   itemBadgeHidden,
   itemLabelColor,
 } from "./render";
+import { buildRenderHass } from "./replay-history/render-state-service";
 import type { FloorplanCardConfig, Opening, RenderHass } from "./types";
 import { symbolCatalog, symbolSize } from "./symbols";
 
@@ -2181,6 +2183,34 @@ describe("itemStateText with attributes (issue #70)", () => {
 
   it("missing attribute renders the em dash", () => {
     expect(itemStateText(climate(), { entity: "climate.home", attribute: "nope" })).toBe("—");
+  });
+
+  it("carries that formatter through the slice the card renders from (issue #260)", () => {
+    // The editor hands the real `hass` to these helpers; the card hands them a
+    // RenderHass built from it. Anything the build drops is not missing, it is
+    // replaced by the raw attribute — which is how a cover position read "50%"
+    // in the editor and "50" on the card.
+    const h = climate() as unknown as Record<string, unknown>;
+    h.formatEntityAttributeValue = (_s: unknown, a: string) => `fmt:${a}`;
+    const rendered = buildRenderHass(
+      h as never,
+      ["climate.home"],
+      { getStateAt: () => new Map() } as never,
+      false,
+      0,
+    );
+    expect(itemStateText(rendered, { entity: "climate.home", attribute: "current_temperature" }))
+      .toBe("fmt:current_temperature");
+  });
+
+  it("re-renders when HA rebuilds the attribute formatter", () => {
+    // A plan built only out of attribute readings never calls the state
+    // formatter, so its identity is not a signal that this plan's wording
+    // changed.
+    const base = climate() as unknown as Record<string, unknown>;
+    const prev = { ...base, formatEntityAttributeValue: () => "old" } as never;
+    const next = { ...base, formatEntityAttributeValue: () => "new" } as never;
+    expect(hassRenderInputsChanged(prev, next, ["climate.home"])).toBe(true);
   });
 });
 
@@ -5579,6 +5609,76 @@ describe("renderGlow (issue #6)", () => {
     expect(
       flattenMarkup(renderGlow(item(), { color: "#fff", opacity: 0.4, radius: DEFAULT_GLOW_RADIUS }, "g")),
     ).toContain('class="fp-glow"');
+  });
+});
+
+describe("itemHiddenUntilZoomed (issue #222)", () => {
+  // A room across the top-left quadrant of a 1000x600 plan.
+  const living: Area = {
+    id: "a1",
+    name: "Living",
+    points: [
+      { x: 100, y: 100 },
+      { x: 500, y: 100 },
+      { x: 500, y: 400 },
+      { x: 100, y: 400 },
+    ],
+  };
+  const kitchen: Area = {
+    id: "a2",
+    name: "Kitchen",
+    points: [
+      { x: 600, y: 100 },
+      { x: 900, y: 100 },
+      { x: 900, y: 400 },
+      { x: 600, y: 400 },
+    ],
+  };
+  const inside = { showOnlyWhenZoomed: true, x: 300, y: 250 };
+  const outside = { showOnlyWhenZoomed: true, x: 800, y: 250 };
+
+  it("leaves an ordinary device alone at every zoom", () => {
+    expect(itemHiddenUntilZoomed({ x: 300, y: 250 }, undefined)).toBe(false);
+    expect(itemHiddenUntilZoomed({ x: 300, y: 250 }, living)).toBe(false);
+    // Explicitly off is the same as unset.
+    expect(itemHiddenUntilZoomed({ showOnlyWhenZoomed: false, x: 300, y: 250 }, living)).toBe(false);
+  });
+
+  it("hides a flagged device on the full plan", () => {
+    expect(itemHiddenUntilZoomed(inside, undefined)).toBe(true);
+  });
+
+  it("shows it in its own room and nowhere else", () => {
+    expect(itemHiddenUntilZoomed(inside, living)).toBe(false);
+    expect(itemHiddenUntilZoomed(inside, kitchen)).toBe(true);
+    expect(itemHiddenUntilZoomed(outside, living)).toBe(true);
+    expect(itemHiddenUntilZoomed(outside, kitchen)).toBe(false);
+  });
+
+  it("takes the room by id or by name when one is given", () => {
+    // A device drawn outside every polygon — the porch doorbell — is reachable
+    // only this way, which is the whole reason `area` exists.
+    const porch = { showOnlyWhenZoomed: true, area: "a1", x: 960, y: 560 };
+    expect(itemHiddenUntilZoomed(porch, living)).toBe(false);
+    expect(itemHiddenUntilZoomed(porch, kitchen)).toBe(true);
+    expect(itemHiddenUntilZoomed({ ...porch, area: "Living" }, living)).toBe(false);
+    expect(itemHiddenUntilZoomed({ ...porch, area: "Living" }, kitchen)).toBe(true);
+  });
+
+  it("lets the named room override where the device is drawn", () => {
+    // Sitting in the Living polygon but assigned to the Kitchen: the name wins,
+    // otherwise `area` could only ever add rooms and never correct one.
+    const assigned = { showOnlyWhenZoomed: true, area: "a2", x: 300, y: 250 };
+    expect(itemHiddenUntilZoomed(assigned, kitchen)).toBe(false);
+    expect(itemHiddenUntilZoomed(assigned, living)).toBe(true);
+  });
+
+  it("stays hidden when there is no room it could belong to", () => {
+    // Fails hidden rather than falling back to "always show": a degenerate
+    // polygon is not a room, and neither is a plan with no areas drawn on it.
+    const degenerate: Area = { id: "a3", points: [{ x: 0, y: 0 }, { x: 10, y: 0 }] };
+    expect(itemHiddenUntilZoomed(inside, degenerate)).toBe(true);
+    expect(itemHiddenUntilZoomed(inside, { id: "a4", points: [] })).toBe(true);
   });
 });
 
